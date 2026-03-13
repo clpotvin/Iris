@@ -99,8 +99,17 @@ public class VanillaCoreTransformer {
 			root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(iris_Position, 1.0)");
 			root.rename("vaPosition", "iris_Position");
 			if (parameters.inputs.hasColor()) {
-				root.replaceReferenceExpressions(t, "vaColor", "iris_Color * iris_transforms.ColorModulator");
-				root.replaceReferenceExpressions(t, "gl_Color", "iris_Color * iris_transforms.ColorModulator");
+				// For entity/item shaders, neutralize Wynncraft's glint signal (G≈1, B≈0, R<1)
+				// so the shader pack sees white instead of the encoded glint color.
+				if (parameters.inputs.hasOverlay() && !parameters.inputs.isText()) {
+					root.replaceReferenceExpressions(t, "vaColor",
+						"(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color) * iris_transforms.ColorModulator");
+					root.replaceReferenceExpressions(t, "gl_Color",
+						"(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color) * iris_transforms.ColorModulator");
+				} else {
+					root.replaceReferenceExpressions(t, "vaColor", "iris_Color * iris_transforms.ColorModulator");
+					root.replaceReferenceExpressions(t, "gl_Color", "iris_Color * iris_transforms.ColorModulator");
+				}
 			} else {
 				root.replaceReferenceExpressions(t, "vaColor", "iris_transforms.ColorModulator");
 				root.replaceReferenceExpressions(t, "gl_Color", "iris_transforms.ColorModulator");

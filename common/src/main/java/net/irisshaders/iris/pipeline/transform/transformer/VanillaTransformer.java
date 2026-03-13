@@ -115,14 +115,23 @@ public class VanillaTransformer {
 
 		if (parameters.inputs.hasColor() && parameters.type == PatchShaderType.VERTEX) {
 			// TODO: Handle the fragment / geometry shader here
-			if (parameters.alpha.reference() == Float.MAX_VALUE) {
-				root.replaceReferenceExpressions(t, "gl_Color",
-					"vec4((iris_Color * iris_transforms.ColorModulator).rgb, iris_transforms.ColorModulator.a)");
-			} else if (parameters.isClouds()) {
+			// For entity/item shaders, neutralize Wynncraft's glint signal (G≈1, B≈0, R<1)
+			// so the shader pack sees white instead of the encoded glint color.
+			boolean isWynncraftEntity = parameters.inputs.hasOverlay() && !parameters.inputs.isText();
+			if (parameters.isClouds()) {
 				root.replaceReferenceExpressions(t, "gl_Color", "iris_cloudCol");
-			} else {
+			} else if (parameters.alpha.reference() == Float.MAX_VALUE) {
+				String baseColor = isWynncraftEntity
+					? "(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color)"
+					: "iris_Color";
 				root.replaceReferenceExpressions(t, "gl_Color",
-					"(iris_Color * iris_transforms.ColorModulator)");
+					"vec4((" + baseColor + " * iris_transforms.ColorModulator).rgb, iris_transforms.ColorModulator.a)");
+			} else {
+				String baseColor = isWynncraftEntity
+					? "(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color)"
+					: "iris_Color";
+				root.replaceReferenceExpressions(t, "gl_Color",
+					"(" + baseColor + " * iris_transforms.ColorModulator)");
 			}
 
 			if (parameters.type.glShaderType == ShaderType.VERTEX) {
