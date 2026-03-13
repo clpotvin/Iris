@@ -32,9 +32,12 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import net.irisshaders.iris.shaderpack.loading.ProgramId;
+
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
@@ -49,6 +52,12 @@ import static net.irisshaders.iris.pipeline.programs.ShaderOverrides.isBlockEnti
 public abstract class MixinShaderManager_Overrides {
 	@Unique
 	private Set<RenderPipeline> missingShaders = new HashSet<>();
+
+	@Unique
+	private Set<RenderPipeline> autoDetectedShaders = new HashSet<>();
+
+	@Unique
+	private Map<Map.Entry<RenderPipeline, ProgramId>, ShaderKey> autoDetectCache = new HashMap<>();
 
 	@Inject(method = "getOrCompilePipeline", at = @At(value = "HEAD"), cancellable = true)
 	private void redirectIrisProgram(RenderPipeline renderPipeline, CallbackInfoReturnable<GlRenderPipeline> cir) {
@@ -95,9 +104,66 @@ public abstract class MixinShaderManager_Overrides {
 		((ShaderInstanceInterface) p).setShouldSkip(shouldSkip);
 	}*/
 
-	private static GlProgram override(IrisRenderingPipeline pipeline, RenderPipeline shaderProgram) {
+	private GlProgram override(IrisRenderingPipeline pipeline, RenderPipeline shaderProgram) {
 		ShaderKey shaderKey = IrisPipelines.getPipeline(pipeline, shaderProgram);
 
+		if (shaderKey == null) {
+			shaderKey = autoDetectAndCache(pipeline, shaderProgram);
+		}
+
 		return shaderKey == null ? null : pipeline.getShaderMap().getShader(shaderKey);
+	}
+
+	@Unique
+	private ShaderKey autoDetectAndCache(IrisRenderingPipeline pipeline, RenderPipeline renderPipeline) {
+		if (renderPipeline.getLocation().getNamespace().equals("minecraft")) {
+			return null;
+		}
+
+		boolean isShadow = ShadowRenderingState.areShadowsCurrentlyBeingRendered();
+		ProgramId programId = isShadow
+			? ShaderOverrides.detectShadowProgramId(pipeline)
+			: ShaderOverrides.detectProgramId(pipeline);
+
+		if (programId == null) {
+			return null;
+		}
+
+		Map.Entry<RenderPipeline, ProgramId> cacheKey = Map.entry(renderPipeline, programId);
+		ShaderKey cached = autoDetectCache.get(cacheKey);
+		if (cached != null) {
+			return cached;
+		}
+
+		ShaderKey match = ShaderKey.findBestMatch(renderPipeline, programId);
+		if (match == null) {
+			return null;
+		}
+
+		autoDetectCache.put(cacheKey, match);
+
+		Map<Map.Entry<RenderPipeline, ProgramId>, ShaderKey> localCache = autoDetectCache;
+		IrisPipelines.autoAssignPipeline(renderPipeline,
+			p -> {
+				IrisRenderingPipeline irp = (IrisRenderingPipeline) p;
+				ProgramId pid = ShaderOverrides.detectProgramId(irp);
+				if (pid == null) return null;
+				return localCache.computeIfAbsent(Map.entry(renderPipeline, pid),
+					k -> ShaderKey.findBestMatch(renderPipeline, pid));
+			},
+			p -> {
+				IrisRenderingPipeline irp = (IrisRenderingPipeline) p;
+				ProgramId pid = ShaderOverrides.detectShadowProgramId(irp);
+				if (pid == null) return null;
+				return localCache.computeIfAbsent(Map.entry(renderPipeline, pid),
+					k -> ShaderKey.findBestMatch(renderPipeline, pid));
+			}
+		);
+
+		if (autoDetectedShaders.add(renderPipeline)) {
+			Iris.logger.info("Auto-detected shader for mod pipeline " + renderPipeline.getLocation());
+		}
+
+		return match;
 	}
 }

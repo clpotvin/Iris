@@ -173,7 +173,7 @@ public enum ShaderKey {
 		if (hasAlphaTest) {
 			for (ShaderKey key : ShaderKey.values()) {
 				if (programId == key.getProgram() && pipeline.getVertexFormat() == key.vertexFormat && key.alphaTest.reference() > 0.01f && key.alphaTest.function() != AlphaTestFunction.NEVER) {
-					Iris.logger.warn("Found perfect program match for " + pipeline.getLocation() + ": " + key);
+					Iris.logger.debug("Found perfect program match for " + pipeline.getLocation() + ": " + key);
 					return key;
 				}
 			}
@@ -181,7 +181,7 @@ public enum ShaderKey {
 
 		for (ShaderKey key : ShaderKey.values()) {
 			if (programId == key.getProgram() && pipeline.getVertexFormat() == key.vertexFormat) {
-				Iris.logger.warn("Found okay program match for " + pipeline.getLocation() + ": " + key);
+				Iris.logger.debug("Found okay program match for " + pipeline.getLocation() + ": " + key);
 				return key;
 			}
 		}
@@ -189,7 +189,7 @@ public enum ShaderKey {
 		if (hasAlphaTest) {
 			for (ShaderKey key : ShaderKey.values()) {
 				if (programId == key.getProgram() && key.alphaTest.reference() > 0.01f && key.alphaTest.function() != AlphaTestFunction.NEVER) {
-					Iris.logger.warn("Found fine program match for " + pipeline.getLocation() + ": " + key);
+					Iris.logger.debug("Found fine program match for " + pipeline.getLocation() + ": " + key);
 					return key;
 				}
 			}
@@ -197,12 +197,12 @@ public enum ShaderKey {
 
 		for (ShaderKey key : ShaderKey.values()) {
 			if (programId == key.getProgram()) {
-				Iris.logger.warn("Found *decent* program match for " + pipeline.getLocation() + ": " + key);
+				Iris.logger.debug("Found *decent* program match for " + pipeline.getLocation() + ": " + key);
 				return key;
 			}
 		}
 
-		Iris.logger.warn("Somehow couldn't find any match for " + pipeline.getLocation());
+		Iris.logger.debug("Somehow couldn't find any match for " + pipeline.getLocation());
 		return null;
 	}
 }

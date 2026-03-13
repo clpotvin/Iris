@@ -224,6 +224,13 @@ public class IrisPipelines {
 		}
 	}
 
+	public static void autoAssignPipeline(RenderPipeline pipeline,
+										   Function<IrisRenderingPipeline, ShaderKey> mainFunc,
+										   Function<IrisRenderingPipeline, ShaderKey> shadowFunc) {
+		coreShaderMap.put(pipeline, mainFunc);
+		coreShaderMapShadow.put(pipeline, shadowFunc);
+	}
+
 	public static void assignPipeline(RenderPipeline pipeline, ShaderKey programId) {
 		if (coreShaderMap.containsKey(pipeline)) {
 			throw new IllegalStateException("Shader already assigned: " + pipeline.getLocation() + ": " + programId);
