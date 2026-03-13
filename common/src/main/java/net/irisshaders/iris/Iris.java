@@ -81,7 +81,7 @@ public class Iris {
 	 * easy branding changes (for forks). You'll still need to change this
 	 * separately in mixin plugin classes & the language files.
 	 */
-	public static final String MODNAME = "Iris";
+	public static final String MODNAME = "WynnIris";
 	public static final IrisLogging logger = new IrisLogging(MODNAME);
 	public static final boolean IS_FOOL;
 	private static final Map<String, String> shaderPackOptionQueue = new HashMap<>();

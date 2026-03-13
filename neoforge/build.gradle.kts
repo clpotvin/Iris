@@ -11,7 +11,7 @@ val SODIUM_DEPENDENCY_NEO: Any by rootProject.extra
 val MOD_VERSION: String by rootProject.extra
 
 base {
-    archivesName = "iris-neoforge"
+    archivesName = "wynniris-neoforge"
 }
 
 sourceSets {

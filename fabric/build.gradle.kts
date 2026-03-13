@@ -27,7 +27,7 @@ repositories {
 }
 
 base {
-    archivesName.set("iris-fabric")
+    archivesName.set("wynniris-fabric")
 }
 
 dependencies {

@@ -1,4 +1,4 @@
-rootProject.name = "Iris"
+rootProject.name = "WynnIris"
 
 pluginManagement {
     repositories {

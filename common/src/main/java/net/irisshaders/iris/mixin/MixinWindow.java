@@ -26,7 +26,7 @@ public class MixinWindow {
 			GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_NO_ERROR, GLFW.GLFW_FALSE);
 			Iris.logger.info("OpenGL debug context activated.");
 			if (SodiumClientMod.options().performance.useNoErrorGLContext) {
-				TinyFileDialogs.tinyfd_messageBox("Iris", "Due to a configuration issue, Iris may crash on this launch. This has been fixed automatically for the next launch.", "ok", "warning", false);
+				TinyFileDialogs.tinyfd_messageBox(Iris.MODNAME, "Due to a configuration issue, " + Iris.MODNAME + " may crash on this launch. This has been fixed automatically for the next launch.", "ok", "warning", false);
 				SodiumClientMod.options().performance.useNoErrorGLContext = false;
 				try {
 					SodiumOptions.writeToDisk(SodiumClientMod.options());
