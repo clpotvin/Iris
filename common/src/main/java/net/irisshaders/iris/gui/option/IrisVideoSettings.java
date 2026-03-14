@@ -14,6 +14,7 @@ public class IrisVideoSettings {
 	private static final Tooltip ENABLED_TOOLTIP = Tooltip.create(Component.translatable("options.iris.shadowDistance.enabled"));
 	public static int shadowDistance = 32;
 	public static ColorSpace colorSpace = ColorSpace.SRGB;
+	public static int glintBrightness = 110;
 	public static final OptionInstance<Integer> RENDER_DISTANCE = new ShadowDistanceOption<>("options.iris.shadowDistance",
 		mc -> {
 			WorldRenderingPipeline pipeline = Iris.getPipelineManager().getPipelineNullable();

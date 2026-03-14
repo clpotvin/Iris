@@ -74,6 +74,22 @@ public class IrisConfig implements ConfigEntryPoint {
 						.setRange(new Range(0, 32, 1))
 						.setImpact(OptionImpact.HIGH)
 					)
+					.addOption(builder.createIntegerOption(Identifier.fromNamespaceAndPath("iris", "glint_brightness"))
+						.setDefaultValue(110)
+						.setBinding(value -> IrisVideoSettings.glintBrightness = value, () -> IrisVideoSettings.glintBrightness)
+						.setName(Component.translatable("options.iris.glintBrightness"))
+						.setTooltip(Component.translatable("options.iris.glintBrightness.tooltip"))
+						.setValueFormatter(ControlValueFormatterImpls.percentage())
+						.setStorageHandler(() -> {
+							try {
+								Iris.getIrisConfig().save();
+							} catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+						})
+						.setRange(new Range(50, 200, 5))
+						.setImpact(OptionImpact.LOW)
+					)
 				)
 			).registerOptionOverlay(Identifier.parse("sodium:quality.filtering_mode"), builder.createEnumOption(Identifier.parse("sodium:quality.filtering_mode"), TextureFilteringMethod.class)
 				.setTooltip(i -> {

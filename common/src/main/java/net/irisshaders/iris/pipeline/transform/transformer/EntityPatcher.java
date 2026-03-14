@@ -332,7 +332,7 @@ public class EntityPatcher {
 		    if (iW_applyLighting) {
 		        float iW_texLuma = max(dot(iW_tex.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.001);
 		        float iW_inLuma = dot(iW_in.rgb, vec3(0.2126, 0.7152, 0.0722));
-		        iW_out.rgb *= min(iW_inLuma / iW_texLuma * 1.1, 1.0);
+		        iW_out.rgb *= min(iW_inLuma / iW_texLuma * iris_glintBrightness, 1.0);
 		    }
 		    return iW_out;
 		}
@@ -479,6 +479,7 @@ public class EntityPatcher {
 			if (!root.identifierIndex.has("Sampler0")) {
 				tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform sampler2D Sampler0;");
 			}
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 
 			// Inject Wynncraft glint GLSL helpers and apply function.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.

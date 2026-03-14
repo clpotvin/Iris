@@ -52,5 +52,5 @@ run/
 .codex/
 
 # Local assets / resource packs
-assets/
+/assets/
 Wynncraft_RP_*/

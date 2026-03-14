@@ -5,6 +5,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.gl.state.FogMode;
+import net.irisshaders.iris.gl.uniform.FloatSupplier;
+import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.gl.state.StateUpdateNotifiers;
 import net.irisshaders.iris.gl.uniform.DynamicUniformHolder;
 import net.irisshaders.iris.gl.uniform.UniformHolder;
@@ -71,6 +73,9 @@ public final class CommonUniforms {
 
 		// This is a fallback for when entityId via attributes cannot be used. (lightning)
 		uniforms.uniform1i("entityId", CapturedRenderingState.INSTANCE::getCurrentRenderedEntity, StateUpdateNotifiers.fallbackEntityNotifier);
+
+		// Wynncraft glint brightness (user-configurable, 50-200%)
+		uniforms.uniform1f("iris_glintBrightness", (FloatSupplier) () -> IrisVideoSettings.glintBrightness / 100.0f, listener -> {});
 
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,
 		//       but we do. How will custom uniforms depending on atlasSize work?

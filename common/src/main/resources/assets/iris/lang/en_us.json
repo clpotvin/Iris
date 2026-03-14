@@ -70,6 +70,8 @@
   "pack.iris.select.title": "Select",
   "pack.iris.configure.title": "Configure",
   "pack.iris.list.label": "+ Drag and Drop Shader Packs to add",
+  "options.iris.glintBrightness": "Glint Brightness",
+  "options.iris.glintBrightness.tooltip": "Controls the brightness of Wynncraft glint effects. Lower values dim effects in bright areas, higher values let them shine through.",
   "label.iris.true": "On",
   "label.iris.false": "Off"
 }
