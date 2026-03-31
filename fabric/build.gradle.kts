@@ -2,6 +2,7 @@ plugins {
     id("java")
     id("idea")
     id("fabric-loom") version ("1.14.4")
+    id("com.modrinth.minotaur") version ("2.+")
 }
 
 val MINECRAFT_VERSION: String by rootProject.extra
@@ -33,8 +34,8 @@ base {
 
 tasks.named<org.gradle.jvm.tasks.Jar>("remapJar") {
     archiveVersion.set(
-        if (project.hasProperty("build.release")) "${WYNNIRIS_VERSION}+mc${MINECRAFT_VERSION}"
-        else "${WYNNIRIS_VERSION}-dev+mc${MINECRAFT_VERSION}"
+        if (project.hasProperty("build.release")) "${WYNNIRIS_VERSION}+${MINECRAFT_VERSION}-fabric"
+        else "${WYNNIRIS_VERSION}-dev+${MINECRAFT_VERSION}-fabric"
     )
     archiveClassifier.set("")
 }
@@ -145,4 +146,19 @@ tasks {
     }
 
     remapJar.get().destinationDirectory = rootDir.resolve("build").resolve("libs")
+}
+
+modrinth {
+    token.set(System.getenv("MODRINTH_TOKEN"))
+    projectId.set("wynniris")
+    versionNumber.set("${WYNNIRIS_VERSION}+${MINECRAFT_VERSION}-fabric")
+    versionName.set("WynnIris ${WYNNIRIS_VERSION} for ${MINECRAFT_VERSION}")
+    versionType.set("release")
+    uploadFile.set(tasks.named("remapJar"))
+    gameVersions.addAll(MINECRAFT_VERSION)
+    loaders.addAll("fabric", "quilt")
+    changelog.set(providers.gradleProperty("changelog").orElse(""))
+    dependencies {
+        required.project("sodium")
+    }
 }
