@@ -35,6 +35,7 @@ import net.minecraft.client.CloudStatus;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.CloudRenderer;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LevelTargetBundle;
@@ -85,14 +86,16 @@ public class MixinLevelRenderer {
 	private RenderBuffers renderBuffers;
 
 	@Shadow
-	private int ticks;
-
-	@Shadow
 	@Final
 	private LevelTargetBundle targets;
 	@Shadow
 	@Final
 	private LevelRenderState levelRenderState;
+	@Shadow
+	private @Nullable ClientLevel level;
+	@Shadow
+	@Final
+	private CloudRenderer cloudRenderer;
 	private boolean warned;
 
 	@Unique
@@ -108,12 +111,6 @@ public class MixinLevelRenderer {
 		}
 	}
 
-	@WrapOperation(method = "method_75413", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/CommandEncoder;clearDepthTexture(Lcom/mojang/blaze3d/textures/GpuTexture;D)V"))
-	private void skip(CommandEncoder instance, GpuTexture texture, double v, Operation<Void> original) {
-		if (!IrisApi.getInstance().isShaderPackInUse()) {
-			original.call(instance, texture, v);
-		}
-	}
 	// Begin shader rendering after buffers have been cleared.
 	// At this point we've ensured that Minecraft's main framebuffer is cleared.
 	// This is important or else very odd issues will happen with shaders that have a final pass that doesn't write to
@@ -127,7 +124,11 @@ public class MixinLevelRenderer {
 		CapturedRenderingState.INSTANCE.setGbufferProjection(projection);
 		float fakeTickDelta = deltaTracker.getGameTimeDeltaPartialTick(false);
 		CapturedRenderingState.INSTANCE.setTickDelta(fakeTickDelta);
-		CapturedRenderingState.INSTANCE.setCloudTime((ticks + fakeTickDelta) * 0.03F);
+		if (((CloudRendererAccessor) this.cloudRenderer).getTexture() != null) {
+			CapturedRenderingState.INSTANCE.setCloudTime((this.level.getGameTime() % (((CloudRendererAccessor) this.cloudRenderer).getTexture().width() * 400) + fakeTickDelta) * 0.03F);
+		} else {
+			CapturedRenderingState.INSTANCE.setCloudTime(0);
+		}
 
 		pipeline = Iris.getPipelineManager().preparePipeline(Iris.getCurrentDimension());
 

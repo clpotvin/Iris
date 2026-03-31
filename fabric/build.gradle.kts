@@ -10,6 +10,7 @@ val FABRIC_LOADER_VERSION: String by rootProject.extra
 val FABRIC_API_VERSION: String by rootProject.extra
 val SODIUM_DEPENDENCY_FABRIC: Any by rootProject.extra
 val MOD_VERSION: String by rootProject.extra
+val WYNNIRIS_VERSION: String by rootProject.extra
 
 repositories {
     mavenLocal()
@@ -27,7 +28,15 @@ repositories {
 }
 
 base {
-    archivesName.set("wynniris-fabric")
+    archivesName.set("WynnIris")
+}
+
+tasks.named<org.gradle.jvm.tasks.Jar>("remapJar") {
+    archiveVersion.set(
+        if (project.hasProperty("build.release")) "${WYNNIRIS_VERSION}+mc${MINECRAFT_VERSION}"
+        else "${WYNNIRIS_VERSION}-dev+mc${MINECRAFT_VERSION}"
+    )
+    archiveClassifier.set("")
 }
 
 dependencies {

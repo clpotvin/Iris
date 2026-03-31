@@ -492,37 +492,49 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, glintFunc);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_HELPERS);
 
-			// Apply glint effects after the shader pack's main() runs, modifying iris_FragData0.
-			// EFFECT_UV is adapted from Wynncraft's entity formula: (uv - 1.0) * (texW / texH, 1.0)
-			tree.appendMainFunctionBody(t, """
-				if (iris_wynncraft_glint != 0) {
-				    vec2 irisW_texSize = vec2(textureSize(Sampler0, 0));
-				    bool irisW_isAtlas = max(irisW_texSize.x, irisW_texSize.y) > 2000.0;
-				    vec2 irisW_uv = iris_wynncraft_texcoord;
-				    float irisW_time = iris_globalInfo.GameTime * 300.0;
-				    vec4 irisW_tex = texture(Sampler0, irisW_uv);
-				    vec2 irisW_eUV;
-				    if (irisW_isAtlas) {
-				        // True atlas texture (Minecraft item/block atlas is always >= 2048px):
-				        // UV is a tiny sub-region, so recover per-sprite [0,1] UV via fract.
-				        vec2 iW_spriteUV = fract(irisW_uv * irisW_texSize / 16.0);
-				        irisW_eUV = (iW_spriteUV - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0) / 5.0;
-				    } else {
-				        // Dedicated texture (armor): UV spans [0,1] so UV-derived formulas give spatial variation.
-				        irisW_eUV = (irisW_uv - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0);
-				    }
-				    // Screen-space sparkle UV (shared across atlas/dedicated)
-				    vec2 iW_dU = max(abs(dFdx(irisW_uv)), abs(dFdy(irisW_uv)));
-				    vec2 iW_uvRate = max(iW_dU, vec2(1e-6));
-				    vec2 irisW_sUV = fract(irisW_uv / (iW_uvRate * 50.0)) * 4.0;
-				    // Radial UV: centered continuousSweepUV for radial effects
-				    vec2 irisW_sweepFull = irisW_continuousSweepUV(irisW_uv, iris_wynncraft_midtex, irisW_texSize, irisW_eUV);
-				    vec2 irisW_sweepMid = irisW_continuousSweepUV(iris_wynncraft_midtex, iris_wynncraft_midtex, irisW_texSize, vec2(0.5));
-				    vec2 irisW_rUV = (irisW_sweepFull - irisW_sweepMid) * 0.25 + vec2(8.0);
-				    int irisW_effectId = iris_wynncraft_glint & 31;
-				    iris_FragData0 = irisW_applyGlint(irisW_effectId, irisW_uv, irisW_eUV, irisW_sUV, iris_wynncraft_midtex, irisW_rUV, irisW_texSize, irisW_isAtlas, irisW_time, irisW_tex, iris_FragData0);
-				}
-				""");
+			// Apply glint effects after the shader pack's main() runs, modifying the fragment output.
+			// Detect the actual output variable: iris_FragData0 (compat profile) or outColor0 (core profile).
+			String fragOutput;
+			if (root.identifierIndex.has("iris_FragData0")) {
+				fragOutput = "iris_FragData0";
+			} else if (root.identifierIndex.has("outColor0")) {
+				fragOutput = "outColor0";
+			} else {
+				fragOutput = null;
+			}
+
+			if (fragOutput != null) {
+				// EFFECT_UV is adapted from Wynncraft's entity formula: (uv - 1.0) * (texW / texH, 1.0)
+				tree.appendMainFunctionBody(t, """
+					if (iris_wynncraft_glint != 0) {
+					    vec2 irisW_texSize = vec2(textureSize(Sampler0, 0));
+					    bool irisW_isAtlas = max(irisW_texSize.x, irisW_texSize.y) > 2000.0;
+					    vec2 irisW_uv = iris_wynncraft_texcoord;
+					    float irisW_time = iris_globalInfo.GameTime * 300.0;
+					    vec4 irisW_tex = texture(Sampler0, irisW_uv);
+					    vec2 irisW_eUV;
+					    if (irisW_isAtlas) {
+					        // True atlas texture (Minecraft item/block atlas is always >= 2048px):
+					        // UV is a tiny sub-region, so recover per-sprite [0,1] UV via fract.
+					        vec2 iW_spriteUV = fract(irisW_uv * irisW_texSize / 16.0);
+					        irisW_eUV = (iW_spriteUV - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0) / 5.0;
+					    } else {
+					        // Dedicated texture (armor): UV spans [0,1] so UV-derived formulas give spatial variation.
+					        irisW_eUV = (irisW_uv - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0);
+					    }
+					    // Screen-space sparkle UV (shared across atlas/dedicated)
+					    vec2 iW_dU = max(abs(dFdx(irisW_uv)), abs(dFdy(irisW_uv)));
+					    vec2 iW_uvRate = max(iW_dU, vec2(1e-6));
+					    vec2 irisW_sUV = fract(irisW_uv / (iW_uvRate * 50.0)) * 4.0;
+					    // Radial UV: centered continuousSweepUV for radial effects
+					    vec2 irisW_sweepFull = irisW_continuousSweepUV(irisW_uv, iris_wynncraft_midtex, irisW_texSize, irisW_eUV);
+					    vec2 irisW_sweepMid = irisW_continuousSweepUV(iris_wynncraft_midtex, iris_wynncraft_midtex, irisW_texSize, vec2(0.5));
+					    vec2 irisW_rUV = (irisW_sweepFull - irisW_sweepMid) * 0.25 + vec2(8.0);
+					    int irisW_effectId = iris_wynncraft_glint & 31;
+					    FRAG_OUTPUT = irisW_applyGlint(irisW_effectId, irisW_uv, irisW_eUV, irisW_sUV, iris_wynncraft_midtex, irisW_rUV, irisW_texSize, irisW_isAtlas, irisW_time, irisW_tex, FRAG_OUTPUT);
+					}
+					""".replace("FRAG_OUTPUT", fragOutput));
+			}
 
 			// Different output name to avoid a name collision in the geometry or tessellation stage.
 			if (parameters.hasGeometry) {
