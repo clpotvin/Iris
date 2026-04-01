@@ -580,11 +580,12 @@ public class EntityPatcher {
 	private static String resolveFragOutput(Root root) {
 		if (root.identifierIndex.has("iris_FragData0")) {
 			return "iris_FragData0";
-		} else if (root.identifierIndex.has("gl_FragData") || root.identifierIndex.has("gl_FragColor")) {
-			// Will be renamed to iris_FragData0 by CommonTransformer later
-			return "iris_FragData0";
 		} else if (root.identifierIndex.has("outColor0")) {
+			// Core profile — check before gl_FragData/gl_FragColor to avoid false match
 			return "outColor0";
+		} else if (root.identifierIndex.has("gl_FragData") || root.identifierIndex.has("gl_FragColor")) {
+			// Compat profile — will be renamed to iris_FragData0 by CommonTransformer later
+			return "iris_FragData0";
 		}
 		return null;
 	}

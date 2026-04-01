@@ -19,6 +19,12 @@ public class BlendModeStorage {
 		return blendUnknown;
 	}
 
+	// Clear the unknown flag after a forced GL call — prevents indefinite global interception
+	// of _blendFuncSeparate when blend state leaks across pipeline teardown.
+	public static void markBlendKnown() {
+		blendUnknown = false;
+	}
+
 	public static void overrideBlend(BlendMode override) {
 		if (!blendLocked) {
 			// Only save the previous state if the blend mode wasn't already locked

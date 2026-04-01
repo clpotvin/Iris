@@ -23,9 +23,9 @@ public class VanillaCoreTransformer {
 				EntityPatcher.patchOverlayColor(t, tree, root, parameters);
 			}
 			EntityPatcher.patchEntityId(t, tree, root, parameters);
-		} else if (parameters.inputs.hasColor() && !parameters.inputs.isText()) {
-			// No overlay but has Color — display entities may render through this path.
-			// Add translucency-only detection (no glint/overlay infrastructure needed).
+		} else if (parameters.inputs.hasColor() && !parameters.inputs.isText() && parameters.inputs.hasNormal()) {
+			// No overlay but has Color + Normal — display entities may render through this path.
+			// Normal check excludes particles/weather (which have Color but no Normal).
 			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
 		}
 
@@ -113,12 +113,12 @@ public class VanillaCoreTransformer {
 					// Entity: neutralize both glint and translucency signals
 					root.replaceReferenceExpressions(t, "vaColor", signalNeutral + " * iris_transforms.ColorModulator");
 					root.replaceReferenceExpressions(t, "gl_Color", signalNeutral + " * iris_transforms.ColorModulator");
-				} else if (!parameters.inputs.isText()) {
-					// Non-overlay, non-text: neutralize translucency signals for display entities
+				} else if (!parameters.inputs.isText() && parameters.inputs.hasNormal()) {
+					// Non-overlay with Normal (entities/display entities): neutralize translucency signals
 					root.replaceReferenceExpressions(t, "vaColor", translucencyOnlyNeutral + " * iris_transforms.ColorModulator");
 					root.replaceReferenceExpressions(t, "gl_Color", translucencyOnlyNeutral + " * iris_transforms.ColorModulator");
 				} else {
-					// Text: no signal neutralization
+					// Text, particles, weather, etc.: no signal neutralization
 					root.replaceReferenceExpressions(t, "vaColor", "iris_Color * iris_transforms.ColorModulator");
 					root.replaceReferenceExpressions(t, "gl_Color", "iris_Color * iris_transforms.ColorModulator");
 				}

@@ -156,7 +156,7 @@ modrinth {
     versionType.set("release")
     uploadFile.set(tasks.named("remapJar"))
     gameVersions.addAll(MINECRAFT_VERSION)
-    loaders.addAll("fabric", "quilt")
+    loaders.addAll("fabric")
     changelog.set(providers.gradleProperty("changelog").orElse(""))
     dependencies {
         required.project("sodium")

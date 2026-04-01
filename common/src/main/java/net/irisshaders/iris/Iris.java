@@ -11,6 +11,7 @@ import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.config.IrisConfig;
 import net.irisshaders.iris.gl.GLDebug;
 import net.irisshaders.iris.gl.buffer.ShaderStorageBufferHolder;
+import net.irisshaders.iris.gl.blending.BlendModeStorage;
 import net.irisshaders.iris.gl.shader.ShaderCompileException;
 import net.irisshaders.iris.gl.shader.StandardMacros;
 import net.irisshaders.iris.gui.debug.DebugLoadFailedGridScreen;
@@ -587,6 +588,10 @@ public class Iris {
 	 */
 	private static void destroyEverything() {
 		currentPack = null;
+
+		// Clear blend override state before destroying the pipeline to prevent
+		// blendUnknown from leaking into vanilla rendering after shader pack toggle.
+		BlendModeStorage.restoreBlend();
 
 		getPipelineManager().destroyPipeline();
 

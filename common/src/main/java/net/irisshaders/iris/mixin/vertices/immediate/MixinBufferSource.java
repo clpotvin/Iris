@@ -59,6 +59,7 @@ public class MixinBufferSource {
 		at = @At("HEAD"), cancellable = true)
 	private void iris$deferTranslucentEntityFlush(RenderType renderType, CallbackInfo ci) {
 		if (ImmediateState.deferItemEntityTranslucentCull
+			&& ((Object) this) == ImmediateState.deferredItemEntityTranslucentCullSource
 			&& renderType.pipeline() == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL) {
 			ci.cancel();
 		}

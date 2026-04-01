@@ -270,6 +270,7 @@ public class MixinLevelRenderer {
 	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("HEAD"))
 	private void iris$beginDeferTranslucentEntities(CallbackInfo ci) {
 		ImmediateState.deferItemEntityTranslucentCull = true;
+		ImmediateState.deferredItemEntityTranslucentCullSource = this.renderBuffers.bufferSource();
 	}
 
 	// TODO this needs to be more consistent.
@@ -282,10 +283,12 @@ public class MixinLevelRenderer {
 		// Stop deferring — the next no-arg endBatch() will flush the deferred buffer
 		// into the post-translucent framebuffer (with sky already composited).
 		ImmediateState.deferItemEntityTranslucentCull = false;
+		ImmediateState.deferredItemEntityTranslucentCullSource = null;
 	}
 
 	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("RETURN"))
 	private void iris$endDeferTranslucentEntities(CallbackInfo ci) {
 		ImmediateState.deferItemEntityTranslucentCull = false;
+		ImmediateState.deferredItemEntityTranslucentCullSource = null;
 	}
 }

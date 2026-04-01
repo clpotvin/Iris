@@ -25,7 +25,7 @@ public class VanillaTransformer {
 		}
 		// Display entities may render through non-overlay paths with Color.
 		// Add translucency-only detection for these cases.
-		if (!parameters.inputs.hasOverlay() && parameters.inputs.hasColor() && !parameters.inputs.isText()) {
+		if (!parameters.inputs.hasOverlay() && parameters.inputs.hasColor() && !parameters.inputs.isText() && parameters.inputs.hasNormal()) {
 			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
 		}
 
@@ -129,10 +129,11 @@ public class VanillaTransformer {
 				+ " : iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
 				+ " : iris_Color)";
 			String translucencyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0) : iris_Color)";
-			// Entity: neutralize glint+translucency. Non-text non-entity: neutralize translucency only.
-			// Text: no neutralization (could have legitimate colors near G=254).
+			// Entity: neutralize glint+translucency. Non-text non-entity with Normal: neutralize translucency only.
+			// Text/particles/weather (no Normal): no neutralization.
+			boolean isNonOverlayEntity = !parameters.inputs.isText() && parameters.inputs.hasNormal();
 			String baseColor = isWynncraftEntity ? entityNeutral
-				: (!parameters.inputs.isText() ? translucencyNeutral : "iris_Color");
+				: (isNonOverlayEntity ? translucencyNeutral : "iris_Color");
 			if (parameters.isClouds()) {
 				root.replaceReferenceExpressions(t, "gl_Color", "iris_cloudCol");
 			} else if (parameters.alpha.reference() == Float.MAX_VALUE) {
