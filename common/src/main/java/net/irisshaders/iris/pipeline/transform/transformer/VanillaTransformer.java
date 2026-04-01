@@ -23,6 +23,11 @@ public class VanillaTransformer {
 		} else if (parameters.inputs.isText()) {
 			EntityPatcher.patchEntityId(t, tree, root, parameters);
 		}
+		// Display entities may render through non-overlay paths with Color.
+		// Add translucency-only detection for these cases.
+		if (!parameters.inputs.hasOverlay() && parameters.inputs.hasColor() && !parameters.inputs.isText()) {
+			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
+		}
 
 		CommonTransformer.transform(t, tree, root, parameters, false);
 
@@ -115,21 +120,25 @@ public class VanillaTransformer {
 
 		if (parameters.inputs.hasColor() && parameters.type == PatchShaderType.VERTEX) {
 			// TODO: Handle the fragment / geometry shader here
-			// For entity/item shaders, neutralize Wynncraft's glint signal (G≈1, B≈0, R<1)
-			// so the shader pack sees white instead of the encoded glint color.
+			// For entity/item shaders, neutralize Wynncraft's glint (G=255, B=0) and translucency
+			// (G=254, B=0) signals so the shader pack sees white instead of the encoded color.
 			boolean isWynncraftEntity = parameters.inputs.hasOverlay() && !parameters.inputs.isText();
+			// Neutralize glint (G=255) and translucency (G=254) signals to white with full alpha.
+			// Translucency alpha is applied fragment-side only to avoid double-multiplication.
+			String entityNeutral = "(iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0)"
+				+ " : iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
+				+ " : iris_Color)";
+			String translucencyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0) : iris_Color)";
+			// Entity: neutralize glint+translucency. Non-text non-entity: neutralize translucency only.
+			// Text: no neutralization (could have legitimate colors near G=254).
+			String baseColor = isWynncraftEntity ? entityNeutral
+				: (!parameters.inputs.isText() ? translucencyNeutral : "iris_Color");
 			if (parameters.isClouds()) {
 				root.replaceReferenceExpressions(t, "gl_Color", "iris_cloudCol");
 			} else if (parameters.alpha.reference() == Float.MAX_VALUE) {
-				String baseColor = isWynncraftEntity
-					? "(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color)"
-					: "iris_Color";
 				root.replaceReferenceExpressions(t, "gl_Color",
 					"vec4((" + baseColor + " * iris_transforms.ColorModulator).rgb, iris_transforms.ColorModulator.a)");
 			} else {
-				String baseColor = isWynncraftEntity
-					? "(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color)"
-					: "iris_Color";
 				root.replaceReferenceExpressions(t, "gl_Color",
 					"(" + baseColor + " * iris_transforms.ColorModulator)");
 			}

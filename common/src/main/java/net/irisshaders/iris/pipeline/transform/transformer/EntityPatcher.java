@@ -62,11 +62,19 @@ public class EntityPatcher {
 	// VARYING: iris_wynncraft_midtex (vec2) carries mc_midTexCoord to fragment shader
 	// ====================================================================================
 
-	// Wynncraft glint signal: vertex Color with G≈1.0, B≈0.0, R in (0,1) encodes glint ID 1-31.
+	// Wynncraft glint signal: vertex Color with G=255/255 (1.0), B=0, R in (0,1) encodes glint ID 1-31.
+	// Threshold G>0.998 distinguishes from translucency signal (G=254/255≈0.996).
 	// Lower bound on R (> 0.002) ensures the decoded ID is at least 1, avoiding false positives
 	// from legitimate vertex colors where R=0 would decode to ID 0 (and still neutralize the color).
 	private static final String IRISW_SIGNAL_DETECT =
-		"bool iris_wynn_isSignal = (iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99);";
+		"bool iris_wynn_isSignal = (iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99);";
+
+	// Wynncraft translucency signal: vertex Color with G=254/255 (≈0.996), B=0, R in (0,1) encodes
+	// translucency level. R*255 gives the translucency value (0-100+), applied as alpha reduction
+	// in the fragment shader: alpha = mix(alpha, 0.0, translucent/100.0).
+	// G range (0.994, 0.998) uniquely matches G=254/255 without overlapping glint (G=255/255).
+	private static final String IRISW_TRANSLUCENCY_DETECT =
+		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
 
 	// GLSL helpers for Wynncraft glint effects — one function per element, since
 	// parseAndInjectNodes requires exactly one external declaration per string.
@@ -368,6 +376,7 @@ public class EntityPatcher {
 				"out vec4 entityColor;",
 				"out vec4 iris_vertexColor;",
 				"flat out int iris_wynncraft_glint;",
+				"flat out int iris_wynncraft_translucency;",
 				"out vec2 iris_wynncraft_texcoord;",
 				"out vec2 iris_wynncraft_midtex;",
 				parameters.inputs.isIE() ? "uniform ivec2 iris_OverlayUV;" : "in ivec2 iris_UV1;");
@@ -375,17 +384,19 @@ public class EntityPatcher {
 			// Create our own main function to wrap the existing main function, so that we
 			// can pass through the overlay color at the end to the geometry or fragment
 			// stage.
-			// Detect Wynncraft glint signal: vertex Color with G≈1.0, B≈0.0, R∈(0,1) encodes
-			// glint ID 1-31. Neutralize to white so the shader pack does not see the raw signal.
+			// Detect Wynncraft glint signal (G=255, B=0) and translucency signal (G=254, B=0).
+			// Both encode a value in the R channel. Neutralize color to white for shader packs.
 			boolean hasMidTexCoord = root.identifierIndex.has("mc_midTexCoord");
 			tree.prependMainFunctionBody(t,
 				"vec4 overlayColor = texelFetch(iris_overlay, " + (parameters.inputs.isIE() ? "iris_OverlayUV" : "iris_UV1") + ", 0);",
 				"entityColor = vec4(overlayColor.rgb, 1.0 - overlayColor.a);",
 				IRISW_SIGNAL_DETECT,
+				IRISW_TRANSLUCENCY_DETECT,
 				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : 0;",
+				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;",
 				"iris_wynncraft_texcoord = iris_UV0;",
 				hasMidTexCoord ? "iris_wynncraft_midtex = mc_midTexCoord.xy;" : "iris_wynncraft_midtex = vec2(0.0);",
-				"iris_vertexColor = iris_wynn_isSignal ? vec4(1.0) : iris_Color;",
+				"iris_vertexColor = (iris_wynn_isSignal || iris_wynn_isTranslucent) ? vec4(1.0) : iris_Color;",
 				// Workaround for a shader pack bug:
 				// https://github.com/IrisShaders/Iris/issues/1549
 				// Some shader packs incorrectly ignore the alpha value, and assume that rgb
@@ -403,6 +414,8 @@ public class EntityPatcher {
 				"in vec4 iris_vertexColor[];",
 				"flat in int iris_wynncraft_glint[];",
 				"flat out int iris_wynncraft_glintTCS[];",
+				"flat in int iris_wynncraft_translucency[];",
+				"flat out int iris_wynncraft_translucencyTCS[];",
 				"in vec2 iris_wynncraft_texcoord[];",
 				"out vec2 iris_wynncraft_texcoordTCS[];",
 				"in vec2 iris_wynncraft_midtex[];",
@@ -411,6 +424,7 @@ public class EntityPatcher {
 				"entityColorTCS = entityColor[gl_InvocationID];",
 				"iris_vertexColorTCS[gl_InvocationID] = iris_vertexColor[gl_InvocationID];",
 				"iris_wynncraft_glintTCS[gl_InvocationID] = iris_wynncraft_glint[gl_InvocationID];",
+				"iris_wynncraft_translucencyTCS[gl_InvocationID] = iris_wynncraft_translucency[gl_InvocationID];",
 				"iris_wynncraft_texcoordTCS[gl_InvocationID] = iris_wynncraft_texcoord[gl_InvocationID];",
 				"iris_wynncraft_midtexTCS[gl_InvocationID] = iris_wynncraft_midtex[gl_InvocationID];");
 		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_EVAL) {
@@ -425,6 +439,8 @@ public class EntityPatcher {
 				"in vec4 iris_vertexColorTCS[];",
 				"flat in int iris_wynncraft_glintTCS[];",
 				"flat out int iris_wynncraft_glintTES;",
+				"flat in int iris_wynncraft_translucencyTCS[];",
+				"flat out int iris_wynncraft_translucencyTES;",
 				"in vec2 iris_wynncraft_texcoordTCS[];",
 				"out vec2 iris_wynncraft_texcoordTES;",
 				"in vec2 iris_wynncraft_midtexTCS[];",
@@ -433,6 +449,7 @@ public class EntityPatcher {
 				"entityColorTES = entityColorTCS;",
 				"iris_vertexColorTES = iris_vertexColorTCS[0];",
 				"iris_wynncraft_glintTES = iris_wynncraft_glintTCS[0];",
+				"iris_wynncraft_translucencyTES = iris_wynncraft_translucencyTCS[0];",
 				"iris_wynncraft_texcoordTES = iris_wynncraft_texcoordTCS[0];",
 				"iris_wynncraft_midtexTES = iris_wynncraft_midtexTCS[0];");
 		} else if (parameters.type.glShaderType == ShaderType.GEOMETRY) {
@@ -447,6 +464,8 @@ public class EntityPatcher {
 				"in vec4 iris_vertexColor[];",
 				"flat in int iris_wynncraft_glint[];",
 				"flat out int iris_wynncraft_glintGS;",
+				"flat in int iris_wynncraft_translucency[];",
+				"flat out int iris_wynncraft_translucencyGS;",
 				"in vec2 iris_wynncraft_texcoord[];",
 				"out vec2 iris_wynncraft_texcoordGS;",
 				"in vec2 iris_wynncraft_midtex[];",
@@ -455,6 +474,7 @@ public class EntityPatcher {
 				"entityColorGS = entityColor[0];",
 				"iris_vertexColorGS = iris_vertexColor[0];",
 				"iris_wynncraft_glintGS = iris_wynncraft_glint[0];",
+				"iris_wynncraft_translucencyGS = iris_wynncraft_translucency[0];",
 				"iris_wynncraft_texcoordGS = iris_wynncraft_texcoord[0];",
 				"iris_wynncraft_midtexGS = iris_wynncraft_midtex[0];");
 
@@ -462,6 +482,7 @@ public class EntityPatcher {
 				root.rename("iris_vertexColor", "iris_vertexColorTES");
 				root.rename("entityColor", "entityColorTES");
 				root.rename("iris_wynncraft_glint", "iris_wynncraft_glintTES");
+				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
 			}
@@ -469,6 +490,7 @@ public class EntityPatcher {
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 				"in vec4 entityColor;", "in vec4 iris_vertexColor;",
 				"flat in int iris_wynncraft_glint;",
+				"flat in int iris_wynncraft_translucency;",
 				"in vec2 iris_wynncraft_texcoord;",
 				"in vec2 iris_wynncraft_midtex;");
 
@@ -492,16 +514,8 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, glintFunc);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_HELPERS);
 
-			// Apply glint effects after the shader pack's main() runs, modifying the fragment output.
-			// Detect the actual output variable: iris_FragData0 (compat profile) or outColor0 (core profile).
-			String fragOutput;
-			if (root.identifierIndex.has("iris_FragData0")) {
-				fragOutput = "iris_FragData0";
-			} else if (root.identifierIndex.has("outColor0")) {
-				fragOutput = "outColor0";
-			} else {
-				fragOutput = null;
-			}
+			// Apply glint and translucency effects after the shader pack's main() runs.
+			String fragOutput = resolveFragOutput(root);
 
 			if (fragOutput != null) {
 				// EFFECT_UV is adapted from Wynncraft's entity formula: (uv - 1.0) * (texW / texH, 1.0)
@@ -534,6 +548,10 @@ public class EntityPatcher {
 					    FRAG_OUTPUT = irisW_applyGlint(irisW_effectId, irisW_uv, irisW_eUV, irisW_sUV, iris_wynncraft_midtex, irisW_rUV, irisW_texSize, irisW_isAtlas, irisW_time, irisW_tex, FRAG_OUTPUT);
 					}
 					""".replace("FRAG_OUTPUT", fragOutput));
+
+				// Translucency: reduce fragment alpha after shader pack renders at full RGB intensity.
+				// This avoids double-alpha-multiplication (black fringing against bright backgrounds).
+				appendTranslucencyAlpha(t, tree, fragOutput);
 			}
 
 			// Different output name to avoid a name collision in the geometry or tessellation stage.
@@ -541,14 +559,93 @@ public class EntityPatcher {
 				root.rename("entityColor", "entityColorGS");
 				root.rename("iris_vertexColor", "iris_vertexColorGS");
 				root.rename("iris_wynncraft_glint", "iris_wynncraft_glintGS");
+				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyGS");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordGS");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexGS");
 			} else if (parameters.hasTesselation) {
 				root.rename("entityColor", "entityColorTES");
 				root.rename("iris_vertexColor", "iris_vertexColorTES");
 				root.rename("iris_wynncraft_glint", "iris_wynncraft_glintTES");
+				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
+			}
+		}
+	}
+
+	// Resolve the fragment output variable name.
+	// EntityPatcher runs BEFORE CommonTransformer, so gl_FragData[0] hasn't been renamed
+	// to iris_FragData0 yet. We check for the pre-rename names too, but always return
+	// the post-rename name since our appended code executes after all transformations.
+	private static String resolveFragOutput(Root root) {
+		if (root.identifierIndex.has("iris_FragData0")) {
+			return "iris_FragData0";
+		} else if (root.identifierIndex.has("gl_FragData") || root.identifierIndex.has("gl_FragColor")) {
+			// Will be renamed to iris_FragData0 by CommonTransformer later
+			return "iris_FragData0";
+		} else if (root.identifierIndex.has("outColor0")) {
+			return "outColor0";
+		}
+		return null;
+	}
+
+	// Append translucency alpha reduction to the fragment shader. Shared by both
+	// patchOverlayColor and patchTranslucencyOnly to keep the logic in sync.
+	private static void appendTranslucencyAlpha(ASTParser t, TranslationUnit tree, String fragOutput) {
+		tree.appendMainFunctionBody(t, """
+			if (iris_wynncraft_translucency > 0) {
+			    FRAG_OUTPUT.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+			}
+			""".replace("FRAG_OUTPUT", fragOutput));
+	}
+
+	// Standalone translucency patcher for shaders that have Color but NOT overlay.
+	// Display entities may render through non-overlay shader paths, so EntityPatcher's
+	// patchOverlayColor (which requires overlay) doesn't run for them. This method adds
+	// just the translucency varying and alpha reduction, without glint/overlay handling.
+	public static void patchTranslucencyOnly(
+		ASTParser t,
+		TranslationUnit tree,
+		Root root,
+		VanillaParameters parameters) {
+
+		if (parameters.type.glShaderType == ShaderType.VERTEX) {
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"flat out int iris_wynncraft_translucency;");
+			tree.prependMainFunctionBody(t,
+				IRISW_TRANSLUCENCY_DETECT,
+				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;");
+		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_CONTROL) {
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"flat in int iris_wynncraft_translucency[];",
+				"flat out int iris_wynncraft_translucencyTCS[];");
+			tree.prependMainFunctionBody(t,
+				"iris_wynncraft_translucencyTCS[gl_InvocationID] = iris_wynncraft_translucency[gl_InvocationID];");
+		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_EVAL) {
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"flat in int iris_wynncraft_translucencyTCS[];",
+				"flat out int iris_wynncraft_translucencyTES;");
+			tree.prependMainFunctionBody(t,
+				"iris_wynncraft_translucencyTES = iris_wynncraft_translucencyTCS[0];");
+		} else if (parameters.type.glShaderType == ShaderType.GEOMETRY) {
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"flat in int iris_wynncraft_translucency" + (parameters.hasTesselation ? "TES" : "") + "[];",
+				"flat out int iris_wynncraft_translucencyGS;");
+			tree.prependMainFunctionBody(t,
+				"iris_wynncraft_translucencyGS = iris_wynncraft_translucency" + (parameters.hasTesselation ? "TES" : "") + "[0];");
+		} else if (parameters.type.glShaderType == ShaderType.FRAGMENT) {
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"flat in int iris_wynncraft_translucency;");
+			// Apply translucency alpha reduction in fragment.
+			String fragOutput = resolveFragOutput(root);
+			if (fragOutput != null) {
+				appendTranslucencyAlpha(t, tree, fragOutput);
+			}
+
+			if (parameters.hasGeometry) {
+				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyGS");
+			} else if (parameters.hasTesselation) {
+				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 			}
 		}
 	}

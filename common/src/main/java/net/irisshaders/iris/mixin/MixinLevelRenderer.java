@@ -24,6 +24,7 @@ import net.irisshaders.iris.layer.IsOutlineRenderStateShard;
 import net.irisshaders.iris.layer.OuterWrappedRenderType;
 import net.irisshaders.iris.pathways.HandRenderer;
 import net.irisshaders.iris.pipeline.WorldRenderingPhase;
+import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.pipeline.WorldRenderingPipeline;
 import net.irisshaders.iris.shadows.frustum.fallback.NonCullingFrustum;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
@@ -264,6 +265,13 @@ public class MixinLevelRenderer {
 		return new OuterWrappedRenderType("iris:is_outline", type, IsOutlineRenderStateShard.INSTANCE);
 	}
 
+	// Defer ITEM_ENTITY_TRANSLUCENT_CULL flush past beginTranslucents() so translucent
+	// entities render with the sky already composited (fixes black halo against sky).
+	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("HEAD"))
+	private void iris$beginDeferTranslucentEntities(CallbackInfo ci) {
+		ImmediateState.deferItemEntityTranslucentCull = true;
+	}
+
 	// TODO this needs to be more consistent.
 	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;endBatch()V", ordinal = 1))
 	private void iris$beginTranslucents(CallbackInfo ci,  @Local(ordinal = 0, argsOnly = true) Matrix4f modelMatrix) {
@@ -271,5 +279,13 @@ public class MixinLevelRenderer {
 		HandRenderer.INSTANCE.renderSolid(modelMatrix, Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(true), Minecraft.getInstance().gameRenderer.getMainCamera(), Minecraft.getInstance().gameRenderer, pipeline);
 		Profiler.get().popPush("iris_pre_translucent");
 		pipeline.beginTranslucents();
+		// Stop deferring — the next no-arg endBatch() will flush the deferred buffer
+		// into the post-translucent framebuffer (with sky already composited).
+		ImmediateState.deferItemEntityTranslucentCull = false;
+	}
+
+	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("RETURN"))
+	private void iris$endDeferTranslucentEntities(CallbackInfo ci) {
+		ImmediateState.deferItemEntityTranslucentCull = false;
 	}
 }

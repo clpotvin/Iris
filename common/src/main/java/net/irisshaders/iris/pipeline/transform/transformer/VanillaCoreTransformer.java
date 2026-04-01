@@ -23,6 +23,10 @@ public class VanillaCoreTransformer {
 				EntityPatcher.patchOverlayColor(t, tree, root, parameters);
 			}
 			EntityPatcher.patchEntityId(t, tree, root, parameters);
+		} else if (parameters.inputs.hasColor() && !parameters.inputs.isText()) {
+			// No overlay but has Color — display entities may render through this path.
+			// Add translucency-only detection (no glint/overlay infrastructure needed).
+			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
 		}
 
 		tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
@@ -99,14 +103,22 @@ public class VanillaCoreTransformer {
 			root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(iris_Position, 1.0)");
 			root.rename("vaPosition", "iris_Position");
 			if (parameters.inputs.hasColor()) {
-				// For entity/item shaders, neutralize Wynncraft's glint signal (G≈1, B≈0, R<1)
-				// so the shader pack sees white instead of the encoded glint color.
+				// Neutralize Wynncraft glint (G=255) and translucency (G=254) signals to white.
+				// Both get full alpha — translucency is applied fragment-side only to avoid double-multiplication.
+				String signalNeutral = "(iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0)"
+					+ " : iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
+					+ " : iris_Color)";
+				String translucencyOnlyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0) : iris_Color)";
 				if (parameters.inputs.hasOverlay() && !parameters.inputs.isText()) {
-					root.replaceReferenceExpressions(t, "vaColor",
-						"(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color) * iris_transforms.ColorModulator");
-					root.replaceReferenceExpressions(t, "gl_Color",
-						"(iris_Color.g > 0.99 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0) : iris_Color) * iris_transforms.ColorModulator");
+					// Entity: neutralize both glint and translucency signals
+					root.replaceReferenceExpressions(t, "vaColor", signalNeutral + " * iris_transforms.ColorModulator");
+					root.replaceReferenceExpressions(t, "gl_Color", signalNeutral + " * iris_transforms.ColorModulator");
+				} else if (!parameters.inputs.isText()) {
+					// Non-overlay, non-text: neutralize translucency signals for display entities
+					root.replaceReferenceExpressions(t, "vaColor", translucencyOnlyNeutral + " * iris_transforms.ColorModulator");
+					root.replaceReferenceExpressions(t, "gl_Color", translucencyOnlyNeutral + " * iris_transforms.ColorModulator");
 				} else {
+					// Text: no signal neutralization
 					root.replaceReferenceExpressions(t, "vaColor", "iris_Color * iris_transforms.ColorModulator");
 					root.replaceReferenceExpressions(t, "gl_Color", "iris_Color * iris_transforms.ColorModulator");
 				}

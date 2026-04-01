@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -47,6 +48,19 @@ public class MixinBufferSource {
 	private void iris$afterFlushBuffer(RenderType renderType, BufferBuilder bufferBuilder, CallbackInfo ci) {
 		if (iris$notRenderingLevel()) {
 			ImmediateState.renderWithExtendedVertexFormat = true;
+		}
+	}
+
+	// Defer ITEM_ENTITY_TRANSLUCENT_CULL flush past beginTranslucents() so translucent
+	// entities (Wynncraft VFX display entities) render with the sky already composited.
+	// Canceling the public endBatch(RenderType) preserves the builder in startedBuilders;
+	// the post-translucent no-arg endBatch() flushes it from the fixedBuffers iteration.
+	@Inject(method = "endBatch(Lnet/minecraft/client/renderer/rendertype/RenderType;)V",
+		at = @At("HEAD"), cancellable = true)
+	private void iris$deferTranslucentEntityFlush(RenderType renderType, CallbackInfo ci) {
+		if (ImmediateState.deferItemEntityTranslucentCull
+			&& renderType.pipeline() == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL) {
+			ci.cancel();
 		}
 	}
 
