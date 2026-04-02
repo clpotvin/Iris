@@ -259,6 +259,25 @@ public abstract class MixinBufferBuilder implements VertexConsumer, BlockSensiti
 			}
 		}
 
+		// Wynncraft translucency signal detection: check vertex color for the signal
+		// pattern (G=254, B=0, R in [1,254]) in tracked ITEM_ENTITY_TRANSLUCENT_CULL builders.
+		// This bridges shader-level signal detection to Java-level mesh deferral.
+		if (!ImmediateState.trackedBuilderHasWynnSignal
+			&& ImmediateState.captureItemEntityBatches
+			&& (Object) this == ImmediateState.trackedTranslucentBuilder) {
+			int colorOffset = this.offsetsByElement[VertexFormatElement.COLOR.id()];
+			for (int vertex = 0; vertex < vertexAmount; vertex++) {
+				long colorPtr = ((MojangBufferAccessor) buffer).getPointer() + vertexOffsets[vertex] + colorOffset;
+				int r = MemoryUtil.memGetByte(colorPtr) & 0xFF;
+				int g = MemoryUtil.memGetByte(colorPtr + 1) & 0xFF;
+				int b = MemoryUtil.memGetByte(colorPtr + 2) & 0xFF;
+				if (g == 254 && b == 0 && r >= 1 && r <= 254) {
+					ImmediateState.trackedBuilderHasWynnSignal = true;
+					break;
+				}
+			}
+		}
+
 		Arrays.fill(vertexOffsets, 0);
 	}
 }

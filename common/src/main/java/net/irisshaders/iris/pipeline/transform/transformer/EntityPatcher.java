@@ -1,11 +1,22 @@
 package net.irisshaders.iris.pipeline.transform.transformer;
 
+import io.github.douira.glsl_transformer.ast.data.ChildNodeList;
 import io.github.douira.glsl_transformer.ast.node.Identifier;
 import io.github.douira.glsl_transformer.ast.node.TranslationUnit;
 import io.github.douira.glsl_transformer.ast.node.abstract_node.ASTNode;
 import io.github.douira.glsl_transformer.ast.node.declaration.TypeAndInitDeclaration;
+import io.github.douira.glsl_transformer.ast.node.expression.Expression;
+import io.github.douira.glsl_transformer.ast.node.expression.ReferenceExpression;
+import io.github.douira.glsl_transformer.ast.node.expression.binary.AssignmentExpression;
+import io.github.douira.glsl_transformer.ast.node.expression.unary.FunctionCallExpression;
+import io.github.douira.glsl_transformer.ast.node.expression.unary.MemberAccessExpression;
 import io.github.douira.glsl_transformer.ast.node.external_declaration.DeclarationExternalDeclaration;
 import io.github.douira.glsl_transformer.ast.node.external_declaration.ExternalDeclaration;
+import io.github.douira.glsl_transformer.ast.node.statement.CompoundStatement;
+import io.github.douira.glsl_transformer.ast.node.statement.Statement;
+import io.github.douira.glsl_transformer.ast.node.statement.selection.SelectionStatement;
+import io.github.douira.glsl_transformer.ast.node.statement.terminal.DiscardStatement;
+import io.github.douira.glsl_transformer.ast.node.statement.terminal.ExpressionStatement;
 import io.github.douira.glsl_transformer.ast.node.type.specifier.BuiltinNumericTypeSpecifier;
 import io.github.douira.glsl_transformer.ast.query.Root;
 import io.github.douira.glsl_transformer.ast.query.match.AutoHintedMatcher;
@@ -15,6 +26,9 @@ import io.github.douira.glsl_transformer.parser.ParseShape;
 import io.github.douira.glsl_transformer.util.Type;
 import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.pipeline.transform.parameter.VanillaParameters;
+
+import java.util.Collection;
+
 
 public class EntityPatcher {
 	// ====================================================================================
@@ -343,6 +357,63 @@ public class EntityPatcher {
 		        iW_out.rgb *= min(iW_inLuma / iW_texLuma * iris_glintBrightness, 1.0);
 		    }
 		    return iW_out;
+		}
+		""";
+
+	// Glint fragment code used by the FORWARD path. FRAG_OUTPUT is replaced with the
+	// actual fragment output variable name (e.g., iris_FragData0).
+	private static final String IRISW_GLINT_FRAGMENT_CODE = """
+		if (iris_wynncraft_glint != 0) {
+		    vec2 irisW_texSize = vec2(textureSize(Sampler0, 0));
+		    bool irisW_isAtlas = max(irisW_texSize.x, irisW_texSize.y) > 2000.0;
+		    vec2 irisW_uv = iris_wynncraft_texcoord;
+		    float irisW_time = iris_globalInfo.GameTime * 300.0;
+		    vec4 irisW_tex = texture(Sampler0, irisW_uv);
+		    vec2 irisW_eUV;
+		    if (irisW_isAtlas) {
+		        vec2 iW_spriteUV = fract(irisW_uv * irisW_texSize / 16.0);
+		        irisW_eUV = (iW_spriteUV - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0) / 5.0;
+		    } else {
+		        irisW_eUV = (irisW_uv - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0);
+		    }
+		    vec2 iW_dU = max(abs(dFdx(irisW_uv)), abs(dFdy(irisW_uv)));
+		    vec2 iW_uvRate = max(iW_dU, vec2(1e-6));
+		    vec2 irisW_sUV = fract(irisW_uv / (iW_uvRate * 50.0)) * 4.0;
+		    vec2 irisW_sweepFull = irisW_continuousSweepUV(irisW_uv, iris_wynncraft_midtex, irisW_texSize, irisW_eUV);
+		    vec2 irisW_sweepMid = irisW_continuousSweepUV(iris_wynncraft_midtex, iris_wynncraft_midtex, irisW_texSize, vec2(0.5));
+		    vec2 irisW_rUV = (irisW_sweepFull - irisW_sweepMid) * 0.25 + vec2(8.0);
+		    int irisW_effectId = iris_wynncraft_glint & 31;
+		    FRAG_OUTPUT = irisW_applyGlint(irisW_effectId, irisW_uv, irisW_eUV, irisW_sUV, iris_wynncraft_midtex, irisW_rUV, irisW_texSize, irisW_isAtlas, irisW_time, irisW_tex, FRAG_OUTPUT);
+		}
+		""";
+
+	// Glint fragment code for the DEFERRED path. ALBEDO_VAR is replaced with the
+	// pack's albedo variable name (e.g., base_color). Modifies .rgb only, wrapping
+	// in vec4 for the applyGlint call since it expects vec4 in/out.
+	private static final String IRISW_DEFERRED_GLINT_CODE = """
+		if (iris_wynncraft_glint != 0) {
+		    vec2 irisW_texSize = vec2(textureSize(Sampler0, 0));
+		    bool irisW_isAtlas = max(irisW_texSize.x, irisW_texSize.y) > 2000.0;
+		    vec2 irisW_uv = iris_wynncraft_texcoord;
+		    float irisW_time = iris_globalInfo.GameTime * 300.0;
+		    vec4 irisW_tex = texture(Sampler0, irisW_uv);
+		    vec2 irisW_eUV;
+		    if (irisW_isAtlas) {
+		        vec2 iW_spriteUV = fract(irisW_uv * irisW_texSize / 16.0);
+		        irisW_eUV = (iW_spriteUV - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0) / 5.0;
+		    } else {
+		        irisW_eUV = (irisW_uv - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0);
+		    }
+		    vec2 iW_dU = max(abs(dFdx(irisW_uv)), abs(dFdy(irisW_uv)));
+		    vec2 iW_uvRate = max(iW_dU, vec2(1e-6));
+		    vec2 irisW_sUV = fract(irisW_uv / (iW_uvRate * 50.0)) * 4.0;
+		    vec2 irisW_sweepFull = irisW_continuousSweepUV(irisW_uv, iris_wynncraft_midtex, irisW_texSize, irisW_eUV);
+		    vec2 irisW_sweepMid = irisW_continuousSweepUV(iris_wynncraft_midtex, iris_wynncraft_midtex, irisW_texSize, vec2(0.5));
+		    vec2 irisW_rUV = (irisW_sweepFull - irisW_sweepMid) * 0.25 + vec2(8.0);
+		    int irisW_effectId = iris_wynncraft_glint & 31;
+		    vec4 irisW_albedoIn = vec4(ALBEDO_VAR.rgb, 1.0);
+		    vec4 irisW_albedoOut = irisW_applyGlint(irisW_effectId, irisW_uv, irisW_eUV, irisW_sUV, iris_wynncraft_midtex, irisW_rUV, irisW_texSize, irisW_isAtlas, irisW_time, irisW_tex, irisW_albedoIn);
+		    ALBEDO_VAR.rgb = irisW_albedoOut.rgb;
 		}
 		""";
 
@@ -720,49 +791,76 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, glintFunc);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_HELPERS);
 
-			// Apply glint and translucency effects after the shader pack's main() runs.
+			// Apply glint and translucency effects.
+			// Forward packs: append to end of main() targeting the fragment output.
+			// Deferred packs: inject mid-main targeting the albedo variable before GBuffer packing.
 			String fragOutput = resolveFragOutput(root);
 
 			if (fragOutput != null) {
-				// EFFECT_UV is adapted from Wynncraft's entity formula: (uv - 1.0) * (texW / texH, 1.0)
-				tree.appendMainFunctionBody(t, """
-					if (iris_wynncraft_glint != 0) {
-					    vec2 irisW_texSize = vec2(textureSize(Sampler0, 0));
-					    bool irisW_isAtlas = max(irisW_texSize.x, irisW_texSize.y) > 2000.0;
-					    vec2 irisW_uv = iris_wynncraft_texcoord;
-					    float irisW_time = iris_globalInfo.GameTime * 300.0;
-					    vec4 irisW_tex = texture(Sampler0, irisW_uv);
-					    vec2 irisW_eUV;
-					    if (irisW_isAtlas) {
-					        // True atlas texture (Minecraft item/block atlas is always >= 2048px):
-					        // UV is a tiny sub-region, so recover per-sprite [0,1] UV via fract.
-					        vec2 iW_spriteUV = fract(irisW_uv * irisW_texSize / 16.0);
-					        irisW_eUV = (iW_spriteUV - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0) / 5.0;
-					    } else {
-					        // Dedicated texture (armor): UV spans [0,1] so UV-derived formulas give spatial variation.
-					        irisW_eUV = (irisW_uv - 1.0) * vec2(irisW_texSize.x / irisW_texSize.y, 1.0);
-					    }
-					    // Screen-space sparkle UV (shared across atlas/dedicated)
-					    vec2 iW_dU = max(abs(dFdx(irisW_uv)), abs(dFdy(irisW_uv)));
-					    vec2 iW_uvRate = max(iW_dU, vec2(1e-6));
-					    vec2 irisW_sUV = fract(irisW_uv / (iW_uvRate * 50.0)) * 4.0;
-					    // Radial UV: centered continuousSweepUV for radial effects
-					    vec2 irisW_sweepFull = irisW_continuousSweepUV(irisW_uv, iris_wynncraft_midtex, irisW_texSize, irisW_eUV);
-					    vec2 irisW_sweepMid = irisW_continuousSweepUV(iris_wynncraft_midtex, iris_wynncraft_midtex, irisW_texSize, vec2(0.5));
-					    vec2 irisW_rUV = (irisW_sweepFull - irisW_sweepMid) * 0.25 + vec2(8.0);
-					    int irisW_effectId = iris_wynncraft_glint & 31;
-					    FRAG_OUTPUT = irisW_applyGlint(irisW_effectId, irisW_uv, irisW_eUV, irisW_sUV, iris_wynncraft_midtex, irisW_rUV, irisW_texSize, irisW_isAtlas, irisW_time, irisW_tex, FRAG_OUTPUT);
-					}
-					""".replace("FRAG_OUTPUT", fragOutput));
-
-				// Translucency: reduce fragment alpha after shader pack renders at full RGB intensity.
-				// This avoids double-alpha-multiplication (black fringing against bright backgrounds).
+				// FORWARD PATH: append effects after main() — existing behavior, unchanged.
+				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fragOutput));
 				appendTranslucencyAlpha(t, tree, fragOutput);
-
-				// Player emote nearFade: multiply entire fragment output by fade factor.
-				// Non-emote entities have nearFade=1.0 (no effect). Emote limbs fade based on
-				// distance to camera (soft/hard fade), with head/body exempt.
 				tree.appendMainFunctionBody(t, fragOutput + " *= iris_wynncraft_nearfade;");
+			} else {
+				// DEFERRED PATH: mid-main injection for packed GBuffer packs (e.g., Photon).
+				// Two injection points:
+				// 1. Translucency → BEFORE alpha-discard (so reduced alpha affects discard)
+				// 2. Glint + NearFade → AFTER entityColor overlay (so effects apply to final color)
+				CompoundStatement mainBody = null;
+				try { mainBody = tree.getOneMainDefinitionBody(); } catch (Exception ignored) {}
+
+				if (mainBody != null) {
+					// IMPORTANT: Insert translucency FIRST (earlier in main), then glint (later).
+					// This avoids index offset issues since translucency inserts at an earlier index.
+
+					// Find both anchors
+					OverlayAnchor overlayAnchor = findOverlayAnchorInMain(root, tree);
+					AlphaDiscardAnchor discardAnchor = findAlphaDiscardAnchorInMain(root, tree,
+						overlayAnchor != null ? overlayAnchor.albedoVar() : null);
+
+					// 1. Translucency at alpha-discard anchor (BEFORE discard)
+					int translucencyStmtsInserted = 0;
+					if (discardAnchor != null) {
+						String av = discardAnchor.albedoVar();
+						Collection<? extends Statement> stmts = t.parseStatements(root, """
+							if (iris_wynncraft_translucency > 0) {
+							    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+							}
+							""".replace("ALBEDO_VAR", av));
+						translucencyStmtsInserted = stmts.size();
+						mainBody.getStatements().addAll(discardAnchor.topLevelInsertBeforeIndex(), stmts);
+					}
+
+					// 2. Glint + NearFade
+					// Preferred: entityColor overlay anchor (AFTER overlay, e.g., gbuffers_entities)
+					// Fallback: alpha-discard anchor (AFTER discard, e.g., gbuffers_hand where
+					//   Photon doesn't use entityColor — it's guarded by PROGRAM_GBUFFERS_ENTITIES only)
+					String glintAlbedoVar = null;
+					int glintIdx = -1;
+
+					if (overlayAnchor != null) {
+						// Insert after entityColor overlay
+						glintAlbedoVar = overlayAnchor.albedoVar();
+						glintIdx = overlayAnchor.topLevelInsertAfterIndex();
+						if (discardAnchor != null && discardAnchor.topLevelInsertBeforeIndex() <= glintIdx) {
+							glintIdx += translucencyStmtsInserted;
+						}
+					} else if (discardAnchor != null) {
+						// Fallback: insert after the alpha-discard statement
+						// (fragments that survive get glint applied before GBuffer packing)
+						glintAlbedoVar = discardAnchor.albedoVar();
+						// Insert AFTER the discard statement: discardIndex + 1
+						// (discardIndex already had translucency inserted before it, so offset)
+						glintIdx = discardAnchor.topLevelInsertBeforeIndex() + translucencyStmtsInserted + 1;
+					}
+
+					if (glintAlbedoVar != null && glintIdx >= 0) {
+						mainBody.getStatements().addAll(glintIdx,
+							t.parseStatements(root,
+								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar),
+								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;"));
+					}
+				}
 			}
 
 			// Different output name to avoid a name collision in the geometry or tessellation stage.
@@ -784,6 +882,306 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeTES");
 			}
 		}
+	}
+
+	// ====================================================================================
+	// DEFERRED RENDERING SUPPORT — Mid-main injection anchors
+	// ====================================================================================
+	// Deferred packs (like Photon) use packed GBuffer outputs instead of simple RGBA
+	// fragment outputs. resolveFragOutput() returns null for these packs. Instead of
+	// modifying the packed output, we inject effects directly into main() targeting
+	// the albedo variable before it gets packed.
+	//
+	// Two anchors for two different injection points:
+	// 1. OverlayAnchor: finds entityColor overlay, used for glint + nearFade (AFTER overlay)
+	// 2. AlphaDiscardAnchor: finds alpha test, used for translucency (BEFORE discard)
+
+	private record OverlayAnchor(String albedoVar, int topLevelInsertAfterIndex) {}
+	private record AlphaDiscardAnchor(String albedoVar, int topLevelInsertBeforeIndex) {}
+
+	// Find the entityColor overlay assignment in main():
+	//   albedo.rgb = mix(albedo.rgb, entityColor.rgb, entityColor.a);
+	// Returns the albedo variable name and insertion index (AFTER the overlay), or null.
+	private static OverlayAnchor findOverlayAnchorInMain(Root root, TranslationUnit tree) {
+		CompoundStatement mainBody;
+		try {
+			mainBody = tree.getOneMainDefinitionBody();
+		} catch (Exception e) {
+			return null;
+		}
+
+		ChildNodeList<Statement> statements = mainBody.getStatements();
+		String lastAlbedoVar = null;
+		int lastTopLevelIndex = -1;
+
+		for (int i = 0; i < statements.size(); i++) {
+			Statement stmt = statements.get(i);
+			String found = findOverlayInStatement(stmt, true);
+			if (found == null) {
+				found = findOverlayInStatement(stmt, false); // relaxed fallback
+			}
+			if (found != null) {
+				lastAlbedoVar = found;
+				// Walk up to find the top-level index if this is nested
+				lastTopLevelIndex = i;
+			}
+		}
+
+		if (lastAlbedoVar == null) return null;
+
+		// Validate: albedo var must be declared at main() top-level scope
+		if (!isVarDeclaredInScope(statements, lastAlbedoVar, lastTopLevelIndex)) return null;
+
+		return new OverlayAnchor(lastAlbedoVar, lastTopLevelIndex + 1);
+	}
+
+	// Recursively search a statement (and nested blocks) for the entityColor overlay pattern.
+	// Returns the albedo variable name if found, null otherwise.
+	// strict=true: require mix() arg0 to match LHS base variable
+	// strict=false: only require mix(..., entityColor.rgb, entityColor.a)
+	private static String findOverlayInStatement(Statement stmt, boolean strict) {
+		if (stmt instanceof ExpressionStatement exprStmt) {
+			Expression expr = exprStmt.getExpression();
+			if (expr instanceof AssignmentExpression assign) {
+				return checkOverlayAssignment(assign, strict);
+			}
+		} else if (stmt instanceof SelectionStatement sel) {
+			// Check inside if-blocks
+			String found = findOverlayInBody(sel.getIfTrue(), strict);
+			if (found != null) return found;
+			if (sel.hasIfFalse()) {
+				found = findOverlayInBody(sel.getIfFalse(), strict);
+				if (found != null) return found;
+			}
+		} else if (stmt instanceof CompoundStatement compound) {
+			for (Statement child : compound.getStatements()) {
+				String found = findOverlayInStatement(child, strict);
+				if (found != null) return found;
+			}
+		}
+		return null;
+	}
+
+	private static String findOverlayInBody(Statement body, boolean strict) {
+		if (body instanceof CompoundStatement compound) {
+			for (Statement child : compound.getStatements()) {
+				String found = findOverlayInStatement(child, strict);
+				if (found != null) return found;
+			}
+		} else {
+			return findOverlayInStatement(body, strict);
+		}
+		return null;
+	}
+
+	// Check if an assignment matches: albedo.rgb = mix(arg0, entityColor.rgb, entityColor.a)
+	private static String checkOverlayAssignment(AssignmentExpression assign, boolean strict) {
+		Expression lhs = assign.getLeft();
+		Expression rhs = assign.getRight();
+
+		// LHS must be .rgb member access
+		if (!(lhs instanceof MemberAccessExpression lhsMember)) return null;
+		if (!"rgb".equals(lhsMember.getMember().getName())) return null;
+
+		// Extract base variable from LHS
+		Expression lhsBase = lhsMember.getOperand();
+		if (!(lhsBase instanceof ReferenceExpression lhsRef)) return null;
+		String albedoVar = lhsRef.getIdentifier().getName();
+
+		// RHS must be mix() call with entityColor args
+		if (!(rhs instanceof FunctionCallExpression funcCall)) return null;
+		if (funcCall.getFunctionName() == null) return null;
+		if (!"mix".equals(funcCall.getFunctionName().getName())) return null;
+		if (funcCall.getParameters().size() != 3) return null;
+
+		Expression arg1 = funcCall.getParameters().get(1);
+		Expression arg2 = funcCall.getParameters().get(2);
+
+		// arg1 must be entityColor.rgb
+		if (!isMemberAccess(arg1, "entityColor", "rgb")) return null;
+		// arg2 must be entityColor.a
+		if (!isMemberAccess(arg2, "entityColor", "a")) return null;
+
+		// Strict mode: arg0 must reference the same base variable as LHS
+		if (strict) {
+			Expression arg0 = funcCall.getParameters().get(0);
+			if (!(arg0 instanceof MemberAccessExpression arg0Member)) return null;
+			Expression arg0Base = arg0Member.getOperand();
+			if (!(arg0Base instanceof ReferenceExpression arg0Ref)) return null;
+			if (!albedoVar.equals(arg0Ref.getIdentifier().getName())) return null;
+		}
+
+		return albedoVar;
+	}
+
+	// Check if an expression is `base.member` (e.g., entityColor.rgb)
+	private static boolean isMemberAccess(Expression expr, String baseName, String memberName) {
+		if (!(expr instanceof MemberAccessExpression member)) return false;
+		if (!memberName.equals(member.getMember().getName())) return false;
+		Expression operand = member.getOperand();
+		if (!(operand instanceof ReferenceExpression ref)) return false;
+		return baseName.equals(ref.getIdentifier().getName());
+	}
+
+	// Find the earliest alpha-discard statement in main():
+	//   if (albedo.a < threshold) { discard; }
+	// Returns the albedo variable name and insertion index (BEFORE the discard), or null.
+	// If requiredVar is non-null, only matches if the base variable matches.
+	private static AlphaDiscardAnchor findAlphaDiscardAnchorInMain(
+		Root root, TranslationUnit tree, String requiredVar) {
+		CompoundStatement mainBody;
+		try {
+			mainBody = tree.getOneMainDefinitionBody();
+		} catch (Exception e) {
+			return null;
+		}
+
+		ChildNodeList<Statement> statements = mainBody.getStatements();
+
+		for (int i = 0; i < statements.size(); i++) {
+			Statement stmt = statements.get(i);
+			if (!(stmt instanceof SelectionStatement sel)) continue;
+
+			// Check if true-body contains discard
+			if (!containsDiscard(sel.getIfTrue())) continue;
+
+			// Check if condition contains .a member access, extract base variable
+			String alphaVar = findAlphaAccessInExpression(sel.getCondition());
+			if (alphaVar == null) continue;
+
+			// If requiredVar specified, must match
+			if (requiredVar != null && !requiredVar.equals(alphaVar)) continue;
+
+			// Validate: variable must be declared as vec4 in main() scope before this index
+			if (!isVarDeclaredInScope(statements, alphaVar, i)) continue;
+
+			return new AlphaDiscardAnchor(alphaVar, i);
+		}
+
+		return null;
+	}
+
+	// Recursively check if a statement contains a discard
+	private static boolean containsDiscard(Statement stmt) {
+		if (stmt instanceof DiscardStatement) return true;
+		if (stmt instanceof CompoundStatement compound) {
+			for (Statement child : compound.getStatements()) {
+				if (containsDiscard(child)) return true;
+			}
+		}
+		if (stmt instanceof SelectionStatement sel) {
+			if (containsDiscard(sel.getIfTrue())) return true;
+			if (sel.hasIfFalse() && containsDiscard(sel.getIfFalse())) return true;
+		}
+		return false;
+	}
+
+	// Recursively search an expression for .a member access in an ALPHA TEST context.
+	// Only matches `var.a < threshold` or `var.a <= threshold` patterns — NOT `var.a > 0`
+	// (which is a presence check, not an alpha test). This prevents false positives from
+	// compound conditions like `(mask.a > 0.0) && (base_color.a < cutoff)`.
+	private static String findAlphaAccessInExpression(Expression expr) {
+		// Alpha test pattern: var.a < threshold — LEFT side only.
+		// Do NOT check right side — `0.0 < mask.a` is a presence check, not an alpha test.
+		if (expr instanceof io.github.douira.glsl_transformer.ast.node.expression.binary.LessThanExpression ltExpr) {
+			return extractAlphaVarDirect(ltExpr.getLeft());
+		}
+		if (expr instanceof io.github.douira.glsl_transformer.ast.node.expression.binary.LessThanEqualExpression lteExpr) {
+			return extractAlphaVarDirect(lteExpr.getLeft());
+		}
+		// Also accept reversed: threshold > var.a (alpha var on RIGHT only)
+		// Do NOT check left side — `mask.a > 0.0` is a presence check, not an alpha test.
+		if (expr instanceof io.github.douira.glsl_transformer.ast.node.expression.binary.GreaterThanExpression gtExpr) {
+			return extractAlphaVarDirect(gtExpr.getRight());
+		}
+		if (expr instanceof io.github.douira.glsl_transformer.ast.node.expression.binary.GreaterThanEqualExpression gteExpr) {
+			return extractAlphaVarDirect(gteExpr.getRight());
+		}
+		// Recurse into logical operators (&&, ||) to find alpha tests in compound conditions
+		if (expr instanceof io.github.douira.glsl_transformer.ast.node.expression.binary.BinaryExpression binExpr) {
+			String found = findAlphaAccessInExpression(binExpr.getLeft());
+			if (found != null) return found;
+			return findAlphaAccessInExpression(binExpr.getRight());
+		}
+		return null;
+	}
+
+	// Extract the base variable name from a direct .a member access (e.g., base_color.a → "base_color")
+	private static String extractAlphaVarDirect(Expression expr) {
+		if (expr instanceof MemberAccessExpression member) {
+			if ("a".equals(member.getMember().getName())) {
+				Expression operand = member.getOperand();
+				if (operand instanceof ReferenceExpression ref) {
+					return ref.getIdentifier().getName();
+				}
+			}
+		}
+		return null;
+	}
+
+	// Check if a variable is visible at the top-level scope of main() at the given index.
+	// The variable must either be declared at file scope (in/uniform/varying) or as a local
+	// in main() at the top level (not inside a nested block) before the insertion point.
+	private static boolean isVarDeclaredInScope(ChildNodeList<Statement> mainStatements, String varName, int beforeIndex) {
+		// Check top-level statements in main() for a declaration of the variable.
+		// Declaration statements in GLSL: `vec4 varName = ...;` or `vec4 varName;`
+		// These appear as ExpressionStatement wrapping an init, or as declaration nodes.
+		for (int i = 0; i < beforeIndex && i < mainStatements.size(); i++) {
+			Statement stmt = mainStatements.get(i);
+			// Walk all identifiers in this statement looking for the variable name
+			// in a declaration context (TypeAndInitDeclaration member)
+			if (containsDeclarationOf(stmt, varName)) return true;
+		}
+		// If not found in a local declaration, check if the variable is referenced
+		// in any top-level statement (not just ExpressionStatement). This catches
+		// variables declared at file scope (in/uniform/varying) which are always visible.
+		// If the variable is ONLY found inside nested blocks (e.g., block-local), it
+		// might not be in scope at our top-level insertion point — reject it.
+		for (int i = 0; i < mainStatements.size(); i++) {
+			Statement stmt = mainStatements.get(i);
+			if (stmt instanceof ExpressionStatement exprStmt) {
+				if (expressionReferencesVar(exprStmt.getExpression(), varName)) return true;
+			} else if (stmt instanceof SelectionStatement sel) {
+				// Check the condition (top-level scope) — not the body (nested scope)
+				if (expressionReferencesVar(sel.getCondition(), varName)) return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean containsDeclarationOf(Statement stmt, String varName) {
+		// Check if this statement declares the given variable name.
+		// In glsl-transformer, local variable declarations in function bodies appear as
+		// DeclarationStatement nodes. We check via identifier matching on TypeAndInitDeclaration.
+		if (stmt instanceof io.github.douira.glsl_transformer.ast.node.statement.terminal.DeclarationStatement declStmt) {
+			var decl = declStmt.getDeclaration();
+			if (decl instanceof TypeAndInitDeclaration typeDecl) {
+				for (var member : typeDecl.getMembers()) {
+					if (varName.equals(member.getName().getName())) return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// Check if an expression tree references a variable name (shallow check for top-level usage)
+	private static boolean expressionReferencesVar(Expression expr, String varName) {
+		if (expr instanceof ReferenceExpression ref) {
+			return varName.equals(ref.getIdentifier().getName());
+		}
+		if (expr instanceof MemberAccessExpression member) {
+			return expressionReferencesVar(member.getOperand(), varName);
+		}
+		if (expr instanceof AssignmentExpression assign) {
+			return expressionReferencesVar(assign.getLeft(), varName)
+				|| expressionReferencesVar(assign.getRight(), varName);
+		}
+		if (expr instanceof FunctionCallExpression func) {
+			for (Expression param : func.getParameters()) {
+				if (expressionReferencesVar(param, varName)) return true;
+			}
+		}
+		return false;
 	}
 
 	// Resolve the fragment output variable name.
@@ -851,9 +1249,26 @@ public class EntityPatcher {
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 				"flat in int iris_wynncraft_translucency;");
 			// Apply translucency alpha reduction in fragment.
+			// Forward packs: append to end of main() targeting fragment output.
+			// Deferred packs: inject before alpha-discard targeting the albedo variable.
 			String fragOutput = resolveFragOutput(root);
 			if (fragOutput != null) {
+				// FORWARD PATH: existing behavior
 				appendTranslucencyAlpha(t, tree, fragOutput);
+			} else {
+				// DEFERRED PATH: find alpha-discard anchor
+				AlphaDiscardAnchor anchor = findAlphaDiscardAnchorInMain(root, tree, null);
+				if (anchor != null) {
+					CompoundStatement mainBody = tree.getOneMainDefinitionBody();
+					String av = anchor.albedoVar();
+					mainBody.getStatements().addAll(anchor.topLevelInsertBeforeIndex(),
+						t.parseStatements(root, """
+							if (iris_wynncraft_translucency > 0) {
+							    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+							}
+							""".replace("ALBEDO_VAR", av)));
+				}
+				// else: no-op — deferred pack without recognized alpha-discard pattern
 			}
 
 			if (parameters.hasGeometry) {

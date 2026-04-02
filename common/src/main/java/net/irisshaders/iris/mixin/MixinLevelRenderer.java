@@ -265,12 +265,15 @@ public class MixinLevelRenderer {
 		return new OuterWrappedRenderType("iris:is_outline", type, IsOutlineRenderStateShard.INSTANCE);
 	}
 
-	// Defer ITEM_ENTITY_TRANSLUCENT_CULL flush past beginTranslucents() so translucent
-	// entities render with the sky already composited (fixes black halo against sky).
+	// Wynncraft translucent entity deferral (per-mesh, signal-gated).
+	// Start capturing ITEM_ENTITY_TRANSLUCENT_CULL draw calls at the beginning of the render pass.
+	// Only meshes with the Wynncraft translucency signal (vertex color G=254, B=0) are deferred.
+	// Non-signal meshes draw immediately. This fixes both the VFX black halo (by deferring VFX
+	// past beginTranslucents) and the display entity translucency bleed (by not deferring non-VFX).
 	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("HEAD"))
-	private void iris$beginDeferTranslucentEntities(CallbackInfo ci) {
-		ImmediateState.deferItemEntityTranslucentCull = true;
-		ImmediateState.deferredItemEntityTranslucentCullSource = this.renderBuffers.bufferSource();
+	private void iris$beginCaptureTranslucentEntities(CallbackInfo ci) {
+		ImmediateState.captureItemEntityBatches = true;
+		ImmediateState.captureSource = this.renderBuffers.bufferSource();
 	}
 
 	// TODO this needs to be more consistent.
@@ -280,15 +283,16 @@ public class MixinLevelRenderer {
 		HandRenderer.INSTANCE.renderSolid(modelMatrix, Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(true), Minecraft.getInstance().gameRenderer.getMainCamera(), Minecraft.getInstance().gameRenderer, pipeline);
 		Profiler.get().popPush("iris_pre_translucent");
 		pipeline.beginTranslucents();
-		// Stop deferring — the next no-arg endBatch() will flush the deferred buffer
-		// into the post-translucent framebuffer (with sky already composited).
-		ImmediateState.deferItemEntityTranslucentCull = false;
-		ImmediateState.deferredItemEntityTranslucentCullSource = null;
+		// Flush deferred signal-containing meshes now that sky is composited.
+		ImmediateState.flushDeferredDraws();
+		// Stop capturing — subsequent draws proceed normally.
+		ImmediateState.resetCapture();
 	}
 
 	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("RETURN"))
-	private void iris$endDeferTranslucentEntities(CallbackInfo ci) {
-		ImmediateState.deferItemEntityTranslucentCull = false;
-		ImmediateState.deferredItemEntityTranslucentCullSource = null;
+	private void iris$endCaptureTranslucentEntities(CallbackInfo ci) {
+		// Cleanup: close any leftover deferred meshes and reset state.
+		ImmediateState.clearDeferredDraws();
+		ImmediateState.resetCapture();
 	}
 }

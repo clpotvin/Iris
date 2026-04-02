@@ -1,5 +1,12 @@
 package net.irisshaders.iris.vertices;
 
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.MeshData;
+import net.minecraft.client.renderer.rendertype.RenderType;
+
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Some annoying global state needed for rendering.
  */
@@ -12,9 +19,50 @@ public class ImmediateState {
 	public static boolean temporarilyIgnorePass;
 	public static boolean safeToMultiply;
 	public static boolean isRenderingBEs;
-	// When true, endBatch() calls for ITEM_ENTITY_TRANSLUCENT_CULL are deferred
-	// past beginTranslucents() so translucent entities render with sky already composited.
-	// Only applies to the specific BufferSource instance tracked below.
-	public static boolean deferItemEntityTranslucentCull;
-	public static Object deferredItemEntityTranslucentCullSource;
+
+	// ====================================================================================
+	// WYNNCRAFT TRANSLUCENT ENTITY DEFERRAL (per-mesh, signal-gated)
+	// ====================================================================================
+	// Defers only display entity meshes that contain the Wynncraft translucency signal
+	// (vertex color G=254, B=0) past beginTranslucents(), so they render with the sky
+	// already composited. Non-signal meshes flush immediately as normal.
+
+	// When true, ITEM_ENTITY_TRANSLUCENT_CULL draw calls are checked for the signal.
+	public static boolean captureItemEntityBatches;
+	// The BufferSource being tracked (to avoid affecting other buffer sources).
+	public static Object captureSource;
+	// The BufferBuilder currently assigned to ITEM_ENTITY_TRANSLUCENT_CULL.
+	// Set in MixinBufferSource.getBuffer, read in MixinBufferBuilder.fillExtendedData.
+	public static BufferBuilder trackedTranslucentBuilder;
+	// Latched true when any vertex in the current batch has the Wynncraft translucency signal.
+	// Reset after each endBatch draw decision.
+	public static boolean trackedBuilderHasWynnSignal;
+
+	// Queue of deferred mesh draws (signal-containing batches held until beginTranslucents).
+	public record DeferredDraw(RenderType renderType, MeshData meshData) {}
+	public static final List<DeferredDraw> deferredDraws = new ArrayList<>();
+
+	// Flush all deferred draws (called at beginTranslucents).
+	public static void flushDeferredDraws() {
+		for (DeferredDraw draw : deferredDraws) {
+			draw.renderType.draw(draw.meshData);
+		}
+		deferredDraws.clear();
+	}
+
+	// Close and discard any leftover deferred draws (cleanup/error path).
+	public static void clearDeferredDraws() {
+		for (DeferredDraw draw : deferredDraws) {
+			draw.meshData.close();
+		}
+		deferredDraws.clear();
+	}
+
+	// Reset all capture state.
+	public static void resetCapture() {
+		captureItemEntityBatches = false;
+		captureSource = null;
+		trackedTranslucentBuilder = null;
+		trackedBuilderHasWynnSignal = false;
+	}
 }
