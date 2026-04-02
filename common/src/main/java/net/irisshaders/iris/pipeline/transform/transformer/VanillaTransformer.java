@@ -84,8 +84,10 @@ public class VanillaTransformer {
 				"in float iris_LineWidth;");
 
 			if (parameters.inputs.hasTex() && !parameters.isClouds()) {
+				boolean isEntityOverlayUV = parameters.inputs.hasOverlay() && !parameters.inputs.isText()
+					&& root.identifierIndex.has("irisw_uv0");
 				root.replaceReferenceExpressions(t, "gl_MultiTexCoord0",
-					"vec4(iris_UV0, 0.0, 1.0)");
+					isEntityOverlayUV ? "vec4(irisw_uv0, 0.0, 1.0)" : "vec4(iris_UV0, 0.0, 1.0)");
 				tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 					"in vec2 iris_UV0;");
 			} else {
@@ -350,7 +352,10 @@ public class VanillaTransformer {
 				root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(iris_cloudPos, 1.0)");
 				root.replaceReferenceExpressions(t, "gl_Normal", "iris_cloudNormal");
 			} else {
-				root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(iris_Position, 1.0)");
+				boolean isEntityOverlay = parameters.inputs.hasOverlay() && !parameters.inputs.isText()
+					&& root.identifierIndex.has("irisw_pos");
+				root.replaceReferenceExpressions(t, "gl_Vertex",
+					isEntityOverlay ? "vec4(irisw_pos, 1.0)" : "vec4(iris_Position, 1.0)");
 			}
 		}
 

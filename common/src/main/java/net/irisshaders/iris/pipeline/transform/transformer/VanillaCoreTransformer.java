@@ -100,8 +100,20 @@ public class VanillaCoreTransformer {
 		CommonTransformer.upgradeStorageQualifiers(t, tree, root, parameters);
 
 		if (parameters.type == PatchShaderType.VERTEX) {
-			root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(iris_Position, 1.0)");
-			root.rename("vaPosition", "iris_Position");
+			// Redirect position/UV to mutable intermediates when EntityPatcher has injected
+			// the player emote function (irisw_pos/irisw_uv0 hold decoded emote positions).
+			// Use replaceReferenceExpressions (not rename) for the emote path to avoid
+			// renaming declarations — `in vec3 vaPosition;` must not become `in vec3 irisw_pos;`
+			// which would conflict with EntityPatcher's `vec3 irisw_pos;` mutable global.
+			boolean isEntityOverlay = parameters.inputs.hasOverlay() && !parameters.inputs.isText()
+				&& root.identifierIndex.has("irisw_pos");
+			if (isEntityOverlay) {
+				root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(irisw_pos, 1.0)");
+				root.replaceReferenceExpressions(t, "vaPosition", "irisw_pos");
+			} else {
+				root.replaceReferenceExpressions(t, "gl_Vertex", "vec4(iris_Position, 1.0)");
+				root.rename("vaPosition", "iris_Position");
+			}
 			if (parameters.inputs.hasColor()) {
 				// Neutralize Wynncraft glint (G=255) and translucency (G=254) signals to white.
 				// Both get full alpha — translucency is applied fragment-side only to avoid double-multiplication.
@@ -128,8 +140,13 @@ public class VanillaCoreTransformer {
 			}
 			root.rename("vaNormal", "iris_Normal");
 			root.rename("gl_Normal", "iris_Normal");
-			root.rename("vaUV0", "iris_UV0");
-			root.replaceReferenceExpressions(t, "gl_MultiTexCoord0", "vec4(iris_UV0, 0.0, 1.0)");
+			if (isEntityOverlay) {
+				root.replaceReferenceExpressions(t, "vaUV0", "irisw_uv0");
+				root.replaceReferenceExpressions(t, "gl_MultiTexCoord0", "vec4(irisw_uv0, 0.0, 1.0)");
+			} else {
+				root.rename("vaUV0", "iris_UV0");
+				root.replaceReferenceExpressions(t, "gl_MultiTexCoord0", "vec4(iris_UV0, 0.0, 1.0)");
+			}
 			if (parameters.inputs.hasLight()) {
 				root.replaceReferenceExpressions(t, "gl_MultiTexCoord1", "vec4(iris_UV2, 0.0, 1.0)");
 				root.replaceReferenceExpressions(t, "gl_MultiTexCoord2", "vec4(iris_UV2, 0.0, 1.0)");

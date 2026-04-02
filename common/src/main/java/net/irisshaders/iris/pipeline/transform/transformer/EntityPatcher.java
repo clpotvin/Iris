@@ -346,6 +346,185 @@ public class EntityPatcher {
 		}
 		""";
 
+	// ====================================================================================
+	// WYNNCRAFT PLAYER EMOTE SUPPORT
+	// ====================================================================================
+	// Wynncraft's resource pack encodes player emote limb metadata into entity vertex
+	// Y-positions. When Iris replaces vanilla entity shaders with shader pack programs,
+	// the RP's applyPlayer() never runs — encoded positions aren't decoded, UVs aren't
+	// remapped, nearFade doesn't execute. This injects an equivalent function.
+	// ====================================================================================
+
+	// GLSL data for player emote system: struct, limb UV table, radix constants.
+	// Copied verbatim from Wynncraft RP player.glsl.
+	private static final String[] IRISW_PLAYER_DATA = {
+		"""
+		struct irisw_LimbUv {
+		    vec2 faceSizes[6];
+		    vec2 faceOrigins[6];
+		    vec2 overlayOffset;
+		};""",
+		"const int IRISW_Y_POSITION_RADIX = 512;",
+		"const int IRISW_STEVE_ALEX_RADIX = 2;",
+		"const int IRISW_LIMB_FADE_RADIX = 3;",
+		"const int IRISW_LIMB_INDEX_RADIX = 6;",
+		"const float IRISW_SKIN_TEX_SIZE = 64.0;",
+		"const float IRISW_SKIN_TEX_SIZE_INV = 1.0 / 64.0;",
+		"const float IRISW_SOFT_FADE_START_SQ = 0.5;",
+		"const float IRISW_SOFT_FADE_END_SQ = 1.0;",
+		"const float IRISW_HARD_FADE_SQ = 6.0;",
+		"""
+		const irisw_LimbUv IRISW_LIMB_UVS[8] = irisw_LimbUv[](
+		    irisw_LimbUv( // Head
+		        vec2[](
+		            vec2(8.0, 8.0), vec2(8.0, 8.0), vec2(8.0, 8.0),
+		            vec2(8.0, 8.0), vec2(8.0, 8.0), vec2(8.0, 8.0)
+		        ),
+		        vec2[](
+		            vec2(16.0, 0.0), vec2(24.0, 8.0), vec2(8.0, 8.0),
+		            vec2(16.0, 8.0), vec2(24.0, 8.0), vec2(32.0, 8.0)
+		        ),
+		        vec2(32.0, 0.0)
+		    ),
+		    irisw_LimbUv( // Body
+		        vec2[](
+		            vec2(8.0, 4.0), vec2(8.0, 4.0), vec2(4.0, 12.0),
+		            vec2(8.0, 12.0), vec2(4.0, 12.0), vec2(8.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(28.0, 16.0), vec2(36.0, 20.0), vec2(20.0, 20.0),
+		            vec2(28.0, 20.0), vec2(32.0, 20.0), vec2(40.0, 20.0)
+		        ),
+		        vec2(0.0, 16.0)
+		    ),
+		    irisw_LimbUv( // Left Arm (Steve)
+		        vec2[](
+		            vec2(4.0, 4.0), vec2(4.0, 4.0), vec2(4.0, 12.0),
+		            vec2(4.0, 12.0), vec2(4.0, 12.0), vec2(4.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(40.0, 48.0), vec2(44.0, 52.0), vec2(36.0, 52.0),
+		            vec2(40.0, 52.0), vec2(44.0, 52.0), vec2(48.0, 52.0)
+		        ),
+		        vec2(16.0, 0.0)
+		    ),
+		    irisw_LimbUv( // Right Arm (Steve)
+		        vec2[](
+		            vec2(4.0, 4.0), vec2(4.0, 4.0), vec2(4.0, 12.0),
+		            vec2(4.0, 12.0), vec2(4.0, 12.0), vec2(4.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(48.0, 16.0), vec2(52.0, 20.0), vec2(44.0, 20.0),
+		            vec2(48.0, 20.0), vec2(52.0, 20.0), vec2(56.0, 20.0)
+		        ),
+		        vec2(0.0, 16.0)
+		    ),
+		    irisw_LimbUv( // Left Leg
+		        vec2[](
+		            vec2(4.0, 4.0), vec2(4.0, 4.0), vec2(4.0, 12.0),
+		            vec2(4.0, 12.0), vec2(4.0, 12.0), vec2(4.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(24.0, 48.0), vec2(28.0, 52.0), vec2(20.0, 52.0),
+		            vec2(24.0, 52.0), vec2(28.0, 52.0), vec2(32.0, 52.0)
+		        ),
+		        vec2(-16.0, 0.0)
+		    ),
+		    irisw_LimbUv( // Right Leg
+		        vec2[](
+		            vec2(4.0, 4.0), vec2(4.0, 4.0), vec2(4.0, 12.0),
+		            vec2(4.0, 12.0), vec2(4.0, 12.0), vec2(4.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(8.0, 16.0), vec2(12.0, 20.0), vec2(4.0, 20.0),
+		            vec2(8.0, 20.0), vec2(12.0, 20.0), vec2(16.0, 20.0)
+		        ),
+		        vec2(0.0, 16.0)
+		    ),
+		    irisw_LimbUv( // Left Arm (Alex)
+		        vec2[](
+		            vec2(3.0, 4.0), vec2(3.0, 4.0), vec2(4.0, 12.0),
+		            vec2(3.0, 12.0), vec2(4.0, 12.0), vec2(3.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(39.0, 48.0), vec2(42.0, 52.0), vec2(36.0, 52.0),
+		            vec2(39.0, 52.0), vec2(43.0, 52.0), vec2(46.0, 52.0)
+		        ),
+		        vec2(16.0, 0.0)
+		    ),
+		    irisw_LimbUv( // Right Arm (Alex)
+		        vec2[](
+		            vec2(3.0, 4.0), vec2(3.0, 4.0), vec2(4.0, 12.0),
+		            vec2(3.0, 12.0), vec2(4.0, 12.0), vec2(3.0, 12.0)
+		        ),
+		        vec2[](
+		            vec2(47.0, 16.0), vec2(50.0, 20.0), vec2(44.0, 20.0),
+		            vec2(47.0, 20.0), vec2(51.0, 20.0), vec2(54.0, 20.0)
+		        ),
+		        vec2(0.0, 16.0)
+		    )
+		);""",
+		"const int IRISW_STEVE_OFFSETS[6] = int[](0, 0, 0, 0, 0, 0);",
+		"const int IRISW_ALEX_OFFSETS[6] = int[](0, 0, 4, 4, 0, 0);",
+		"const int IRISW_FACE_RIGHT = 2;",
+		"const int IRISW_FACE_FRONT = 3;",
+		"const int IRISW_FACE_LEFT = 4;",
+		"const int IRISW_HEAD = 0;",
+		"const int IRISW_BODY = 1;",
+	};
+
+	// Player emote function — decodes metadata from Y-position, remaps UV, computes nearFade.
+	// Ported from Wynncraft RP player.glsl applyPlayer().
+	private static final String IRISW_APPLY_PLAYER_FUNC = """
+		void irisw_applyPlayer(inout vec3 pos, inout vec2 uv, out float nearFade) {
+		    nearFade = 1.0;
+		    if (pos.y < 2.0 * float(IRISW_Y_POSITION_RADIX)) return;
+		    if (iris_transforms.ModelViewMat == mat4(1.0)) return;
+
+		    int metadata = int(pos.y) - 2 * IRISW_Y_POSITION_RADIX;
+
+		    int steveAlex = (metadata / IRISW_Y_POSITION_RADIX) % IRISW_STEVE_ALEX_RADIX;
+		    int limbFade = (metadata / IRISW_Y_POSITION_RADIX / IRISW_STEVE_ALEX_RADIX) % IRISW_LIMB_FADE_RADIX;
+		    int limbIndex = (metadata / IRISW_Y_POSITION_RADIX / IRISW_STEVE_ALEX_RADIX / IRISW_LIMB_FADE_RADIX) % IRISW_LIMB_INDEX_RADIX;
+
+		    pos.y = mod(pos.y, float(IRISW_Y_POSITION_RADIX)) - (float(IRISW_Y_POSITION_RADIX) / 2.0 - 1.0);
+
+		    int face = (gl_VertexID % 24) / 4;
+		    int overlay = (gl_VertexID / 24) % 2;
+
+		    int limbUvOffset = steveAlex == 0 ? IRISW_STEVE_OFFSETS[limbIndex] : IRISW_ALEX_OFFSETS[limbIndex];
+		    irisw_LimbUv limbUv = IRISW_LIMB_UVS[limbIndex + limbUvOffset];
+		    irisw_LimbUv headUv = IRISW_LIMB_UVS[0];
+
+		    uv -= float(overlay) * headUv.overlayOffset * IRISW_SKIN_TEX_SIZE_INV;
+
+		    float faceDivideX = (headUv.faceOrigins[IRISW_FACE_RIGHT].x + headUv.faceOrigins[IRISW_FACE_LEFT].x) / 2.0;
+		    int divide = int(uv.x >= faceDivideX * IRISW_SKIN_TEX_SIZE_INV);
+
+		    face += divide * int(face == IRISW_FACE_RIGHT) * (IRISW_FACE_LEFT - IRISW_FACE_RIGHT);
+		    face -= (1 - divide) * int(face == IRISW_FACE_LEFT) * (IRISW_FACE_LEFT - IRISW_FACE_RIGHT);
+
+		    vec2 sizeRatio = limbUv.faceSizes[face] / headUv.faceSizes[face];
+		    vec2 originOffset = limbUv.faceOrigins[face] - (headUv.faceOrigins[face] * sizeRatio);
+
+		    uv *= sizeRatio;
+		    uv += originOffset * IRISW_SKIN_TEX_SIZE_INV;
+
+		    uv += float(overlay) * limbUv.overlayOffset * IRISW_SKIN_TEX_SIZE_INV;
+
+		    vec4 blockPos = iris_transforms.ModelViewMat * vec4(pos, 1.0);
+		    float blockDistSq = dot(blockPos.xyz, blockPos.xyz);
+
+		    float softFade = smoothstep(IRISW_SOFT_FADE_START_SQ, IRISW_SOFT_FADE_END_SQ, blockDistSq);
+		    float hardFade = step(IRISW_HARD_FADE_SQ, blockDistSq);
+
+		    nearFade = mix(1.0, mix(softFade, hardFade, limbFade == 2), limbFade != 0);
+
+		    int headBody = int(limbIndex == IRISW_HEAD || limbIndex == IRISW_BODY);
+		    nearFade = mix(1.0, nearFade, headBody);
+		}
+		""";
+
 	private static final AutoHintedMatcher<ExternalDeclaration> uniformVec4EntityColor = new AutoHintedMatcher<>(
 		"uniform vec4 entityColor;", ParseShape.EXTERNAL_DECLARATION);
 
@@ -379,6 +558,9 @@ public class EntityPatcher {
 				"flat out int iris_wynncraft_translucency;",
 				"out vec2 iris_wynncraft_texcoord;",
 				"out vec2 iris_wynncraft_midtex;",
+				"vec3 irisw_pos;",
+				"vec2 irisw_uv0;",
+				"out float iris_wynncraft_nearfade;",
 				parameters.inputs.isIE() ? "uniform ivec2 iris_OverlayUV;" : "in ivec2 iris_UV1;");
 
 			// Create our own main function to wrap the existing main function, so that we
@@ -394,7 +576,12 @@ public class EntityPatcher {
 				IRISW_TRANSLUCENCY_DETECT,
 				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : 0;",
 				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;",
-				"iris_wynncraft_texcoord = iris_UV0;",
+				"irisw_pos = iris_Position;",
+				"irisw_uv0 = iris_UV0;",
+				"float irisw_nf = 1.0;",
+				"irisw_applyPlayer(irisw_pos, irisw_uv0, irisw_nf);",
+				"iris_wynncraft_nearfade = irisw_nf;",
+				"iris_wynncraft_texcoord = irisw_uv0;",
 				hasMidTexCoord ? "iris_wynncraft_midtex = mc_midTexCoord.xy;" : "iris_wynncraft_midtex = vec2(0.0);",
 				"iris_vertexColor = (iris_wynn_isSignal || iris_wynn_isTranslucent) ? vec4(1.0) : iris_Color;",
 				// Workaround for a shader pack bug:
@@ -402,6 +589,12 @@ public class EntityPatcher {
 				// Some shader packs incorrectly ignore the alpha value, and assume that rgb
 				// will be zero if there is no hit flash, we try to emulate that here
 				"entityColor.rgb *= float(entityColor.a != 0.0);");
+
+			// Inject player emote function and data into vertex shader.
+			// Data goes to BEFORE_DECLARATIONS (struct, constants, arrays).
+			// Function goes to BEFORE_FUNCTIONS (needs data declared above it).
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_APPLY_PLAYER_FUNC);
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS, IRISW_PLAYER_DATA);
 		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_CONTROL) {
 			// replace read references to grab the color from the first vertex.
 			root.replaceReferenceExpressions(t, "entityColor", "entityColor[gl_InvocationID]");
@@ -419,14 +612,17 @@ public class EntityPatcher {
 				"in vec2 iris_wynncraft_texcoord[];",
 				"out vec2 iris_wynncraft_texcoordTCS[];",
 				"in vec2 iris_wynncraft_midtex[];",
-				"out vec2 iris_wynncraft_midtexTCS[];");
+				"out vec2 iris_wynncraft_midtexTCS[];",
+				"in float iris_wynncraft_nearfade[];",
+				"out float iris_wynncraft_nearfadeTCS[];");
 			tree.prependMainFunctionBody(t,
 				"entityColorTCS = entityColor[gl_InvocationID];",
 				"iris_vertexColorTCS[gl_InvocationID] = iris_vertexColor[gl_InvocationID];",
 				"iris_wynncraft_glintTCS[gl_InvocationID] = iris_wynncraft_glint[gl_InvocationID];",
 				"iris_wynncraft_translucencyTCS[gl_InvocationID] = iris_wynncraft_translucency[gl_InvocationID];",
 				"iris_wynncraft_texcoordTCS[gl_InvocationID] = iris_wynncraft_texcoord[gl_InvocationID];",
-				"iris_wynncraft_midtexTCS[gl_InvocationID] = iris_wynncraft_midtex[gl_InvocationID];");
+				"iris_wynncraft_midtexTCS[gl_InvocationID] = iris_wynncraft_midtex[gl_InvocationID];",
+				"iris_wynncraft_nearfadeTCS[gl_InvocationID] = iris_wynncraft_nearfade[gl_InvocationID];");
 		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_EVAL) {
 			// replace read references to grab the color from the first vertex.
 			root.replaceReferenceExpressions(t, "entityColor", "entityColorTCS");
@@ -444,14 +640,17 @@ public class EntityPatcher {
 				"in vec2 iris_wynncraft_texcoordTCS[];",
 				"out vec2 iris_wynncraft_texcoordTES;",
 				"in vec2 iris_wynncraft_midtexTCS[];",
-				"out vec2 iris_wynncraft_midtexTES;");
+				"out vec2 iris_wynncraft_midtexTES;",
+				"in float iris_wynncraft_nearfadeTCS[];",
+				"out float iris_wynncraft_nearfadeTES;");
 			tree.prependMainFunctionBody(t,
 				"entityColorTES = entityColorTCS;",
 				"iris_vertexColorTES = iris_vertexColorTCS[0];",
 				"iris_wynncraft_glintTES = iris_wynncraft_glintTCS[0];",
 				"iris_wynncraft_translucencyTES = iris_wynncraft_translucencyTCS[0];",
 				"iris_wynncraft_texcoordTES = iris_wynncraft_texcoordTCS[0];",
-				"iris_wynncraft_midtexTES = iris_wynncraft_midtexTCS[0];");
+				"iris_wynncraft_midtexTES = iris_wynncraft_midtexTCS[0];",
+				"iris_wynncraft_nearfadeTES = iris_wynncraft_nearfadeTCS[0];");
 		} else if (parameters.type.glShaderType == ShaderType.GEOMETRY) {
 			// replace read references to grab the color from the first vertex.
 			root.replaceReferenceExpressions(t, "entityColor", "entityColor[0]");
@@ -469,14 +668,17 @@ public class EntityPatcher {
 				"in vec2 iris_wynncraft_texcoord[];",
 				"out vec2 iris_wynncraft_texcoordGS;",
 				"in vec2 iris_wynncraft_midtex[];",
-				"out vec2 iris_wynncraft_midtexGS;");
+				"out vec2 iris_wynncraft_midtexGS;",
+				"in float iris_wynncraft_nearfade[];",
+				"out float iris_wynncraft_nearfadeGS;");
 			tree.prependMainFunctionBody(t,
 				"entityColorGS = entityColor[0];",
 				"iris_vertexColorGS = iris_vertexColor[0];",
 				"iris_wynncraft_glintGS = iris_wynncraft_glint[0];",
 				"iris_wynncraft_translucencyGS = iris_wynncraft_translucency[0];",
 				"iris_wynncraft_texcoordGS = iris_wynncraft_texcoord[0];",
-				"iris_wynncraft_midtexGS = iris_wynncraft_midtex[0];");
+				"iris_wynncraft_midtexGS = iris_wynncraft_midtex[0];",
+				"iris_wynncraft_nearfadeGS = iris_wynncraft_nearfade[0];");
 
 			if (parameters.hasTesselation) {
 				root.rename("iris_vertexColor", "iris_vertexColorTES");
@@ -485,6 +687,7 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
+				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeTES");
 			}
 		} else if (parameters.type.glShaderType == ShaderType.FRAGMENT) {
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
@@ -492,9 +695,12 @@ public class EntityPatcher {
 				"flat in int iris_wynncraft_glint;",
 				"flat in int iris_wynncraft_translucency;",
 				"in vec2 iris_wynncraft_texcoord;",
-				"in vec2 iris_wynncraft_midtex;");
+				"in vec2 iris_wynncraft_midtex;",
+				"in float iris_wynncraft_nearfade;");
 
-			tree.prependMainFunctionBody(t, "float iris_vertexColorAlpha = iris_vertexColor.a;");
+			tree.prependMainFunctionBody(t,
+				"float iris_vertexColorAlpha = iris_vertexColor.a;",
+				"if (iris_wynncraft_nearfade <= 0.01) discard;");
 
 			// Inject Sampler0 if not already declared (needed by glint effects to sample entity texture).
 			// Entity textures are always on texture unit 0; Sampler0 is the conventional name.
@@ -552,6 +758,11 @@ public class EntityPatcher {
 				// Translucency: reduce fragment alpha after shader pack renders at full RGB intensity.
 				// This avoids double-alpha-multiplication (black fringing against bright backgrounds).
 				appendTranslucencyAlpha(t, tree, fragOutput);
+
+				// Player emote nearFade: multiply entire fragment output by fade factor.
+				// Non-emote entities have nearFade=1.0 (no effect). Emote limbs fade based on
+				// distance to camera (soft/hard fade), with head/body exempt.
+				tree.appendMainFunctionBody(t, fragOutput + " *= iris_wynncraft_nearfade;");
 			}
 
 			// Different output name to avoid a name collision in the geometry or tessellation stage.
@@ -562,6 +773,7 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyGS");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordGS");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexGS");
+				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeGS");
 			} else if (parameters.hasTesselation) {
 				root.rename("entityColor", "entityColorTES");
 				root.rename("iris_vertexColor", "iris_vertexColorTES");
@@ -569,6 +781,7 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
+				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeTES");
 			}
 		}
 	}
