@@ -417,6 +417,20 @@ public class EntityPatcher {
 		}
 		""";
 
+	// Translucency code for the DEFERRED path. Currently a no-op placeholder —
+	// deferred packs don't alpha-blend at the GBuffer stage, and dithered discard
+	// doesn't produce acceptable visual results. True deferred translucency requires
+	// routing VFX entities through the pack's forward translucent pass
+	// (e.g., gbuffers_entities_translucent in Photon).
+	// TODO: Investigate routing translucent entities to the forward translucent path.
+	private static final String IRISW_DEFERRED_TRANSLUCENCY_CODE = """
+		if (iris_wynncraft_translucency > 0) {
+		    // Deferred translucency: reduce alpha for packs that consume it via discard/dither.
+		    // This has limited visual effect in fully deferred packs without alpha blending.
+		    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+		}
+		""";
+
 	// ====================================================================================
 	// WYNNCRAFT PLAYER EMOTE SUPPORT
 	// ====================================================================================
@@ -819,14 +833,13 @@ public class EntityPatcher {
 						overlayAnchor != null ? overlayAnchor.albedoVar() : null);
 
 					// 1. Translucency at alpha-discard anchor (BEFORE discard)
+					// Deferred packs don't alpha-blend at GBuffer stage, so use dithered discard
+					// instead of alpha reduction for screen-door transparency.
 					int translucencyStmtsInserted = 0;
 					if (discardAnchor != null) {
 						String av = discardAnchor.albedoVar();
-						Collection<? extends Statement> stmts = t.parseStatements(root, """
-							if (iris_wynncraft_translucency > 0) {
-							    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
-							}
-							""".replace("ALBEDO_VAR", av));
+						Collection<? extends Statement> stmts = t.parseStatements(root,
+							IRISW_DEFERRED_TRANSLUCENCY_CODE.replace("ALBEDO_VAR", av));
 						translucencyStmtsInserted = stmts.size();
 						mainBody.getStatements().addAll(discardAnchor.topLevelInsertBeforeIndex(), stmts);
 					}
@@ -1188,6 +1201,8 @@ public class EntityPatcher {
 	// EntityPatcher runs BEFORE CommonTransformer, so gl_FragData[0] hasn't been renamed
 	// to iris_FragData0 yet. We check for the pre-rename names too, but always return
 	// the post-rename name since our appended code executes after all transformations.
+	// Also scans for layout-qualified output declarations (e.g., Photon's translucent pass
+	// uses `layout(location=0) out vec4 fragment_color` which is a forward RGBA output).
 	private static String resolveFragOutput(Root root) {
 		if (root.identifierIndex.has("iris_FragData0")) {
 			return "iris_FragData0";
@@ -1197,6 +1212,54 @@ public class EntityPatcher {
 		} else if (root.identifierIndex.has("gl_FragData") || root.identifierIndex.has("gl_FragColor")) {
 			// Compat profile — will be renamed to iris_FragData0 by CommonTransformer later
 			return "iris_FragData0";
+		}
+		// Fallback: scan for layout(location=0) out vec4 declarations.
+		// This catches forward translucent passes in deferred packs (e.g., Photon's
+		// gbuffers_entities_translucent outputs `fragment_color` with alpha blending).
+		// Only match location=0 outputs — these are the primary color target.
+		for (DeclarationExternalDeclaration decl : root.nodeIndex.get(DeclarationExternalDeclaration.class)) {
+			if (!(decl.getDeclaration() instanceof TypeAndInitDeclaration typeDecl)) continue;
+			var fullySpecified = typeDecl.getType();
+			if (fullySpecified == null) continue;
+			var qualifier = fullySpecified.getTypeQualifier();
+			if (qualifier == null) continue;
+			boolean hasOut = false;
+			boolean hasLocation0 = false;
+			for (var part : qualifier.getParts()) {
+				if (part instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.StorageQualifier sq
+					&& sq.storageType == io.github.douira.glsl_transformer.ast.node.type.qualifier.StorageQualifier.StorageType.OUT) {
+					hasOut = true;
+				}
+				if (part instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.LayoutQualifier layout) {
+					for (var layoutPart : layout.getParts()) {
+						if (layoutPart instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.NamedLayoutQualifierPart named
+							&& "location".equals(named.getName().getName())
+							&& named.getExpression() instanceof io.github.douira.glsl_transformer.ast.node.expression.LiteralExpression lit
+							&& lit.isInteger() && lit.getInteger() == 0) {
+							hasLocation0 = true;
+						}
+					}
+				}
+			}
+			if (hasOut && hasLocation0) {
+				// Found layout(location=0) out — get the variable name.
+				// Only use it if the variable is assigned as a WHOLE vec4 somewhere in
+				// the shader (forward rendering). Deferred GBuffer outputs are only assigned
+				// component-wise (e.g., gbuffer_data_0.x = pack(...)), so this distinguishes
+				// forward translucent passes from deferred solid passes.
+				for (var member : typeDecl.getMembers()) {
+					String name = member.getName().getName();
+					// Check for whole-variable assignment (forward) vs component-only (deferred)
+					for (Identifier id : root.identifierIndex.get(name)) {
+						if (id.getParent() instanceof ReferenceExpression ref
+							&& ref.getParent() instanceof AssignmentExpression assign
+							&& assign.getLeft() == ref) {
+							// Direct assignment to the variable (not .x, .rgb, etc.) — forward output
+							return name;
+						}
+					}
+				}
+			}
 		}
 		return null;
 	}
@@ -1257,16 +1320,13 @@ public class EntityPatcher {
 				appendTranslucencyAlpha(t, tree, fragOutput);
 			} else {
 				// DEFERRED PATH: find alpha-discard anchor
+				// Use dithered discard for deferred packs (no alpha blending at GBuffer stage).
 				AlphaDiscardAnchor anchor = findAlphaDiscardAnchorInMain(root, tree, null);
 				if (anchor != null) {
 					CompoundStatement mainBody = tree.getOneMainDefinitionBody();
 					String av = anchor.albedoVar();
 					mainBody.getStatements().addAll(anchor.topLevelInsertBeforeIndex(),
-						t.parseStatements(root, """
-							if (iris_wynncraft_translucency > 0) {
-							    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
-							}
-							""".replace("ALBEDO_VAR", av)));
+						t.parseStatements(root, IRISW_DEFERRED_TRANSLUCENCY_CODE.replace("ALBEDO_VAR", av)));
 				}
 				// else: no-op — deferred pack without recognized alpha-discard pattern
 			}
