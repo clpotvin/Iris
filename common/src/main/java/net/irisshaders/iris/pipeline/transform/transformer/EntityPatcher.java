@@ -427,7 +427,7 @@ public class EntityPatcher {
 		if (iris_wynncraft_translucency > 0) {
 		    // Deferred translucency: reduce alpha for packs that consume it via discard/dither.
 		    // This has limited visual effect in fully deferred packs without alpha blending.
-		    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+		    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.013, 0.0, 1.0));
 		}
 		""";
 
@@ -1320,13 +1320,13 @@ public class EntityPatcher {
 		if (premultiplied) {
 			tree.appendMainFunctionBody(t, """
 				if (iris_wynncraft_translucency > 0) {
-				    FRAG_OUTPUT *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+				    FRAG_OUTPUT *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.013, 0.0, 1.0));
 				}
 				""".replace("FRAG_OUTPUT", fragOutput));
 		} else {
 			tree.appendMainFunctionBody(t, """
 				if (iris_wynncraft_translucency > 0) {
-				    FRAG_OUTPUT.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+				    FRAG_OUTPUT.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.013, 0.0, 1.0));
 				}
 				""".replace("FRAG_OUTPUT", fragOutput));
 		}
