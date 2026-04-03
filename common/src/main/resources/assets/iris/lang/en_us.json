@@ -72,6 +72,8 @@
   "pack.iris.list.label": "+ Drag and Drop Shader Packs to add",
   "options.iris.glintBrightness": "Glint Brightness",
   "options.iris.glintBrightness.tooltip": "Controls the brightness of Wynncraft glint effects. Lower values dim effects in bright areas, higher values let them shine through.",
+  "options.iris.tintBrightness": "Tint Brightness",
+  "options.iris.tintBrightness.tooltip": "Controls the brightness of Wynncraft armor/weapon tints (color recolors). Adjust if tints appear too bright or too dim.",
   "label.iris.true": "On",
   "label.iris.false": "Off"
 }

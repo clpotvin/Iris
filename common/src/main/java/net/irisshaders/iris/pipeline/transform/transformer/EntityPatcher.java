@@ -131,6 +131,7 @@ public class EntityPatcher {
 		vec3 irisW_tint(vec3 tex, vec3 tintColor, float contrast) {
 		    float brightness = pow(dot(tex, vec3(0.2126, 0.7152, 0.0722)), 0.7);
 		    vec3 color = tintColor * brightness;
+		    color = mix(color, vec3(1.0), smoothstep(0.7, 1.0, brightness) * contrast);
 		    return color;
 		}""",
 		"""
@@ -213,6 +214,8 @@ public class EntityPatcher {
 		vec4 irisW_applyGlint(int iW_id, vec2 iW_uv, vec2 iW_eUV, vec2 iW_sUV, vec2 iW_midTex, vec2 iW_rUV, vec2 iW_texSize, bool iW_isAtlas, float iW_time, vec4 iW_tex, vec4 iW_in) {
 		    vec4 iW_out = iW_in;
 		    bool iW_applyLighting = true;
+		    bool iW_isTint = (iW_id >= 15 && iW_id <= 24);
+		    bool iW_knownEffect = (iW_id >= 1 && iW_id <= 31);
 		    switch (iW_id) {
 		        case 1:  { iW_out = irisW_shiny(irisW_rgb(255, 200, 100), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
 		        case 2:  { iW_out.a *= 0.5; iW_applyLighting = false; break; }
@@ -351,10 +354,19 @@ public class EntityPatcher {
 		        case 30: { iW_out = irisW_shiny(irisW_rgb(255, 85,  85 ), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
 		        case 31: { iW_out = irisW_shiny(irisW_rgb(170, 0,   170), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
 		    }
-		    if (iW_applyLighting) {
+		    if (iW_applyLighting && iW_knownEffect) {
 		        float iW_texLuma = max(dot(iW_tex.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.001);
-		        float iW_inLuma = dot(iW_in.rgb, vec3(0.2126, 0.7152, 0.0722));
-		        iW_out.rgb *= min(iW_inLuma / iW_texLuma * iris_glintBrightness, 1.0);
+		        float iW_inLuma  = max(dot(iW_in.rgb,  vec3(0.2126, 0.7152, 0.0722)), 0.0);
+		        if (iW_isTint) {
+		            float iW_tintRatio = iW_inLuma / iW_texLuma * iris_tintBrightness;
+		            iW_out.rgb *= clamp(iW_tintRatio, 0.0, 4.0);
+		            vec3 iW_litChroma = iW_inLuma > 0.001 ? iW_in.rgb / iW_inLuma : vec3(1.0);
+		            iW_litChroma /= max(dot(iW_litChroma, vec3(0.2126, 0.7152, 0.0722)), 0.001);
+		            iW_out.rgb *= mix(vec3(1.0), clamp(iW_litChroma, vec3(0.7), vec3(1.3)), 0.35);
+		        } else {
+		            float iW_ratio = iW_inLuma / iW_texLuma * iris_glintBrightness;
+		            iW_out.rgb *= min(iW_ratio, 1.0);
+		        }
 		    }
 		    return iW_out;
 		}
@@ -793,6 +805,7 @@ public class EntityPatcher {
 				tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform sampler2D Sampler0;");
 			}
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
 
 			// Inject Wynncraft glint GLSL helpers and apply function.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.

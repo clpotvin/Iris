@@ -76,6 +76,8 @@ public final class CommonUniforms {
 
 		// Wynncraft glint brightness (user-configurable, 50-200%)
 		uniforms.uniform1f("iris_glintBrightness", (FloatSupplier) () -> IrisVideoSettings.glintBrightness / 100.0f, listener -> {});
+		// Wynncraft tint brightness (user-configurable, 0-150%)
+		uniforms.uniform1f("iris_tintBrightness", (FloatSupplier) () -> IrisVideoSettings.tintBrightness / 100.0f, listener -> {});
 
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,
 		//       but we do. How will custom uniforms depending on atlasSize work?

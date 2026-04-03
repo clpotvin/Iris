@@ -178,11 +178,13 @@ public class IrisConfig {
 			IrisVideoSettings.shadowDistance = Integer.parseInt(properties.getProperty("maxShadowRenderDistance", "32"));
 			IrisVideoSettings.colorSpace = ColorSpace.valueOf(properties.getProperty("colorSpace", "SRGB"));
 			IrisVideoSettings.glintBrightness = Integer.parseInt(properties.getProperty("glintBrightness", "110"));
+			IrisVideoSettings.tintBrightness = Integer.parseInt(properties.getProperty("tintBrightness", "75"));
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
 			IrisVideoSettings.shadowDistance = 32;
 			IrisVideoSettings.colorSpace = ColorSpace.SRGB;
 			IrisVideoSettings.glintBrightness = 110;
+			IrisVideoSettings.tintBrightness = 75;
 			save();
 		}
 
@@ -208,6 +210,7 @@ public class IrisConfig {
 		properties.setProperty("maxShadowRenderDistance", String.valueOf(IrisVideoSettings.shadowDistance));
 		properties.setProperty("colorSpace", IrisVideoSettings.colorSpace.name());
 		properties.setProperty("glintBrightness", String.valueOf(IrisVideoSettings.glintBrightness));
+		properties.setProperty("tintBrightness", String.valueOf(IrisVideoSettings.tintBrightness));
 		// NB: This uses ISO-8859-1 with unicode escapes as the encoding
 		try (OutputStream os = Files.newOutputStream(propertiesPath)) {
 			properties.store(os, COMMENT);
