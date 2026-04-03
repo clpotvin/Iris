@@ -43,6 +43,28 @@ public class GlShader extends GlResource {
 		int result = GlStateManager.glGetShaderi(handle, GL20C.GL_COMPILE_STATUS);
 
 		if (result != GL20C.GL_TRUE) {
+			LOGGER.error("=== SHADER COMPILATION FAILED: {} ({}) ===", name, type.name());
+			LOGGER.error("Error log: {}", log);
+			// Dump source lines around the error for debugging
+			try {
+				String[] lines = src.split("\n");
+				// Try to extract line number from error message (format: "0:LINE(COL): error: ...")
+				int errorLine = -1;
+				for (String part : log.split("[:\\s]+")) {
+					try { errorLine = Integer.parseInt(part); if (errorLine > 0) break; } catch (NumberFormatException ignored) {}
+				}
+				if (errorLine > 0 && errorLine <= lines.length) {
+					int start = Math.max(0, errorLine - 5);
+					int end = Math.min(lines.length, errorLine + 5);
+					StringBuilder context = new StringBuilder("Source context (lines ").append(start + 1).append("-").append(end).append("):\n");
+					for (int i = start; i < end; i++) {
+						context.append(i == errorLine - 1 ? ">>> " : "    ").append(i + 1).append(": ").append(lines[i]).append("\n");
+					}
+					LOGGER.error(context.toString());
+				}
+			} catch (Exception e) {
+				LOGGER.error("Failed to extract source context", e);
+			}
 			throw new ShaderCompileException(name, log);
 		}
 

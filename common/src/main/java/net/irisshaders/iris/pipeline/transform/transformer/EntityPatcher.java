@@ -808,13 +808,14 @@ public class EntityPatcher {
 			// Apply glint and translucency effects.
 			// Forward packs: append to end of main() targeting the fragment output.
 			// Deferred packs: inject mid-main targeting the albedo variable before GBuffer packing.
-			String fragOutput = resolveFragOutput(root);
+			FragOutput fragOutput = resolveFragOutput(root);
 
 			if (fragOutput != null) {
 				// FORWARD PATH: append effects after main() — existing behavior, unchanged.
-				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fragOutput));
-				appendTranslucencyAlpha(t, tree, fragOutput);
-				tree.appendMainFunctionBody(t, fragOutput + " *= iris_wynncraft_nearfade;");
+				String fo = fragOutput.name();
+				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
+				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
+				tree.appendMainFunctionBody(t, fo + " *= iris_wynncraft_nearfade;");
 			} else {
 				// DEFERRED PATH: mid-main injection for packed GBuffer packs (e.g., Photon).
 				// Two injection points:
@@ -1068,6 +1069,11 @@ public class EntityPatcher {
 			// Validate: variable must be declared as vec4 in main() scope before this index
 			if (!isVarDeclaredInScope(statements, alphaVar, i)) continue;
 
+			// Reject read-only variables (e.g., `in vec4 tint` / `flat in vec4 tint`).
+			// These are input varyings that can't be assigned to. The pack typically
+			// copies them to a local (e.g., `vec4 base_color = tint;`) after the discard.
+			if (isReadOnlyVariable(root, alphaVar)) continue;
+
 			return new AlphaDiscardAnchor(alphaVar, i);
 		}
 
@@ -1162,6 +1168,35 @@ public class EntityPatcher {
 		return false;
 	}
 
+	// Check if a variable is declared as an input varying (read-only in fragment shader).
+	// Scans file-scope declarations for `in vec4 varName` or `flat in vec4 varName`.
+	private static boolean isReadOnlyVariable(Root root, String varName) {
+		for (DeclarationExternalDeclaration decl : root.nodeIndex.get(DeclarationExternalDeclaration.class)) {
+			if (!(decl.getDeclaration() instanceof TypeAndInitDeclaration typeDecl)) continue;
+			// Check if this declaration contains the variable name
+			boolean hasVar = false;
+			for (var member : typeDecl.getMembers()) {
+				if (varName.equals(member.getName().getName())) {
+					hasVar = true;
+					break;
+				}
+			}
+			if (!hasVar) continue;
+			// Check if it has an `in` storage qualifier (input varying = read-only)
+			var fullySpecified = typeDecl.getType();
+			if (fullySpecified == null) continue;
+			var qualifier = fullySpecified.getTypeQualifier();
+			if (qualifier == null) continue;
+			for (var part : qualifier.getParts()) {
+				if (part instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.StorageQualifier sq
+					&& sq.storageType == io.github.douira.glsl_transformer.ast.node.type.qualifier.StorageQualifier.StorageType.IN) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	private static boolean containsDeclarationOf(Statement stmt, String varName) {
 		// Check if this statement declares the given variable name.
 		// In glsl-transformer, local variable declarations in function bodies appear as
@@ -1197,21 +1232,23 @@ public class EntityPatcher {
 		return false;
 	}
 
+	private record FragOutput(String name, boolean premultiplied) {}
+
 	// Resolve the fragment output variable name.
 	// EntityPatcher runs BEFORE CommonTransformer, so gl_FragData[0] hasn't been renamed
 	// to iris_FragData0 yet. We check for the pre-rename names too, but always return
 	// the post-rename name since our appended code executes after all transformations.
 	// Also scans for layout-qualified output declarations (e.g., Photon's translucent pass
 	// uses `layout(location=0) out vec4 fragment_color` which is a forward RGBA output).
-	private static String resolveFragOutput(Root root) {
+	// Returns premultiplied=true for layout-scanned outputs (deferred pack forward passes
+	// typically use premultiplied alpha blending: ONE, ONE_MINUS_SRC_ALPHA).
+	private static FragOutput resolveFragOutput(Root root) {
 		if (root.identifierIndex.has("iris_FragData0")) {
-			return "iris_FragData0";
+			return new FragOutput("iris_FragData0", false);
 		} else if (root.identifierIndex.has("outColor0")) {
-			// Core profile — check before gl_FragData/gl_FragColor to avoid false match
-			return "outColor0";
+			return new FragOutput("outColor0", false);
 		} else if (root.identifierIndex.has("gl_FragData") || root.identifierIndex.has("gl_FragColor")) {
-			// Compat profile — will be renamed to iris_FragData0 by CommonTransformer later
-			return "iris_FragData0";
+			return new FragOutput("iris_FragData0", false);
 		}
 		// Fallback: scan for layout(location=0) out vec4 declarations.
 		// This catches forward translucent passes in deferred packs (e.g., Photon's
@@ -1221,6 +1258,12 @@ public class EntityPatcher {
 			if (!(decl.getDeclaration() instanceof TypeAndInitDeclaration typeDecl)) continue;
 			var fullySpecified = typeDecl.getType();
 			if (fullySpecified == null) continue;
+			// Only match vec4 outputs — vec3 (e.g., shadow shaders) has no .a channel
+			var typeSpecifier = fullySpecified.getTypeSpecifier();
+			if (!(typeSpecifier instanceof BuiltinNumericTypeSpecifier numericType)
+				|| numericType.type != Type.F32VEC4) {
+				continue;
+			}
 			var qualifier = fullySpecified.getTypeQualifier();
 			if (qualifier == null) continue;
 			boolean hasOut = false;
@@ -1254,8 +1297,10 @@ public class EntityPatcher {
 						if (id.getParent() instanceof ReferenceExpression ref
 							&& ref.getParent() instanceof AssignmentExpression assign
 							&& assign.getLeft() == ref) {
-							// Direct assignment to the variable (not .x, .rgb, etc.) — forward output
-							return name;
+							// Direct assignment to the variable (not .x, .rgb, etc.) — forward output.
+							// Layout-scanned outputs are from deferred pack forward passes which
+							// typically use premultiplied alpha (ONE, ONE_MINUS_SRC_ALPHA).
+							return new FragOutput(name, true);
 						}
 					}
 				}
@@ -1266,12 +1311,25 @@ public class EntityPatcher {
 
 	// Append translucency alpha reduction to the fragment shader. Shared by both
 	// patchOverlayColor and patchTranslucencyOnly to keep the logic in sync.
-	private static void appendTranslucencyAlpha(ASTParser t, TranslationUnit tree, String fragOutput) {
-		tree.appendMainFunctionBody(t, """
-			if (iris_wynncraft_translucency > 0) {
-			    FRAG_OUTPUT.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
-			}
-			""".replace("FRAG_OUTPUT", fragOutput));
+	// premultiplied=false (standard packs like BSL): only modify .a — the blend equation
+	//   (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) handles the rgb weighting via alpha.
+	// premultiplied=true (deferred forward passes like Photon translucent): multiply ALL
+	//   channels (rgba) — the blend equation (ONE, ONE_MINUS_SRC_ALPHA) expects rgb to
+	//   already be scaled by alpha.
+	private static void appendTranslucencyAlpha(ASTParser t, TranslationUnit tree, String fragOutput, boolean premultiplied) {
+		if (premultiplied) {
+			tree.appendMainFunctionBody(t, """
+				if (iris_wynncraft_translucency > 0) {
+				    FRAG_OUTPUT *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+				}
+				""".replace("FRAG_OUTPUT", fragOutput));
+		} else {
+			tree.appendMainFunctionBody(t, """
+				if (iris_wynncraft_translucency > 0) {
+				    FRAG_OUTPUT.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.01, 0.0, 1.0));
+				}
+				""".replace("FRAG_OUTPUT", fragOutput));
+		}
 	}
 
 	// Standalone translucency patcher for shaders that have Color but NOT overlay.
@@ -1314,10 +1372,10 @@ public class EntityPatcher {
 			// Apply translucency alpha reduction in fragment.
 			// Forward packs: append to end of main() targeting fragment output.
 			// Deferred packs: inject before alpha-discard targeting the albedo variable.
-			String fragOutput = resolveFragOutput(root);
+			FragOutput fragOutput = resolveFragOutput(root);
 			if (fragOutput != null) {
 				// FORWARD PATH: existing behavior
-				appendTranslucencyAlpha(t, tree, fragOutput);
+				appendTranslucencyAlpha(t, tree, fragOutput.name(), fragOutput.premultiplied());
 			} else {
 				// DEFERRED PATH: find alpha-discard anchor
 				// Use dithered discard for deferred packs (no alpha blending at GBuffer stage).
