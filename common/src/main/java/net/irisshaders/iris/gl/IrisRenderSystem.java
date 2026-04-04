@@ -329,6 +329,21 @@ public class IrisRenderSystem {
 		}
 	}
 
+	/**
+	 * Issue a memory barrier for image load/store operations. Unlike {@link #memoryBarrier}
+	 * which is gated on compute support (GL 4.3), this dispatches through the correct
+	 * entry point for the available image-load-store extension (core 4.2 / ARB / EXT).
+	 */
+	public static void imageMemoryBarrier(int barriers) {
+		RenderSystem.assertOnRenderThread();
+
+		if (GL.getCapabilities().OpenGL42 || GL.getCapabilities().GL_ARB_shader_image_load_store) {
+			GL42C.glMemoryBarrier(barriers);
+		} else if (GL.getCapabilities().GL_EXT_shader_image_load_store) {
+			EXTShaderImageLoadStore.glMemoryBarrierEXT(barriers);
+		}
+	}
+
 	public static boolean supportsBufferBlending() {
 		return GL.getCapabilities().GL_ARB_draw_buffers_blend || GL.getCapabilities().OpenGL40;
 	}

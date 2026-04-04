@@ -106,6 +106,22 @@ public class IrisConfig implements ConfigEntryPoint {
 						.setRange(new Range(25, 150, 5))
 						.setImpact(OptionImpact.LOW)
 					)
+					.addOption(builder.createIntegerOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_skybox_opacity"))
+						.setDefaultValue(100)
+						.setBinding(value -> IrisVideoSettings.wynncraftSkyboxOpacity = value, () -> IrisVideoSettings.wynncraftSkyboxOpacity)
+						.setName(Component.translatable("options.iris.wynncraftSkyboxOpacity"))
+						.setTooltip(Component.translatable("options.iris.wynncraftSkyboxOpacity.tooltip"))
+						.setValueFormatter(ControlValueFormatterImpls.percentage())
+						.setStorageHandler(() -> {
+							try {
+								Iris.getIrisConfig().save();
+							} catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+						})
+						.setRange(new Range(0, 100, 5))
+						.setImpact(OptionImpact.LOW)
+					)
 				)
 			).registerOptionOverlay(Identifier.parse("sodium:quality.filtering_mode"), builder.createEnumOption(Identifier.parse("sodium:quality.filtering_mode"), TextureFilteringMethod.class)
 				.setTooltip(i -> {

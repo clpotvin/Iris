@@ -24,6 +24,7 @@ import io.github.douira.glsl_transformer.ast.transform.ASTInjectionPoint;
 import io.github.douira.glsl_transformer.ast.transform.ASTParser;
 import io.github.douira.glsl_transformer.parser.ParseShape;
 import io.github.douira.glsl_transformer.util.Type;
+import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.pipeline.transform.parameter.VanillaParameters;
 
@@ -89,6 +90,39 @@ public class EntityPatcher {
 	// G range (0.994, 0.998) uniquely matches G=254/255 without overlapping glint (G=255/255).
 	private static final String IRISW_TRANSLUCENCY_DETECT =
 		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
+
+	// ====================================================================================
+	// WYNNCRAFT SKYBOX DETECTION
+	// ====================================================================================
+	// Skybox signal is TEXTURE-based (not vertex-color): textureColor.g ≈ 251/255 and
+	// textureColor.a ≈ 254/255, with the blue channel encoding the skybox variant ID (1-7).
+	// Detection happens in the fragment shader, writing the variant ID to a 1x1 R32I image
+	// via imageAtomicMax. The entity is always discarded to hide display entity geometry.
+	// Two variants: with image support (writes to detection texture) and without (just discards).
+
+	// WITH image load/store support — writes skybox ID then discards
+	private static final String IRISW_SKYBOX_DETECT_WITH_IMAGE = """
+		{
+		    vec4 irisW_skyTex = texture(Sampler0, iris_wynncraft_texcoord);
+		    if (abs(irisW_skyTex.g - 251.0/255.0) < 0.004 &&
+		        abs(irisW_skyTex.a - 254.0/255.0) < 0.004) {
+		        if (iris_wynncraftSkyboxEnabled != 0) {
+		            imageAtomicMax(iris_wynncraftSkyboxDetect, ivec2(0, 0),
+		                max(int(round(irisW_skyTex.b * 255.0)), 1));
+		        }
+		        discard;
+		    }
+		}""";
+
+	// WITHOUT image load/store support — just discards (hides broken entities, shader pack sky shows)
+	private static final String IRISW_SKYBOX_DETECT_NO_IMAGE = """
+		{
+		    vec4 irisW_skyTex = texture(Sampler0, iris_wynncraft_texcoord);
+		    if (abs(irisW_skyTex.g - 251.0/255.0) < 0.004 &&
+		        abs(irisW_skyTex.a - 254.0/255.0) < 0.004) {
+		        discard;
+		    }
+		}""";
 
 	// GLSL helpers for Wynncraft glint effects — one function per element, since
 	// parseAndInjectNodes requires exactly one external declaration per string.
@@ -807,6 +841,19 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
 
+			// Wynncraft skybox detection: inject image uniform + enable flag when image
+			// load/store is available. The uniform iimage2D is bound per-program via
+			// ShaderCreator → tryAddTextureImage. iris_wynncraftSkyboxEnabled is set to 1
+			// only when binding succeeded (prevents imageAtomicMax on unbound unit 0).
+			boolean hasImageLoadStore = IrisRenderSystem.supportsImageLoadStore();
+			if (hasImageLoadStore) {
+				tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+					"uniform iimage2D iris_wynncraftSkyboxDetect;",
+					"uniform int iris_wynncraftSkyboxEnabled;");
+			}
+			String skyboxDetectCode = hasImageLoadStore
+				? IRISW_SKYBOX_DETECT_WITH_IMAGE : IRISW_SKYBOX_DETECT_NO_IMAGE;
+
 			// Inject Wynncraft glint GLSL helpers and apply function.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.
 			// (BEFORE_DECLARATIONS pushes functions before uniforms, breaking GLSL compilers
@@ -825,12 +872,18 @@ public class EntityPatcher {
 
 			if (fragOutput != null) {
 				// FORWARD PATH: append effects after main() — existing behavior, unchanged.
+				// Skybox detection runs first — if it matches, discard immediately.
+				tree.appendMainFunctionBody(t, skyboxDetectCode);
 				String fo = fragOutput.name();
 				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
 				tree.appendMainFunctionBody(t, fo + " *= iris_wynncraft_nearfade;");
 			} else {
 				// DEFERRED PATH: mid-main injection for packed GBuffer packs (e.g., Photon).
+				// Skybox detection runs early — discard skybox entities before GBuffer packing.
+				// This is appended after the nearfade discard that was prepended above.
+				tree.appendMainFunctionBody(t, skyboxDetectCode);
+
 				// Two injection points:
 				// 1. Translucency → BEFORE alpha-discard (so reduced alpha affects discard)
 				// 2. Glint + NearFade → AFTER entityColor overlay (so effects apply to final color)

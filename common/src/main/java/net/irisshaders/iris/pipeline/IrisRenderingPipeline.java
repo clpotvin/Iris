@@ -45,6 +45,7 @@ import net.irisshaders.iris.mixin.LevelRendererAccessor;
 import net.irisshaders.iris.pathways.CenterDepthSampler;
 import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pathways.HorizonRenderer;
+import net.irisshaders.iris.pathways.WynncraftSkyboxRenderer;
 import net.irisshaders.iris.pathways.colorspace.ColorSpace;
 import net.irisshaders.iris.pathways.colorspace.ColorSpaceConverter;
 import net.irisshaders.iris.pathways.colorspace.ColorSpaceFragmentConverter;
@@ -109,11 +110,15 @@ import org.joml.Vector3d;
 import org.joml.Vector4f;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.ARBClearTexture;
+import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GL12C;
 import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL21C;
 import org.lwjgl.opengl.GL30C;
+import org.lwjgl.opengl.GL42C;
 import org.lwjgl.opengl.GL43C;
+import org.lwjgl.opengl.GL44C;
 
 import java.io.IOException;
 import java.util.HashSet;
@@ -150,6 +155,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final ImmutableSet<Integer> flippedAfterPrepare;
 	private final ImmutableSet<Integer> flippedAfterTranslucent;
 	private final HorizonRenderer horizonRenderer = new HorizonRenderer();
+	@Nullable
+	private WynncraftSkyboxRenderer wynncraftSkyboxRenderer;
 	@Nullable
 	private final ComputeProgram[] shadowComputes;
 	private final float sunPathRotation;
@@ -206,6 +213,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private GlSampler normalSampler = GlSampler.MIPPED_NEAREST, specularSampler = GlSampler.MIPPED_NEAREST;
 
 	private int albedoTex;
+
+	// Wynncraft skybox detection: 1x1 R32I texture written by entity shaders via imageAtomicMax.
+	// The post-process skybox shader reads this via texelFetch (no CPU readback).
+	// 0 when image load/store is not supported.
+	private int wynncraftSkyboxDetectTex;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		ShaderPrinter.resetPrintState();
@@ -267,6 +279,22 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			.filter(GlImage::shouldClear)
 			.map(ImageClearPass::create)
 			.collect(ImmutableList.toImmutableList());
+
+		// Wynncraft skybox detection texture (1x1 R32I)
+		if (IrisRenderSystem.supportsImageLoadStore()) {
+			wynncraftSkyboxDetectTex = GlStateManager._genTexture();
+			GlStateManager._bindTexture(wynncraftSkyboxDetectTex);
+			IrisRenderSystem.texImage2D(wynncraftSkyboxDetectTex, GL30C.GL_TEXTURE_2D, 0,
+				GL30C.GL_R32I, 1, 1, 0, GL30C.GL_RED_INTEGER, GL30C.GL_INT, null);
+			GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
+			GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
+			GL12C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL12C.GL_TEXTURE_BASE_LEVEL, 0);
+			GL12C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL12C.GL_TEXTURE_MAX_LEVEL, 0);
+			GlStateManager._bindTexture(0);
+
+			// Create skybox renderer (needs the detection texture)
+			wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height, wynncraftSkyboxDetectTex);
+		}
 
 		if (programSet.getPackDirectives().getParticleRenderingSettings() != ParticleRenderingSettings.UNSET) {
 			this.particleRenderingSettings = programSet.getPackDirectives().getParticleRenderingSettings();
@@ -958,6 +986,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 			customImages.forEach(image -> image.updateNewSize(main.width, main.height));
 
+			if (wynncraftSkyboxRenderer != null) {
+				wynncraftSkyboxRenderer.rebuild(main.width, main.height);
+			}
+
 			this.clearPassesFull.forEach(clearPass -> renderTargets.destroyFramebuffer(clearPass.getFramebuffer()));
 			this.clearPasses.forEach(clearPass -> renderTargets.destroyFramebuffer(clearPass.getFramebuffer()));
 
@@ -1017,6 +1049,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 
+		// Clear Wynncraft skybox detection texture at frame start (prevents stale state
+		// across world switches / pipeline reloads).
+		clearWynncraftSkyboxDetect();
+
 		beginRenderer.renderAll();
 
 		isBeforeTranslucent = true;
@@ -1028,7 +1064,31 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			this.shadowRenderer.renderShadows(worldRenderer, playerCamera, renderState);
 		}
 
+		// Clear skybox detection after shadow pass — shadow-camera writes should not
+		// affect the main-camera detection. Only main entity rendering writes persist.
+		clearWynncraftSkyboxDetect();
+
 		prepareRenderer.renderAll();
+	}
+
+	public int getWynncraftSkyboxDetectTex() {
+		return wynncraftSkyboxDetectTex;
+	}
+
+	private void clearWynncraftSkyboxDetect() {
+		if (wynncraftSkyboxDetectTex != 0) {
+			// Clear the 1x1 R32I texture to 0 via glClearTexImage (GL 4.4) or fallback
+			if (GL.getCapabilities().OpenGL44) {
+				GL44C.glClearTexImage(wynncraftSkyboxDetectTex, 0, GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{0});
+			} else {
+				// Fallback: use texSubImage to write a zero (saves/restores binding state)
+				int prev = GlStateManager._getInteger(GL11C.GL_TEXTURE_BINDING_2D);
+				GlStateManager._bindTexture(wynncraftSkyboxDetectTex);
+				GL11C.glTexSubImage2D(GL11C.GL_TEXTURE_2D, 0, 0, 0, 1, 1,
+					GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{0});
+				GlStateManager._bindTexture(prev);
+			}
+		}
 	}
 
 	@Override
@@ -1088,6 +1148,27 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		removePhaseIfNeeded();
 		compositeRenderer.renderAll();
 		finalPassRenderer.renderFinalPass();
+
+		// Wynncraft skybox post-process: render procedural sky over depth=1.0 pixels.
+		// Runs after all shader pack passes so it works with both forward and deferred packs.
+		if (wynncraftSkyboxRenderer != null) {
+			IrisRenderSystem.imageMemoryBarrier(GL42C.GL_TEXTURE_FETCH_BARRIER_BIT);
+			float opacity = IrisVideoSettings.wynncraftSkyboxOpacity / 100.0f;
+			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+			float gameTime = computeWynncraftGameTime();
+			wynncraftSkyboxRenderer.render(
+				main.getDepthTexture().iris$getGlId(),
+				(GlTexture) main.getColorTexture(),
+				gameTime, opacity);
+		}
+	}
+
+	private float computeWynncraftGameTime() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level != null) {
+			return (float) ((mc.level.getGameTime() + mc.getDeltaTracker().getGameTimeDeltaPartialTick(true)) / 24000.0);
+		}
+		return 0.0f;
 	}
 
 	@Override
@@ -1230,6 +1311,16 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		whitePixel.close();
 
 		horizonRenderer.destroy();
+
+		if (wynncraftSkyboxRenderer != null) {
+			wynncraftSkyboxRenderer.destroy();
+			wynncraftSkyboxRenderer = null;
+		}
+
+		if (wynncraftSkyboxDetectTex != 0) {
+			GlStateManager._deleteTexture(wynncraftSkyboxDetectTex);
+			wynncraftSkyboxDetectTex = 0;
+		}
 
 		GlStateManager._glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, 0);
 		GlStateManager._glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, 0);
