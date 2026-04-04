@@ -105,6 +105,8 @@ public class Iris {
 	private static KeyMapping toggleShadersKeybind;
 	private static KeyMapping shaderpackScreenKeybind;
 	private static KeyMapping wireframeKeybind;
+	// DEBUG: REMOVE BEFORE RELEASE
+	private static KeyMapping debugSkyboxKeybind;
 	// Flag variable used when reloading
 	// Used in favor of queueDefaultShaderPackOptionValues() for resetting as the
 	// behavior is more concrete and therefore is more likely to repair a user's issues
@@ -211,6 +213,24 @@ public class Iris {
 			if (irisConfig.areDebugOptionsEnabled() && minecraft.player != null && !Minecraft.getInstance().isLocalServer()) {
 				minecraft.player.displayClientMessage(Component.literal("No cheating; wireframe only in singleplayer!"), false);
 			}
+		}
+		// DEBUG: REMOVE BEFORE RELEASE — cycle skybox ID with B key
+		if (debugSkyboxKeybind.consumeClick() && minecraft.player != null) {
+			IrisRenderingPipeline.debugSkyboxId = (IrisRenderingPipeline.debugSkyboxId + 1) % 8;
+			String name = switch (IrisRenderingPipeline.debugSkyboxId) {
+				case 0 -> "OFF";
+				case 1 -> "Memory Mist";
+				case 2 -> "Memory Fog";
+				case 3 -> "Stormy";
+				case 4 -> "War Surface";
+				case 5 -> "War Heights";
+				case 6 -> "Light";
+				case 7 -> "Red Lightning";
+				default -> "Unknown";
+			};
+			minecraft.player.displayClientMessage(
+				Component.literal("[WynnIris Debug] Skybox: " + IrisRenderingPipeline.debugSkyboxId + " (" + name + ")"),
+				true);
 		}
 	}
 
@@ -796,6 +816,8 @@ public class Iris {
 		toggleShadersKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.toggleShaders", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, irisKeybindCategory));
 		shaderpackScreenKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.shaderPackSelection", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_O, irisKeybindCategory));
 		wireframeKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.wireframe", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), irisKeybindCategory));
+		// DEBUG: REMOVE BEFORE RELEASE — keybind to cycle skybox IDs for testing
+		debugSkyboxKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.debugSkybox", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, irisKeybindCategory));
 
 		DHCompat.run();
 

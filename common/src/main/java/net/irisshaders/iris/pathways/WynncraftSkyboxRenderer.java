@@ -402,7 +402,12 @@ public class WynncraftSkyboxRenderer {
 		    }
 
 		    float depth = texture(DepthTex, uv).r;
-		    if (depth < 0.9999) {
+		    // Relaxed threshold: Iris's HorizonRenderer renders sky geometry at finite
+		    // depth (~0.995-0.9999 depending on render distance), and block edges have
+		    // depth precision artifacts near 1.0. A threshold of 0.999 catches the
+		    // horizon cone, edge fringing, and shader pack sky dome geometry while staying
+		    // safely above terrain depth values (max render distance terrain is ~0.998).
+		    if (depth < 0.999) {
 		        // Not sky — pass through existing color
 		        fragColor = texture(ColorTex, uv);
 		        return;

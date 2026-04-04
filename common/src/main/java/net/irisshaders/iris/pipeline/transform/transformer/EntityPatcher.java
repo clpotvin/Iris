@@ -24,7 +24,8 @@ import io.github.douira.glsl_transformer.ast.transform.ASTInjectionPoint;
 import io.github.douira.glsl_transformer.ast.transform.ASTParser;
 import io.github.douira.glsl_transformer.parser.ParseShape;
 import io.github.douira.glsl_transformer.util.Type;
-import net.irisshaders.iris.gl.IrisRenderSystem;
+import io.github.douira.glsl_transformer.ast.node.Version;
+import org.lwjgl.opengl.GL;
 import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.pipeline.transform.parameter.VanillaParameters;
 
@@ -841,17 +842,25 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
 
-			// Wynncraft skybox detection: inject image uniform + enable flag when image
-			// load/store is available. The uniform iimage2D is bound per-program via
-			// ShaderCreator → tryAddTextureImage. iris_wynncraftSkyboxEnabled is set to 1
-			// only when binding succeeded (prevents imageAtomicMax on unbound unit 0).
-			boolean hasImageLoadStore = IrisRenderSystem.supportsImageLoadStore();
-			if (hasImageLoadStore) {
+			// Wynncraft skybox detection: inject image uniform + enable flag when the GPU
+			// supports core GL 4.2 (not extension-only). iimage2D and imageAtomicMax require
+			// GLSL 420, so we must bump the shader version — but we can only do that safely
+			// when the driver supports core 4.2. Extension-only paths (ARB/EXT without core 4.2)
+			// cannot compile #version 420, so those fall back to discard-only.
+			boolean canUseImageInShader = GL.getCapabilities().OpenGL42;
+			if (canUseImageInShader) {
+				try {
+					var vs = tree.getVersionStatement();
+					if (vs != null && vs.version != null && vs.version.number < 420) {
+						vs.version = Version.GLSL42;
+					}
+				} catch (Exception ignored) {}
+				// layout(r32i) is required by Mesa/AMD/Intel drivers for image atomics.
 				tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
-					"uniform iimage2D iris_wynncraftSkyboxDetect;",
+					"layout(r32i) uniform iimage2D iris_wynncraftSkyboxDetect;",
 					"uniform int iris_wynncraftSkyboxEnabled;");
 			}
-			String skyboxDetectCode = hasImageLoadStore
+			String skyboxDetectCode = canUseImageInShader
 				? IRISW_SKYBOX_DETECT_WITH_IMAGE : IRISW_SKYBOX_DETECT_NO_IMAGE;
 
 			// Inject Wynncraft glint GLSL helpers and apply function.

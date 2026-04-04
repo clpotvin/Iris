@@ -1075,17 +1075,26 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		return wynncraftSkyboxDetectTex;
 	}
 
+	// ===== DEBUG: REMOVE BEFORE RELEASE =====
+	// Force a skybox ID for testing without Wynncraft display entities.
+	// Set via: /wynniris skybox <id>  (or directly: IrisRenderingPipeline.debugSkyboxId = N)
+	// 0 = disabled (normal detection), 1-7 = force that skybox variant
+	public static int debugSkyboxId = 0;
+	// ===== END DEBUG =====
+
 	private void clearWynncraftSkyboxDetect() {
 		if (wynncraftSkyboxDetectTex != 0) {
-			// Clear the 1x1 R32I texture to 0 via glClearTexImage (GL 4.4) or fallback
+			// DEBUG: REMOVE BEFORE RELEASE — write debug ID instead of clearing to 0
+			int clearValue = debugSkyboxId;
+			// END DEBUG (change above to: int clearValue = 0;)
+
 			if (GL.getCapabilities().OpenGL44) {
-				GL44C.glClearTexImage(wynncraftSkyboxDetectTex, 0, GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{0});
+				GL44C.glClearTexImage(wynncraftSkyboxDetectTex, 0, GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{clearValue});
 			} else {
-				// Fallback: use texSubImage to write a zero (saves/restores binding state)
 				int prev = GlStateManager._getInteger(GL11C.GL_TEXTURE_BINDING_2D);
 				GlStateManager._bindTexture(wynncraftSkyboxDetectTex);
 				GL11C.glTexSubImage2D(GL11C.GL_TEXTURE_2D, 0, 0, 0, 1, 1,
-					GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{0});
+					GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{clearValue});
 				GlStateManager._bindTexture(prev);
 			}
 		}
@@ -1151,15 +1160,18 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		// Wynncraft skybox post-process: render procedural sky over depth=1.0 pixels.
 		// Runs after all shader pack passes so it works with both forward and deferred packs.
+		// Gated on opacity > 0 to avoid unnecessary fullscreen pass + copy when disabled.
 		if (wynncraftSkyboxRenderer != null) {
-			IrisRenderSystem.imageMemoryBarrier(GL42C.GL_TEXTURE_FETCH_BARRIER_BIT);
 			float opacity = IrisVideoSettings.wynncraftSkyboxOpacity / 100.0f;
-			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
-			float gameTime = computeWynncraftGameTime();
-			wynncraftSkyboxRenderer.render(
-				main.getDepthTexture().iris$getGlId(),
-				(GlTexture) main.getColorTexture(),
-				gameTime, opacity);
+			if (opacity > 0.001f) {
+				IrisRenderSystem.imageMemoryBarrier(GL42C.GL_TEXTURE_FETCH_BARRIER_BIT);
+				com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+				float gameTime = computeWynncraftGameTime();
+				wynncraftSkyboxRenderer.render(
+					main.getDepthTexture().iris$getGlId(),
+					(GlTexture) main.getColorTexture(),
+					gameTime, opacity);
+			}
 		}
 	}
 
