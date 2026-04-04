@@ -19,7 +19,7 @@ val PARCHMENT_VERSION by extra { null }
 // WynnIris versioning: IRIS_BASE_VERSION is the upstream Iris version we forked from.
 // It's used as the mod version so Fabric/Sodium compatibility checks pass.
 // WYNNIRIS_VERSION is our own release counter, used in the jar filename only.
-val WYNNIRIS_VERSION by extra { "1.0.4-prerelease" }
+val WYNNIRIS_VERSION by extra { "1.0.4" }
 val IRIS_BASE_VERSION by extra { "1.10.7" }
 val MOD_VERSION by extra { IRIS_BASE_VERSION }
 
