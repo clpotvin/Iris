@@ -13,6 +13,8 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMaps;
+import net.irisshaders.iris.Iris;
+import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.features.FeatureFlags;
 import net.irisshaders.iris.gl.GLDebug;
@@ -108,17 +110,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3d;
 import org.joml.Vector4f;
-import org.lwjgl.opengl.GL;
-import org.lwjgl.opengl.ARBClearTexture;
-import org.lwjgl.opengl.GL11C;
-import org.lwjgl.opengl.GL12C;
 import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL21C;
 import org.lwjgl.opengl.GL30C;
-import org.lwjgl.opengl.GL42C;
 import org.lwjgl.opengl.GL43C;
-import org.lwjgl.opengl.GL44C;
 
 import java.io.IOException;
 import java.util.HashSet;
@@ -214,10 +210,12 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 	private int albedoTex;
 
-	// Wynncraft skybox detection: 1x1 R32I texture written by entity shaders via imageAtomicMax.
-	// The post-process skybox shader reads this via texelFetch (no CPU readback).
-	// 0 when image load/store is not supported.
-	private int wynncraftSkyboxDetectTex;
+
+	// Skybox temporal smoothing: persist skybox for 2.5s after entity disappears, then fade 2.5s.
+
+	private int displayedSkyboxId = 0;
+	private long lastDetectionTimeMs = 0;
+	private float skyboxFadeOpacity = 0.0f;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		ShaderPrinter.resetPrintState();
@@ -280,21 +278,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			.map(ImageClearPass::create)
 			.collect(ImmutableList.toImmutableList());
 
-		// Wynncraft skybox detection texture (1x1 R32I)
-		if (IrisRenderSystem.supportsImageLoadStore()) {
-			wynncraftSkyboxDetectTex = GlStateManager._genTexture();
-			GlStateManager._bindTexture(wynncraftSkyboxDetectTex);
-			IrisRenderSystem.texImage2D(wynncraftSkyboxDetectTex, GL30C.GL_TEXTURE_2D, 0,
-				GL30C.GL_R32I, 1, 1, 0, GL30C.GL_RED_INTEGER, GL30C.GL_INT, null);
-			GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
-			GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
-			GL12C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL12C.GL_TEXTURE_BASE_LEVEL, 0);
-			GL12C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL12C.GL_TEXTURE_MAX_LEVEL, 0);
-			GlStateManager._bindTexture(0);
-
-			// Create skybox renderer (needs the detection texture)
-			wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height, wynncraftSkyboxDetectTex);
-		}
+		// Skybox renderer — detection is CPU-side (ItemStackStateLayerMixin reads texture pixels),
+		// so no GL version requirement.
+		wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height);
 
 		if (programSet.getPackDirectives().getParticleRenderingSettings() != ParticleRenderingSettings.UNSET) {
 			this.particleRenderingSettings = programSet.getPackDirectives().getParticleRenderingSettings();
@@ -1049,10 +1035,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 
-		// Clear Wynncraft skybox detection texture at frame start (prevents stale state
-		// across world switches / pipeline reloads).
-		clearWynncraftSkyboxDetect();
-
 		beginRenderer.renderAll();
 
 		isBeforeTranslucent = true;
@@ -1064,41 +1046,25 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			this.shadowRenderer.renderShadows(worldRenderer, playerCamera, renderState);
 		}
 
-		// Clear skybox detection after shadow pass — shadow-camera writes should not
-		// affect the main-camera detection. Only main entity rendering writes persist.
-		clearWynncraftSkyboxDetect();
-
 		prepareRenderer.renderAll();
 	}
 
-	public int getWynncraftSkyboxDetectTex() {
-		return wynncraftSkyboxDetectTex;
-	}
+	// Skybox fog color override: when non-null, MixinFogRenderer uses this instead of vanilla.
+	// Set at end of each frame based on active skybox state. Affects shader pack fog + reflections.
+	// Blended with vanilla fog using skyboxFadeOpacity for smooth transitions.
+	public static float[] skyboxFogColor = null;
+	public static float skyboxFogBlendFactor = 0.0f;
 
-	// ===== DEBUG: REMOVE BEFORE RELEASE =====
-	// Force a skybox ID for testing without Wynncraft display entities.
-	// Set via: /wynniris skybox <id>  (or directly: IrisRenderingPipeline.debugSkyboxId = N)
-	// 0 = disabled (normal detection), 1-7 = force that skybox variant
-	public static int debugSkyboxId = 0;
-	// ===== END DEBUG =====
-
-	private void clearWynncraftSkyboxDetect() {
-		if (wynncraftSkyboxDetectTex != 0) {
-			// DEBUG: REMOVE BEFORE RELEASE — write debug ID instead of clearing to 0
-			int clearValue = debugSkyboxId;
-			// END DEBUG (change above to: int clearValue = 0;)
-
-			if (GL.getCapabilities().OpenGL44) {
-				GL44C.glClearTexImage(wynncraftSkyboxDetectTex, 0, GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{clearValue});
-			} else {
-				int prev = GlStateManager._getInteger(GL11C.GL_TEXTURE_BINDING_2D);
-				GlStateManager._bindTexture(wynncraftSkyboxDetectTex);
-				GL11C.glTexSubImage2D(GL11C.GL_TEXTURE_2D, 0, 0, 0, 1, 1,
-					GL30C.GL_RED_INTEGER, GL11C.GL_INT, new int[]{clearValue});
-				GlStateManager._bindTexture(prev);
-			}
-		}
-	}
+	private static final float[][] SKYBOX_FOG_COLORS = {
+		null,                          // 0: unused
+		{0.75f, 0.78f, 0.85f},        // 1: Memory Mist — cool blue-gray
+		{0.35f, 0.30f, 0.40f},        // 2: Memory Fog — dark purple-gray
+		{0.08f, 0.08f, 0.09f},        // 3: Stormy — near-black
+		{0.25f, 0.05f, 0.03f},        // 4: War Surface — dark red
+		{0.20f, 0.05f, 0.03f},        // 5: War Heights — dark red
+		{0.85f, 0.80f, 0.70f},        // 6: Light — warm
+		{0.15f, 0.04f, 0.02f},        // 7: Red Lightning — very dark red
+	};
 
 	@Override
 	public void addDebugText(DebugScreenDisplayer messages) {
@@ -1158,19 +1124,76 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		compositeRenderer.renderAll();
 		finalPassRenderer.renderFinalPass();
 
-		// Wynncraft skybox post-process: render procedural sky over depth=1.0 pixels.
-		// Runs after all shader pack passes so it works with both forward and deferred packs.
-		// Gated on opacity > 0 to avoid unnecessary fullscreen pass + copy when disabled.
+		// Wynncraft skybox post-process with temporal smoothing.
+		// Persists skybox 2.5s after entity disappears, then fades over 2.5s.
 		if (wynncraftSkyboxRenderer != null) {
+			// Always consume CPU detection and clear fog state, even when opacity is 0.
+			// Prevents stale state from persisting across opacity changes.
+			int detectedId = ImmediateState.consumeSkyboxDetection();
 			float opacity = IrisVideoSettings.wynncraftSkyboxOpacity / 100.0f;
-			if (opacity > 0.001f) {
-				IrisRenderSystem.imageMemoryBarrier(GL42C.GL_TEXTURE_FETCH_BARRIER_BIT);
-				com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
-				float gameTime = computeWynncraftGameTime();
-				wynncraftSkyboxRenderer.render(
-					main.getDepthTexture().iris$getGlId(),
-					(GlTexture) main.getColorTexture(),
-					gameTime, opacity);
+			if (opacity <= 0.001f) {
+				skyboxFogColor = null;
+				skyboxFogBlendFactor = 0.0f;
+				displayedSkyboxId = 0;
+
+				skyboxFadeOpacity = 0.0f;
+			} else {
+
+				long now = System.currentTimeMillis();
+
+				// Temporal smoothing state machine.
+				// Once a skybox is active, LOCK the ID until it fully fades out.
+				// Only accept a new detection when no skybox is currently displayed.
+				if (detectedId > 0 && detectedId <= 7) {
+					lastDetectionTimeMs = now;
+					if (displayedSkyboxId == 0) {
+						// No skybox active — accept this ID
+						displayedSkyboxId = detectedId;
+						Iris.logger.info("[WynnIris Skybox] Activated skybox ID={}", detectedId);
+					}
+					// If skybox already active, just refresh the timer (keep current ID)
+					skyboxFadeOpacity = 1.0f;
+				} else if (displayedSkyboxId > 0) {
+					// No detection — persistence/fade timing (wall-clock, TPS-independent)
+					// Long hold (10s) to survive entity culling gaps + flashback replays.
+					// Fade over 3s after hold expires.
+					float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
+					if (secondsSince < 10.0f) {
+						// Hold phase: keep skybox fully visible
+						skyboxFadeOpacity = 1.0f;
+					} else if (secondsSince < 13.0f) {
+						// Fade phase: linear fade over 3 seconds
+						skyboxFadeOpacity = 1.0f - (secondsSince - 10.0f) / 3.0f;
+					} else {
+						// Gone: fully faded, reset
+						Iris.logger.info("[WynnIris Skybox] Faded out, resetting");
+						skyboxFadeOpacity = 0.0f;
+						displayedSkyboxId = 0;
+		
+					}
+				}
+
+				// Render with the smoothed state
+				if (displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
+					float effectiveOpacity = opacity * skyboxFadeOpacity;
+					com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+					float gameTime = computeWynncraftGameTime();
+					wynncraftSkyboxRenderer.render(
+						main.getDepthTexture().iris$getGlId(),
+						(GlTexture) main.getColorTexture(),
+						gameTime, effectiveOpacity, displayedSkyboxId);
+				}
+
+				// Set fog color override for NEXT frame's shader pack rendering.
+				// Blended with vanilla fog using fade opacity for smooth transitions.
+				if (displayedSkyboxId > 0 && displayedSkyboxId < SKYBOX_FOG_COLORS.length
+					&& SKYBOX_FOG_COLORS[displayedSkyboxId] != null) {
+					skyboxFogColor = SKYBOX_FOG_COLORS[displayedSkyboxId];
+					skyboxFogBlendFactor = skyboxFadeOpacity * opacity;
+				} else {
+					skyboxFogColor = null;
+					skyboxFogBlendFactor = 0.0f;
+				}
 			}
 		}
 	}
@@ -1178,7 +1201,14 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private float computeWynncraftGameTime() {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level != null) {
-			return (float) ((mc.level.getGameTime() + mc.getDeltaTracker().getGameTimeDeltaPartialTick(true)) / 24000.0);
+			// Use modular time to avoid float precision loss on long-running servers.
+			// On Wynncraft, getGameTime() can be hundreds of millions of ticks.
+			// Without modulo, GameTime * 12000 in the shader produces values too large
+			// for float precision, causing noise functions to return static values.
+			// Cycle every 24000 ticks (one Minecraft day) — matches vanilla GameTime.
+			long ticks = mc.level.getGameTime() % 24000L;
+			float partial = mc.getDeltaTracker().getGameTimeDeltaPartialTick(true);
+			return (float) ((ticks + partial) / 24000.0);
 		}
 		return 0.0f;
 	}
@@ -1328,11 +1358,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			wynncraftSkyboxRenderer.destroy();
 			wynncraftSkyboxRenderer = null;
 		}
-
-		if (wynncraftSkyboxDetectTex != 0) {
-			GlStateManager._deleteTexture(wynncraftSkyboxDetectTex);
-			wynncraftSkyboxDetectTex = 0;
-		}
+		// Clear fog override on pipeline destroy (prevents cross-world ghosting)
+		skyboxFogColor = null;
+		skyboxFogBlendFactor = 0.0f;
+		displayedSkyboxId = 0;
+		skyboxFadeOpacity = 0.0f;
 
 		GlStateManager._glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, 0);
 		GlStateManager._glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, 0);
@@ -1407,6 +1437,15 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			// NB: The alpha value must be 1.0 here, or else you will get a bunch of bugs. Sildur's Vibrant Shaders
 			//     will give you pink reflections and other weirdness if this is zero.
 			Vector4f fogColor = new Vector4f((float) fogColor3.x, (float) fogColor3.y, (float) fogColor3.z, 1.0F);
+
+			// Override horizon fog color when Wynncraft skybox is active.
+			// This makes the GBuffer sky match our skybox mood, affecting pack reflections.
+			if (skyboxFogColor != null && skyboxFogBlendFactor > 0.001f) {
+				float b = skyboxFogBlendFactor;
+				fogColor.x = fogColor.x * (1 - b) + skyboxFogColor[0] * b;
+				fogColor.y = fogColor.y * (1 - b) + skyboxFogColor[1] * b;
+				fogColor.z = fogColor.z * (1 - b) + skyboxFogColor[2] * b;
+			}
 
 			horizonRenderer.renderHorizon(CapturedRenderingState.INSTANCE.getGbufferModelView(), CapturedRenderingState.INSTANCE.getGbufferProjection(), fogColor);
 		}

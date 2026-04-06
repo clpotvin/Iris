@@ -18,8 +18,6 @@ import net.irisshaders.iris.platform.IrisPlatformHelpers;
 import net.irisshaders.iris.gl.blending.AlphaTest;
 import net.irisshaders.iris.gl.blending.BlendModeOverride;
 import net.irisshaders.iris.gl.blending.BufferBlendOverride;
-import net.irisshaders.iris.gl.texture.InternalTextureFormat;
-import net.irisshaders.iris.gl.uniform.UniformUpdateFrequency;
 import net.irisshaders.iris.gl.framebuffer.GlFramebuffer;
 import net.irisshaders.iris.gl.state.FogMode;
 import net.irisshaders.iris.gl.state.ShaderAttributeInputs;
@@ -152,10 +150,6 @@ public class ShaderCreator {
 		PartialShader id = link(name, vertex, geometry, tessControl, tessEval, fragment, vertexFormat, false);
 
 
-		// Per-program capture: tracks whether the skybox detection image was successfully bound.
-		// Captured by both the image lambda and uniform lambda below.
-		final boolean[] skyboxDetectBound = {false};
-
 		return new ShaderSupplier(shaderKey, id, () -> {
 			try {
 				return new ExtendedShader(id.getFinally(), name, vertexFormat, tessControl != null || tessEval != null, writingToBeforeTranslucent, writingToAfterTranslucent, blendModeOverride, alpha, uniforms -> {
@@ -163,22 +157,8 @@ public class ShaderCreator {
 					customUniforms.assignTo(uniforms);
 					BuiltinReplacementUniforms.addBuiltinReplacementUniforms(uniforms);
 					VanillaUniforms.addVanillaUniforms(uniforms);
-					// Wynncraft skybox: per-program enable uniform (set based on whether
-					// image binding succeeded — prevents imageAtomicMax on unbound unit 0)
-					final boolean[] captured = skyboxDetectBound;
-					uniforms.uniform1i(UniformUpdateFrequency.ONCE, "iris_wynncraftSkyboxEnabled", () -> captured[0] ? 1 : 0);
 				}, (samplerHolder, imageHolder) -> {
 					parent.addGbufferOrShadowSamplers(samplerHolder, imageHolder, flipped, isShadowPass, inputs.hasTex(), inputs.hasLight(), inputs.hasOverlay());
-					// Wynncraft skybox: bind detection image for non-shadow entity programs
-					if (!isShadowPass && IrisRenderSystem.supportsImageLoadStore()) {
-						int detectTex = parent.getWynncraftSkyboxDetectTex();
-						if (detectTex != 0) {
-							skyboxDetectBound[0] = imageHolder.tryAddTextureImage(
-								() -> detectTex,
-								InternalTextureFormat.R32I,
-								"iris_wynncraftSkyboxDetect");
-						}
-					}
 				}, isIntensity, parent, overrides, customUniforms);
 			} catch (IOException e) {
 				throw new RuntimeException(e);
@@ -355,11 +335,8 @@ public class ShaderCreator {
 					customUniforms.assignTo(uniforms);
 					BuiltinReplacementUniforms.addBuiltinReplacementUniforms(uniforms);
 					VanillaUniforms.addVanillaUniforms(uniforms);
-					// Shadow programs: skybox detection always disabled (discard still hides entities)
-					uniforms.uniform1i(UniformUpdateFrequency.ONCE, "iris_wynncraftSkyboxEnabled", () -> 0);
 				}, (samplerHolder, imageHolder) -> {
 					parent.addGbufferOrShadowSamplers(samplerHolder, imageHolder, flipped, isShadowPass, inputs.hasTex(), inputs.hasLight(), inputs.hasOverlay());
-					// No skybox detection image binding for shadow programs
 				}, isIntensity, parent, overrides, customUniforms);
 			} catch (IOException e) {
 				throw new RuntimeException(e);

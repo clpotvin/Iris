@@ -27,6 +27,12 @@ public class ItemStackStateLayerMixin {
 	@Unique
 	private ItemStackRenderState parentState;
 
+	@Shadow
+	net.minecraft.client.renderer.texture.TextureAtlasSprite particleIcon;
+
+	@Shadow
+	private java.util.List<net.minecraft.client.renderer.block.model.BakedQuad> quads;
+
 	@Inject(method = "<init>", at = @At("TAIL"))
 	private void iris$catchParent(ItemStackRenderState itemStackRenderState, CallbackInfo ci) {
 		this.parentState = itemStackRenderState;
@@ -36,6 +42,61 @@ public class ItemStackStateLayerMixin {
 	private void onRender(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int i, int j, int k, CallbackInfo ci, @Share("lastBState") LocalIntRef ref) {
 		ref.set(CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
 		iris$setupId(((ItemContextState) parentState).getDisplayItem(), ((ItemContextState) parentState).getDisplayItemModel());
+
+		// Wynncraft skybox CPU detection: check this layer's particle icon texture
+		// for the skybox signal (G=251, A=254, B=variant ID). Works on ALL platforms.
+		iris$checkSkyboxSignal();
+	}
+
+	@Unique
+	private static long iris$lastSkyboxLogTime = 0;
+
+	@Unique
+	private static int iris$debugCallCount = 0;
+
+	@Unique
+	private void iris$checkSkyboxSignal() {
+		// Check quad sprites (not particleIcon, which is often minecraft:item/empty
+		// for Wynncraft custom model items). The actual skybox texture is on the quads.
+		if (quads == null || quads.isEmpty()) return;
+		try {
+			for (var quad : quads) {
+				var sprite = quad.sprite();
+				if (sprite == null) continue;
+				var contents = sprite.contents();
+				if (contents == null) continue;
+				var image = ((net.irisshaders.iris.mixin.texture.SpriteContentsAccessor) contents).getOriginalImage();
+				if (image == null) continue;
+				int w = contents.width();
+				int h = contents.height();
+				if (w < 1 || h < 1) continue;
+
+				// Sample center pixel — NativeImage.getPixel returns ARGB format
+				int pixel = image.getPixel(w / 2, h / 2);
+				int a = (pixel >> 24) & 0xFF;
+				int r = (pixel >> 16) & 0xFF;
+				int g = (pixel >> 8) & 0xFF;
+				int b = (pixel >> 0) & 0xFF;
+
+				if (g == 251 && a == 254 && b >= 1 && b <= 7) {
+					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
+					long now = System.currentTimeMillis();
+					if (now - iris$lastSkyboxLogTime > 5000) {
+						iris$lastSkyboxLogTime = now;
+						net.irisshaders.iris.Iris.logger.info(
+							"[WynnIris Skybox] CPU detected skybox ID={} from quad sprite {} (pixel argb={},{},{},{})",
+							b, contents.name(), a, r, g, b);
+					}
+					return; // Found it — no need to check more quads
+				}
+			}
+		} catch (Exception e) {
+			long now = System.currentTimeMillis();
+			if (now - iris$lastSkyboxLogTime > 10000) {
+				iris$lastSkyboxLogTime = now;
+				net.irisshaders.iris.Iris.logger.warn("[WynnIris Skybox] CPU detection error: {}", e.toString());
+			}
+		}
 	}
 
 	@Inject(method = "submit", at = @At("TAIL"))

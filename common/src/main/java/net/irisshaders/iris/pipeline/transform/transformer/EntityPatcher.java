@@ -24,8 +24,6 @@ import io.github.douira.glsl_transformer.ast.transform.ASTInjectionPoint;
 import io.github.douira.glsl_transformer.ast.transform.ASTParser;
 import io.github.douira.glsl_transformer.parser.ParseShape;
 import io.github.douira.glsl_transformer.util.Type;
-import io.github.douira.glsl_transformer.ast.node.Version;
-import org.lwjgl.opengl.GL;
 import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.pipeline.transform.parameter.VanillaParameters;
 
@@ -96,31 +94,17 @@ public class EntityPatcher {
 	// WYNNCRAFT SKYBOX DETECTION
 	// ====================================================================================
 	// Skybox signal is TEXTURE-based (not vertex-color): textureColor.g ≈ 251/255 and
-	// textureColor.a ≈ 254/255, with the blue channel encoding the skybox variant ID (1-7).
-	// Detection happens in the fragment shader, writing the variant ID to a 1x1 R32I image
-	// via imageAtomicMax. The entity is always discarded to hide display entity geometry.
-	// Two variants: with image support (writes to detection texture) and without (just discards).
+	// textureColor.a ≈ 254/255. When a skybox entity is detected, the fragment is discarded
+	// to hide the display entity geometry. The variant ID is detected CPU-side by reading
+	// item texture pixels in ItemStackStateLayerMixin (no GL version requirements).
 
-	// WITH image load/store support — writes skybox ID then discards
-	private static final String IRISW_SKYBOX_DETECT_WITH_IMAGE = """
+	// Discard skybox display entities so the post-process skybox renders instead.
+	private static final String IRISW_SKYBOX_DETECT = """
 		{
 		    vec4 irisW_skyTex = texture(Sampler0, iris_wynncraft_texcoord);
-		    if (abs(irisW_skyTex.g - 251.0/255.0) < 0.004 &&
-		        abs(irisW_skyTex.a - 254.0/255.0) < 0.004) {
-		        if (iris_wynncraftSkyboxEnabled != 0) {
-		            imageAtomicMax(iris_wynncraftSkyboxDetect, ivec2(0, 0),
-		                max(int(round(irisW_skyTex.b * 255.0)), 1));
-		        }
-		        discard;
-		    }
-		}""";
-
-	// WITHOUT image load/store support — just discards (hides broken entities, shader pack sky shows)
-	private static final String IRISW_SKYBOX_DETECT_NO_IMAGE = """
-		{
-		    vec4 irisW_skyTex = texture(Sampler0, iris_wynncraft_texcoord);
-		    if (abs(irisW_skyTex.g - 251.0/255.0) < 0.004 &&
-		        abs(irisW_skyTex.a - 254.0/255.0) < 0.004) {
+		    int irisW_g = int(round(irisW_skyTex.g * 255.0));
+		    int irisW_a = int(round(irisW_skyTex.a * 255.0));
+		    if (irisW_g == 251 && irisW_a == 254) {
 		        discard;
 		    }
 		}""";
@@ -842,26 +826,9 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
 
-			// Wynncraft skybox detection: inject image uniform + enable flag when the GPU
-			// supports core GL 4.2 (not extension-only). iimage2D and imageAtomicMax require
-			// GLSL 420, so we must bump the shader version — but we can only do that safely
-			// when the driver supports core 4.2. Extension-only paths (ARB/EXT without core 4.2)
-			// cannot compile #version 420, so those fall back to discard-only.
-			boolean canUseImageInShader = GL.getCapabilities().OpenGL42;
-			if (canUseImageInShader) {
-				try {
-					var vs = tree.getVersionStatement();
-					if (vs != null && vs.version != null && vs.version.number < 420) {
-						vs.version = Version.GLSL42;
-					}
-				} catch (Exception ignored) {}
-				// layout(r32i) is required by Mesa/AMD/Intel drivers for image atomics.
-				tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
-					"layout(r32i) uniform iimage2D iris_wynncraftSkyboxDetect;",
-					"uniform int iris_wynncraftSkyboxEnabled;");
-			}
-			String skyboxDetectCode = canUseImageInShader
-				? IRISW_SKYBOX_DETECT_WITH_IMAGE : IRISW_SKYBOX_DETECT_NO_IMAGE;
+			// Wynncraft skybox detection: discard skybox display entities so the post-process
+			// skybox renders instead. Variant ID is detected CPU-side (no GL version requirement).
+			String skyboxDetectCode = IRISW_SKYBOX_DETECT;
 
 			// Inject Wynncraft glint GLSL helpers and apply function.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.

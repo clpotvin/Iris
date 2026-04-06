@@ -46,6 +46,20 @@ public class MixinFogRenderer {
 
 	@Inject(method = "setupFog", at = @At("RETURN"))
 	private void render(Camera camera, int i, DeltaTracker deltaTracker, float f, ClientLevel clientLevel, CallbackInfoReturnable<Vector4f> cir) {
-		CapturedRenderingState.INSTANCE.setFogColor(cir.getReturnValue().x, cir.getReturnValue().y, cir.getReturnValue().z);
+		float r = cir.getReturnValue().x;
+		float g = cir.getReturnValue().y;
+		float b = cir.getReturnValue().z;
+
+		// Override fog color when Wynncraft skybox is active.
+		// Blended with vanilla fog using skybox fade opacity for smooth transitions.
+		float[] skyFog = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogColor;
+		float blend = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogBlendFactor;
+		if (skyFog != null && blend > 0.001f) {
+			r = r * (1 - blend) + skyFog[0] * blend;
+			g = g * (1 - blend) + skyFog[1] * blend;
+			b = b * (1 - blend) + skyFog[2] * blend;
+		}
+
+		CapturedRenderingState.INSTANCE.setFogColor(r, g, b);
 	}
 }

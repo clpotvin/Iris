@@ -65,4 +65,31 @@ public class ImmediateState {
 		trackedTranslucentBuilder = null;
 		trackedBuilderHasWynnSignal = false;
 	}
+
+	// ====================================================================================
+	// WYNNCRAFT SKYBOX CPU-SIDE DETECTION
+	// ====================================================================================
+	// Detects skybox variant ID from item display entity textures on the CPU.
+	// Works on ALL platforms including Mac (no GL 4.2 required).
+	// Set from ItemStackStateLayerMixin when a skybox texture signal is found.
+	// Read from IrisRenderingPipeline.finalizeLevelRendering().
+
+	// The skybox ID detected this frame (1-7), or 0 if none detected.
+	// Reset to 0 at frame start. The FIRST detection wins (lowest ID priority).
+	public static volatile int cpuDetectedSkyboxId = 0;
+
+	public static void noteSkyboxDetection(int id) {
+		if (id >= 1 && id <= 7) {
+			int current = cpuDetectedSkyboxId;
+			if (current == 0 || id < current) {
+				cpuDetectedSkyboxId = id; // lowest ID wins (primary skybox effect)
+			}
+		}
+	}
+
+	public static int consumeSkyboxDetection() {
+		int id = cpuDetectedSkyboxId;
+		cpuDetectedSkyboxId = 0;
+		return id;
+	}
 }
