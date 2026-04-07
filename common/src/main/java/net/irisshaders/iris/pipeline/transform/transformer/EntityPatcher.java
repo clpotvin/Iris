@@ -168,11 +168,11 @@ public class EntityPatcher {
 		    // Clean directional sweep with irregular burst timing.
 		    // Sweep speed/width is constant; a visibility gate creates bursts and pauses.
 		    vec2 iW_dir = iW_isAtlas ? vec2(0.3, 0.0) : vec2(0.3, -0.07);
-		    float iW_speed = iW_isAtlas ? 2.5 : 0.625;
+		    float iW_speed = iW_isAtlas ? 6.0 : 1.5;
 		    float iW_freq = iW_isAtlas ? 0.25 : 0.5;
 		    float iW_x = dot(iW_dir, iW_sweepUV) - iW_time * iW_speed;
 		    float iW_phase = 1.0 - fract(iW_x * iW_freq);
-		    float iW_wave = smoothstep(0.0, 0.03, iW_phase) * (1.0 - smoothstep(0.06, 0.22, iW_phase));
+		    float iW_wave = smoothstep(0.0, 0.05, iW_phase) * (1.0 - smoothstep(0.1, 0.4, iW_phase));
 		    // Per-cycle visibility gate: decide once per sweep whether it's visible.
 		    // Uses the cycle index (floor of the sweep counter) so the decision is
 		    // constant for the entire pass — no mid-sweep cutoffs.
