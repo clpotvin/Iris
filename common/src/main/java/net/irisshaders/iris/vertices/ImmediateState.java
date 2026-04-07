@@ -92,4 +92,32 @@ public class ImmediateState {
 		cpuDetectedSkyboxId = 0;
 		return id;
 	}
+
+	// ====================================================================================
+	// WYNNCRAFT TRANSITION CPU-SIDE DETECTION
+	// ====================================================================================
+	// Detects transition screen effects from text display entities on the CPU.
+	// The transition signal is a Unicode character U+E000-U+E012 rendered with
+	// font "minecraft:screen/transition". When detected, the text entity is
+	// suppressed and a fullscreen post-process transition is rendered instead.
+
+	/** Atomic transition detection payload — avoids split reads across separate fields. */
+	public record TransitionDetection(int type, int opacity, int color) {
+		public static final TransitionDetection NONE = new TransitionDetection(0, 0, 0);
+	}
+
+	private static volatile TransitionDetection cpuDetectedTransition = TransitionDetection.NONE;
+
+	public static void noteTransitionDetection(int type, int opacity, int color) {
+		if (type >= 1 && type <= 19) {
+			cpuDetectedTransition = new TransitionDetection(type, opacity, color);
+		}
+	}
+
+	/** Returns and resets the detected transition as a single atomic snapshot. */
+	public static TransitionDetection consumeTransitionDetection() {
+		TransitionDetection d = cpuDetectedTransition;
+		cpuDetectedTransition = TransitionDetection.NONE;
+		return d;
+	}
 }

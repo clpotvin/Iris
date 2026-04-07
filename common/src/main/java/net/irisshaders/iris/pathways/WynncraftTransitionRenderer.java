@@ -6,7 +6,6 @@ import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexFormat;
-import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.program.Program;
 import net.irisshaders.iris.gl.program.ProgramBuilder;
@@ -114,9 +113,14 @@ public class WynncraftTransitionRenderer {
 	private float gameTime;
 	private int transType;
 	private float transProgress;
+	private float transColorR, transColorG, transColorB;
 
 	public WynncraftTransitionRenderer(int width, int height) {
 		rebuild(width, height);
+	}
+
+	public boolean needsRebuild(int width, int height) {
+		return this.width != width || this.height != height;
 	}
 
 	public void rebuild(int width, int height) {
@@ -136,7 +140,7 @@ public class WynncraftTransitionRenderer {
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "TransType", () -> transType);
 		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "TransProgress", () -> transProgress);
 		builder.uniform3f(UniformUpdateFrequency.PER_FRAME, "TransColor",
-			() -> new org.joml.Vector3f(0f, 0f, 0f));
+			() -> new org.joml.Vector3f(transColorR, transColorG, transColorB));
 
 		builder.addDynamicSampler(() -> colorTexId, GlSampler.NEAREST, "ColorTex");
 
@@ -150,12 +154,19 @@ public class WynncraftTransitionRenderer {
 	}
 
 	public void render(com.mojang.blaze3d.opengl.GlTexture colorTex, float gameTime, int type, float progress) {
+		render(colorTex, gameTime, type, progress, 0x000000);
+	}
+
+	public void render(com.mojang.blaze3d.opengl.GlTexture colorTex, float gameTime, int type, float progress, int rgbColor) {
 		if (type <= 0) return;
 
 		this.colorTexId = colorTex.iris$getGlId();
 		this.gameTime = gameTime;
 		this.transType = type;
 		this.transProgress = progress;
+		this.transColorR = ((rgbColor >> 16) & 0xFF) / 255.0f;
+		this.transColorG = ((rgbColor >> 8) & 0xFF) / 255.0f;
+		this.transColorB = (rgbColor & 0xFF) / 255.0f;
 
 		GpuBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS).getBuffer(6);
 		VertexFormat.IndexType indexType = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS).type();

@@ -1197,16 +1197,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 						gameTime, effectiveOpacity, displayedSkyboxId);
 				}
 
-				// Debug transition renderer — renders independently of text shaders
-				if (wynncraftTransitionRenderer != null && Iris.debugTransitionType > 0) {
-					com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
-					wynncraftTransitionRenderer.render(
-						(GlTexture) mainRT.getColorTexture(),
-						computeWynncraftGameTime(),
-						Iris.debugTransitionType,
-						Iris.debugTransitionProgress);
-				}
-
 				// Set fog color override for NEXT frame's shader pack rendering.
 				// Blended with vanilla fog using fade opacity for smooth transitions.
 				if (displayedSkyboxId > 0 && displayedSkyboxId < SKYBOX_FOG_COLORS.length
@@ -1217,6 +1207,28 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 					skyboxFogColor = null;
 					skyboxFogBlendFactor = 0.0f;
 				}
+			}
+		}
+
+		// Wynncraft transition rendering — independent of skybox state.
+		// CPU-detected transitions from text display entities OR debug keys.
+		if (wynncraftTransitionRenderer != null) {
+			ImmediateState.TransitionDetection cpuTrans = ImmediateState.consumeTransitionDetection();
+
+			boolean debugActive = Iris.debugTransitionType > 0;
+			int transType = debugActive ? Iris.debugTransitionType : cpuTrans.type();
+			float transProgress = debugActive ? Iris.debugTransitionProgress
+				: cpuTrans.opacity() / 255.0f;
+			int transColor = debugActive ? 0x000000 : cpuTrans.color();
+
+			if (transType > 0 && transProgress > 0.001f) {
+				com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
+				wynncraftTransitionRenderer.render(
+					(GlTexture) mainRT.getColorTexture(),
+					computeWynncraftGameTime(),
+					transType,
+					transProgress,
+					transColor);
 			}
 		}
 	}
