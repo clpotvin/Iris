@@ -232,7 +232,7 @@ public class EntityPatcher {
 		    vec4 iW_out = iW_in;
 		    bool iW_applyLighting = true;
 		    bool iW_isTint = (iW_id >= 15 && iW_id <= 24);
-		    bool iW_knownEffect = (iW_id >= 1 && iW_id <= 31);
+		    bool iW_knownEffect = (iW_id >= 1 && iW_id <= 32);
 		    // Shiny uses continuousSweepUV (same as shadow sweep) for clean directional band
 		    vec2 iW_shinySweep = irisW_continuousSweepUV(iW_uv, iW_midTex, iW_texSize, iW_eUV);
 		    switch (iW_id) {
@@ -372,6 +372,7 @@ public class EntityPatcher {
 		        case 29: { iW_out = irisW_shiny(irisW_rgb(85,  255, 255), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
 		        case 30: { iW_out = irisW_shiny(irisW_rgb(255, 85,  85 ), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
 		        case 31: { iW_out = irisW_shiny(irisW_rgb(170, 0,   170), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 32: { iW_applyLighting = false; break; } // Clear fog — entity renders without fog blend
 		    }
 		    if (iW_applyLighting && iW_knownEffect) {
 		        float iW_texLuma = max(dot(iW_tex.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.001);
