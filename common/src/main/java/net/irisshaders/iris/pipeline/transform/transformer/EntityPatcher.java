@@ -76,12 +76,14 @@ public class EntityPatcher {
 	// VARYING: iris_wynncraft_midtex (vec2) carries mc_midTexCoord to fragment shader
 	// ====================================================================================
 
-	// Wynncraft glint signal: vertex Color with G=255/255 (1.0), B=0, R in (0,1) encodes glint ID 1-31.
+	// Wynncraft glint signal: vertex Color with G=255/255 (1.0), B=0, R encodes glint ID 1-32.
 	// Threshold G>0.998 distinguishes from translucency signal (G=254/255≈0.996).
-	// Lower bound on R (> 0.002) ensures the decoded ID is at least 1, avoiding false positives
-	// from legitimate vertex colors where R=0 would decode to ID 0 (and still neutralize the color).
+	// Lower bound on R (> 0.002) ensures the decoded ID is at least 1.
+	// Upper bound on R (< 0.13) caps at ID ~33 — valid glint IDs are 1-32.
+	// This rejects VFX display entities whose vertex colors happen to have high G / low B
+	// but R values well above the glint range.
 	private static final String IRISW_SIGNAL_DETECT =
-		"bool iris_wynn_isSignal = (iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99);";
+		"bool iris_wynn_isSignal = (iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.13);";
 
 	// Wynncraft translucency signal: vertex Color with G=254/255 (≈0.996), B=0, R in (0,1) encodes
 	// translucency level. R*255 gives the translucency value (0-100+), applied as alpha reduction
@@ -163,14 +165,20 @@ public class EntityPatcher {
 		}""",
 		"""
 		vec4 irisW_shiny(vec3 iW_color, float iW_intensity, float iW_brightness, vec2 iW_sweepUV, bool iW_isAtlas, float iW_time, vec4 iW_tex) {
-		    // Clean directional sweep — like shadow (case 9) but additive highlight
+		    // Clean directional sweep with irregular burst timing.
+		    // Sweep speed/width is constant; a visibility gate creates bursts and pauses.
 		    vec2 iW_dir = iW_isAtlas ? vec2(0.3, 0.0) : vec2(0.3, -0.07);
-		    float iW_speed = iW_isAtlas ? 2.0 : 0.5;
+		    float iW_speed = iW_isAtlas ? 2.5 : 0.625;
 		    float iW_freq = iW_isAtlas ? 0.25 : 0.5;
 		    float iW_x = dot(iW_dir, iW_sweepUV) - iW_time * iW_speed;
 		    float iW_phase = 1.0 - fract(iW_x * iW_freq);
-		    // Wider, softer band than shadow: smooth leading edge, gradual fade
-		    float iW_wave = smoothstep(0.0, 0.05, iW_phase) * (1.0 - smoothstep(0.1, 0.45, iW_phase));
+		    float iW_wave = smoothstep(0.0, 0.03, iW_phase) * (1.0 - smoothstep(0.06, 0.22, iW_phase));
+		    // Per-cycle visibility gate: decide once per sweep whether it's visible.
+		    // Uses the cycle index (floor of the sweep counter) so the decision is
+		    // constant for the entire pass — no mid-sweep cutoffs.
+		    float iW_cycle = floor(iW_x * iW_freq);
+		    float iW_gate = sin(iW_cycle * 1.7) + sin(iW_cycle * 0.73) + sin(iW_cycle * 0.31);
+		    iW_wave *= step(-0.3, iW_gate);
 		    return vec4(iW_tex.rgb + iW_color * iW_wave * iW_intensity * iW_brightness, iW_tex.a);
 		}""",
 		"""

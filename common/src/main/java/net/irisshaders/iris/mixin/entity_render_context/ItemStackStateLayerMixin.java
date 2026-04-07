@@ -73,10 +73,19 @@ public class ItemStackStateLayerMixin {
 
 				if (g == 251 && a == 254 && b >= 1 && b <= 7) {
 					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
+					if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
+						int r = (pixel >> 16) & 0xFF;
+						net.irisshaders.iris.Iris.logger.info(
+							"[WynnIris Skybox] CPU detected skybox ID={} from quad sprite {} (pixel argb={},{},{},{})",
+							b, contents.name(), a, r, g, b);
+					}
 					return;
 				}
 			}
-		} catch (Exception ignored) {
+		} catch (Exception e) {
+			if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
+				net.irisshaders.iris.Iris.logger.warn("[WynnIris Skybox] CPU detection error: {}", e.toString());
+			}
 		}
 	}
 

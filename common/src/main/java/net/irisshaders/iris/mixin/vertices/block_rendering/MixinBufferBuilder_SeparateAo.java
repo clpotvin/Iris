@@ -3,9 +3,11 @@ package net.irisshaders.iris.mixin.vertices.block_rendering;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 
 import java.util.Arrays;
 
@@ -23,9 +25,30 @@ import java.util.Arrays;
 @Mixin(value = BufferBuilder.class, priority = 1001)
 public abstract class MixinBufferBuilder_SeparateAo implements VertexConsumer {
 
+	@Unique
+	private static long iris$lastSignalLog = 0;
+
 	@Override
 	public void putBulkData(PoseStack.Pose matrixEntry, BakedQuad quad, float[] brightnesses, float red, float green,
 							float blue, float alpha, int[] lights, int overlay) {
+		// DEBUG: Log tint colors that could trigger WynnIris glint signal detection
+		// Signal condition: G>0.998, B<0.01, R in (0.002, 0.99)
+		if (IrisVideoSettings.wynncraftDebugLogging && green > 0.99f && blue < 0.05f) {
+			long now = System.currentTimeMillis();
+			if (now - iris$lastSignalLog > 200) {
+				iris$lastSignalLog = now;
+				int rInt = Math.round(red * 255);
+				int gInt = Math.round(green * 255);
+				int bInt = Math.round(blue * 255);
+				int aInt = Math.round(alpha * 255);
+				String spriteName = quad.sprite() != null ? quad.sprite().contents().name().toString() : "null";
+				System.out.println("[WynnIris GLINT-DEBUG] tint RGBA=(" + rInt + "," + gInt + "," + bInt + "," + aInt
+					+ ") raw=(" + red + "," + green + "," + blue + "," + alpha + ")"
+					+ " tintIdx=" + quad.tintIndex()
+					+ " sprite=" + spriteName);
+			}
+		}
+
 		if (WorldRenderingSettings.INSTANCE.shouldUseSeparateAo()) {
 			float[] brightnesses1 = brightnesses;
 			int brightnessIndex = 0;
