@@ -13,6 +13,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMaps;
+import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.features.FeatureFlags;
@@ -47,6 +48,7 @@ import net.irisshaders.iris.pathways.CenterDepthSampler;
 import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pathways.HorizonRenderer;
 import net.irisshaders.iris.pathways.WynncraftSkyboxRenderer;
+import net.irisshaders.iris.pathways.WynncraftTransitionRenderer;
 import net.irisshaders.iris.pathways.colorspace.ColorSpace;
 import net.irisshaders.iris.pathways.colorspace.ColorSpaceConverter;
 import net.irisshaders.iris.pathways.colorspace.ColorSpaceFragmentConverter;
@@ -152,6 +154,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final HorizonRenderer horizonRenderer = new HorizonRenderer();
 	@Nullable
 	private WynncraftSkyboxRenderer wynncraftSkyboxRenderer;
+	@Nullable
+	private WynncraftTransitionRenderer wynncraftTransitionRenderer;
 	@Nullable
 	private final ComputeProgram[] shadowComputes;
 	private final float sunPathRotation;
@@ -280,6 +284,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// Skybox renderer — detection is CPU-side (ItemStackStateLayerMixin reads texture pixels),
 		// so no GL version requirement.
 		wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height);
+		wynncraftTransitionRenderer = new WynncraftTransitionRenderer(main.width, main.height);
 
 		if (programSet.getPackDirectives().getParticleRenderingSettings() != ParticleRenderingSettings.UNSET) {
 			this.particleRenderingSettings = programSet.getPackDirectives().getParticleRenderingSettings();
@@ -974,6 +979,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			if (wynncraftSkyboxRenderer != null) {
 				wynncraftSkyboxRenderer.rebuild(main.width, main.height);
 			}
+			if (wynncraftTransitionRenderer != null) {
+				wynncraftTransitionRenderer.rebuild(main.width, main.height);
+			}
 
 			this.clearPassesFull.forEach(clearPass -> renderTargets.destroyFramebuffer(clearPass.getFramebuffer()));
 			this.clearPasses.forEach(clearPass -> renderTargets.destroyFramebuffer(clearPass.getFramebuffer()));
@@ -1148,6 +1156,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 					if (displayedSkyboxId == 0) {
 						// No skybox active — accept this ID
 						displayedSkyboxId = detectedId;
+						if (IrisVideoSettings.wynncraftDebugLogging) {
+							Iris.logger.info("[WynnIris Skybox] Activated skybox ID={}", detectedId);
+						}
+					} else if (detectedId != displayedSkyboxId && IrisVideoSettings.wynncraftDebugLogging) {
+						Iris.logger.info("[WynnIris Skybox] Ignoring detected ID={} (locked to {})", detectedId, displayedSkyboxId);
 					}
 					// If skybox already active, just refresh the timer (keep current ID)
 					skyboxFadeOpacity = 1.0f;
@@ -1164,6 +1177,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 						skyboxFadeOpacity = 1.0f - (secondsSince - 10.0f) / 3.0f;
 					} else {
 						// Gone: fully faded, reset
+						if (IrisVideoSettings.wynncraftDebugLogging) {
+							Iris.logger.info("[WynnIris Skybox] Faded out, resetting");
+						}
 						skyboxFadeOpacity = 0.0f;
 						displayedSkyboxId = 0;
 		
@@ -1179,6 +1195,16 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 						main.getDepthTexture().iris$getGlId(),
 						(GlTexture) main.getColorTexture(),
 						gameTime, effectiveOpacity, displayedSkyboxId);
+				}
+
+				// Debug transition renderer — renders independently of text shaders
+				if (wynncraftTransitionRenderer != null && Iris.debugTransitionType > 0) {
+					com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
+					wynncraftTransitionRenderer.render(
+						(GlTexture) mainRT.getColorTexture(),
+						computeWynncraftGameTime(),
+						Iris.debugTransitionType,
+						Iris.debugTransitionProgress);
 				}
 
 				// Set fog color override for NEXT frame's shader pack rendering.
@@ -1354,6 +1380,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (wynncraftSkyboxRenderer != null) {
 			wynncraftSkyboxRenderer.destroy();
 			wynncraftSkyboxRenderer = null;
+		}
+		if (wynncraftTransitionRenderer != null) {
+			wynncraftTransitionRenderer.destroy();
+			wynncraftTransitionRenderer = null;
 		}
 		// Clear fog override on pipeline destroy (prevents cross-world ghosting)
 		skyboxFogColor = null;

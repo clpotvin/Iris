@@ -138,6 +138,20 @@ public class IrisConfig implements ConfigEntryPoint {
 						.setRange(new Range(0, 100, 5))
 						.setImpact(OptionImpact.LOW)
 					)
+					.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_debug_logging"))
+						.setDefaultValue(false)
+						.setBinding(value -> IrisVideoSettings.wynncraftDebugLogging = value, () -> IrisVideoSettings.wynncraftDebugLogging)
+						.setName(Component.translatable("options.iris.wynncraftDebugLogging"))
+						.setTooltip(Component.translatable("options.iris.wynncraftDebugLogging.tooltip"))
+						.setStorageHandler(() -> {
+							try {
+								Iris.getIrisConfig().save();
+							} catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+						})
+						.setImpact(OptionImpact.LOW)
+					)
 				)
 			).registerOptionOverlay(Identifier.parse("sodium:quality.filtering_mode"), builder.createEnumOption(Identifier.parse("sodium:quality.filtering_mode"), TextureFilteringMethod.class)
 				.setTooltip(i -> {
