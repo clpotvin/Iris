@@ -34,30 +34,21 @@ public class VanillaCoreTransformer {
 		// EntityPatcher (isText() check above), but still need brightness boost when a
 		// custom skybox is active. Text gets 2x the entity boost for readability.
 		if (parameters.inputs.isText() && parameters.type.glShaderType == ShaderType.FRAGMENT) {
-			// DEBUG: log what we find
-			boolean hasOutColor0 = root.identifierIndex.has("outColor0");
-			boolean hasFragData = root.identifierIndex.has("gl_FragData");
-			boolean hasFragColor = root.identifierIndex.has("gl_FragColor");
-			org.apache.logging.log4j.LogManager.getLogger("WynnIris").info(
-				"[WynnIris] Text shader fragment injection: outColor0={}, gl_FragData={}, gl_FragColor={}",
-				hasOutColor0, hasFragData, hasFragColor);
-
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 				"uniform float iris_wynncraftEntityBoost;");
-			// Determine the fragment output variable name.
+			// Determine the fragment output variable name (core vs compat profile).
 			String textOutput;
-			if (hasOutColor0) {
+			if (root.identifierIndex.has("outColor0")) {
 				textOutput = "outColor0";
-			} else if (hasFragData || hasFragColor) {
+			} else if (root.identifierIndex.has("gl_FragData") || root.identifierIndex.has("gl_FragColor")) {
 				textOutput = "iris_FragData0";
 			} else {
 				textOutput = null;
-				org.apache.logging.log4j.LogManager.getLogger("WynnIris").warn(
-					"[WynnIris] Text shader: no known fragment output found! Boost will not apply.");
 			}
 			if (textOutput != null) {
-				org.apache.logging.log4j.LogManager.getLogger("WynnIris").info(
-					"[WynnIris] Text shader: boosting output '{}'", textOutput);
+				// Text gets ~3x the entity boost (cubed) for readability at night.
+				// Only effective for shader packs with custom text programs (non-fallback).
+				// Fallback text shaders are handled by MixinTextDisplayRenderer (packedLight override).
 				tree.appendMainFunctionBody(t,
 					textOutput + ".rgb *= iris_wynncraftEntityBoost * iris_wynncraftEntityBoost * iris_wynncraftEntityBoost;");
 			}

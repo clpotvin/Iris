@@ -442,7 +442,7 @@ public class WynncraftSkyboxRenderer {
 		//    procedural skybox and eliminates edge fringe.
 
 		void main() {
-		    // Java-provided skybox ID (handles persistence, fade, debug override)
+		    // Java-provided skybox ID (handles persistence and fade)
 		    int skyboxId = SkyboxId;
 		    if (skyboxId <= 0 || Opacity <= 0.001) {
 		        fragColor = texture(ColorTex, uv);

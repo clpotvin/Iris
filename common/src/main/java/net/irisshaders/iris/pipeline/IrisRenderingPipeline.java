@@ -13,7 +13,6 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMaps;
-import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.features.FeatureFlags;
@@ -1125,7 +1124,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		finalPassRenderer.renderFinalPass();
 
 		// Wynncraft skybox post-process with temporal smoothing.
-		// Persists skybox 2.5s after entity disappears, then fades over 2.5s.
+		// Persists skybox 10s after entity disappears, then fades over 3s.
 		if (wynncraftSkyboxRenderer != null) {
 			// Always consume CPU detection and clear fog state, even when opacity is 0.
 			// Prevents stale state from persisting across opacity changes.
@@ -1149,7 +1148,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 					if (displayedSkyboxId == 0) {
 						// No skybox active — accept this ID
 						displayedSkyboxId = detectedId;
-						Iris.logger.info("[WynnIris Skybox] Activated skybox ID={}", detectedId);
 					}
 					// If skybox already active, just refresh the timer (keep current ID)
 					skyboxFadeOpacity = 1.0f;
@@ -1166,7 +1164,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 						skyboxFadeOpacity = 1.0f - (secondsSince - 10.0f) / 3.0f;
 					} else {
 						// Gone: fully faded, reset
-						Iris.logger.info("[WynnIris Skybox] Faded out, resetting");
 						skyboxFadeOpacity = 0.0f;
 						displayedSkyboxId = 0;
 		

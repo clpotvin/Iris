@@ -1,10 +1,7 @@
 package net.irisshaders.iris.mixin.entity_render_context;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
-import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.DisplayRenderer;
-import net.minecraft.client.renderer.entity.state.TextDisplayEntityRenderState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;

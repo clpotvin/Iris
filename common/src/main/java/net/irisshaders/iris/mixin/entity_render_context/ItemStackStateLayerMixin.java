@@ -49,15 +49,9 @@ public class ItemStackStateLayerMixin {
 	}
 
 	@Unique
-	private static long iris$lastSkyboxLogTime = 0;
-
-	@Unique
-	private static int iris$debugCallCount = 0;
-
-	@Unique
 	private void iris$checkSkyboxSignal() {
-		// Check quad sprites (not particleIcon, which is often minecraft:item/empty
-		// for Wynncraft custom model items). The actual skybox texture is on the quads.
+		// Check quad sprites for the Wynncraft skybox texture signal (G=251, A=254, B=variant ID).
+		// particleIcon is often minecraft:item/empty for custom models — the actual texture is on quads.
 		if (quads == null || quads.isEmpty()) return;
 		try {
 			for (var quad : quads) {
@@ -71,31 +65,18 @@ public class ItemStackStateLayerMixin {
 				int h = contents.height();
 				if (w < 1 || h < 1) continue;
 
-				// Sample center pixel — NativeImage.getPixel returns ARGB format
+				// NativeImage.getPixel returns ARGB format
 				int pixel = image.getPixel(w / 2, h / 2);
 				int a = (pixel >> 24) & 0xFF;
-				int r = (pixel >> 16) & 0xFF;
 				int g = (pixel >> 8) & 0xFF;
 				int b = (pixel >> 0) & 0xFF;
 
 				if (g == 251 && a == 254 && b >= 1 && b <= 7) {
 					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
-					long now = System.currentTimeMillis();
-					if (now - iris$lastSkyboxLogTime > 5000) {
-						iris$lastSkyboxLogTime = now;
-						net.irisshaders.iris.Iris.logger.info(
-							"[WynnIris Skybox] CPU detected skybox ID={} from quad sprite {} (pixel argb={},{},{},{})",
-							b, contents.name(), a, r, g, b);
-					}
-					return; // Found it — no need to check more quads
+					return;
 				}
 			}
-		} catch (Exception e) {
-			long now = System.currentTimeMillis();
-			if (now - iris$lastSkyboxLogTime > 10000) {
-				iris$lastSkyboxLogTime = now;
-				net.irisshaders.iris.Iris.logger.warn("[WynnIris Skybox] CPU detection error: {}", e.toString());
-			}
+		} catch (Exception ignored) {
 		}
 	}
 
