@@ -99,6 +99,7 @@
     "entity_render_context.MixinModelStorageTrigger",
     "entity_render_context.ItemStackStateMixin",
     "entity_render_context.ItemStackStateLayerMixin",
+    "entity_render_context.MixinTextDisplayRenderer",
     "fabulous.MixinDisableFabulousGraphics",
     "gui.MixinGui",
     "gui.MixinVideoSettingsScreen",
