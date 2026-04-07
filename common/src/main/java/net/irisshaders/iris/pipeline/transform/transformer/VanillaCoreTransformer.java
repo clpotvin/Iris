@@ -34,18 +34,33 @@ public class VanillaCoreTransformer {
 		// EntityPatcher (isText() check above), but still need brightness boost when a
 		// custom skybox is active. Text gets 2x the entity boost for readability.
 		if (parameters.inputs.isText() && parameters.type.glShaderType == ShaderType.FRAGMENT) {
+			// DEBUG: log what we find
+			boolean hasOutColor0 = root.identifierIndex.has("outColor0");
+			boolean hasFragData = root.identifierIndex.has("gl_FragData");
+			boolean hasFragColor = root.identifierIndex.has("gl_FragColor");
+			org.apache.logging.log4j.LogManager.getLogger("WynnIris").info(
+				"[WynnIris] Text shader fragment injection: outColor0={}, gl_FragData={}, gl_FragColor={}",
+				hasOutColor0, hasFragData, hasFragColor);
+
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 				"uniform float iris_wynncraftEntityBoost;");
-			// Text gets 2x boost (squared) since text readability is critical.
-			// Also luminance-aware: bright text gets less boost.
-			tree.appendMainFunctionBody(t, """
-				{
-				    float irisW_textBoost = iris_wynncraftEntityBoost * iris_wynncraftEntityBoost;
-				    float irisW_textLuma = dot(iris_FragData0.rgb, vec3(0.2126, 0.7152, 0.0722));
-				    float irisW_textScale = mix(irisW_textBoost, 1.0, smoothstep(0.3, 0.8, irisW_textLuma));
-				    iris_FragData0.rgb *= irisW_textScale;
-				}
-				""");
+			// Determine the fragment output variable name.
+			String textOutput;
+			if (hasOutColor0) {
+				textOutput = "outColor0";
+			} else if (hasFragData || hasFragColor) {
+				textOutput = "iris_FragData0";
+			} else {
+				textOutput = null;
+				org.apache.logging.log4j.LogManager.getLogger("WynnIris").warn(
+					"[WynnIris] Text shader: no known fragment output found! Boost will not apply.");
+			}
+			if (textOutput != null) {
+				org.apache.logging.log4j.LogManager.getLogger("WynnIris").info(
+					"[WynnIris] Text shader: boosting output '{}'", textOutput);
+				tree.appendMainFunctionBody(t,
+					textOutput + ".rgb *= iris_wynncraftEntityBoost * iris_wynncraftEntityBoost * iris_wynncraftEntityBoost;");
+			}
 		}
 
 		tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
