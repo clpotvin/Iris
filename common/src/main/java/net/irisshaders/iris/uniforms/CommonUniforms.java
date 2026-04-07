@@ -271,7 +271,22 @@ public final class CommonUniforms {
 		int skyColor = client.gameRenderer.getMainCamera().attributeProbe().getValue(EnvironmentAttributes.SKY_COLOR,
 			CapturedRenderingState.INSTANCE.getTickDelta());
 
-		return new Vector3d(ARGB.redFloat(skyColor), ARGB.greenFloat(skyColor), ARGB.blueFloat(skyColor));
+		double r = ARGB.redFloat(skyColor);
+		double g = ARGB.greenFloat(skyColor);
+		double b = ARGB.blueFloat(skyColor);
+
+		// Override sky color when Wynncraft skybox is active.
+		// Shader packs use skyColor for ambient sky lighting (deferred pass) and reflections.
+		// Without this, block edges and glass reflect the bright vanilla sky instead of our dark skybox.
+		float[] skyFog = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogColor;
+		float blend = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogBlendFactor;
+		if (skyFog != null && blend > 0.001f) {
+			r = r * (1 - blend) + skyFog[0] * blend;
+			g = g * (1 - blend) + skyFog[1] * blend;
+			b = b * (1 - blend) + skyFog[2] * blend;
+		}
+
+		return new Vector3d(r, g, b);
 	}
 
 	static float getBlindness() {
