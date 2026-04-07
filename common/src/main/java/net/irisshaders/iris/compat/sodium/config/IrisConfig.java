@@ -122,6 +122,22 @@ public class IrisConfig implements ConfigEntryPoint {
 						.setRange(new Range(0, 100, 5))
 						.setImpact(OptionImpact.LOW)
 					)
+					.addOption(builder.createIntegerOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_entity_boost"))
+						.setDefaultValue(150)
+						.setBinding(value -> IrisVideoSettings.wynncraftEntityBoost = value, () -> IrisVideoSettings.wynncraftEntityBoost)
+						.setName(Component.translatable("options.iris.wynncraftEntityBoost"))
+						.setTooltip(Component.translatable("options.iris.wynncraftEntityBoost.tooltip"))
+						.setValueFormatter(ControlValueFormatterImpls.percentage())
+						.setStorageHandler(() -> {
+							try {
+								Iris.getIrisConfig().save();
+							} catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+						})
+						.setRange(new Range(100, 300, 10))
+						.setImpact(OptionImpact.LOW)
+					)
 				)
 			).registerOptionOverlay(Identifier.parse("sodium:quality.filtering_mode"), builder.createEnumOption(Identifier.parse("sodium:quality.filtering_mode"), TextureFilteringMethod.class)
 				.setTooltip(i -> {

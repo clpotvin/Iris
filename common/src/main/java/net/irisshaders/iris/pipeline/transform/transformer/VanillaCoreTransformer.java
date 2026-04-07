@@ -6,6 +6,7 @@ import io.github.douira.glsl_transformer.ast.query.Root;
 import io.github.douira.glsl_transformer.ast.transform.ASTInjectionPoint;
 import io.github.douira.glsl_transformer.ast.transform.ASTParser;
 import io.github.douira.glsl_transformer.util.Type;
+import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.pipeline.transform.PatchShaderType;
 import net.irisshaders.iris.pipeline.transform.parameter.VanillaParameters;
 
@@ -27,6 +28,24 @@ public class VanillaCoreTransformer {
 			// No overlay but has Color + Normal — display entities may render through this path.
 			// Normal check excludes particles/weather (which have Color but no Normal).
 			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
+		}
+
+		// Wynncraft text display entity brightness boost: text shaders are excluded from
+		// EntityPatcher (isText() check above), but still need brightness boost when a
+		// custom skybox is active. Text gets 2x the entity boost for readability.
+		if (parameters.inputs.isText() && parameters.type.glShaderType == ShaderType.FRAGMENT) {
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"uniform float iris_wynncraftEntityBoost;");
+			// Text gets 2x boost (squared) since text readability is critical.
+			// Also luminance-aware: bright text gets less boost.
+			tree.appendMainFunctionBody(t, """
+				{
+				    float irisW_textBoost = iris_wynncraftEntityBoost * iris_wynncraftEntityBoost;
+				    float irisW_textLuma = dot(iris_FragData0.rgb, vec3(0.2126, 0.7152, 0.0722));
+				    float irisW_textScale = mix(irisW_textBoost, 1.0, smoothstep(0.3, 0.8, irisW_textLuma));
+				    iris_FragData0.rgb *= irisW_textScale;
+				}
+				""");
 		}
 
 		tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,

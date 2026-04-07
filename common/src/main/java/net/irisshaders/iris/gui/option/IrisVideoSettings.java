@@ -17,6 +17,7 @@ public class IrisVideoSettings {
 	public static int glintBrightness = 110;
 	public static int tintBrightness = 75;
 	public static int wynncraftSkyboxOpacity = 100;
+	public static int wynncraftEntityBoost = 150;
 	public static final OptionInstance<Integer> RENDER_DISTANCE = new ShadowDistanceOption<>("options.iris.shadowDistance",
 		mc -> {
 			WorldRenderingPipeline pipeline = Iris.getPipelineManager().getPipelineNullable();

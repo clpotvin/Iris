@@ -76,6 +76,8 @@
   "options.iris.tintBrightness.tooltip": "Controls the brightness of Wynncraft armor/weapon tints (color recolors). Adjust if tints appear too bright or too dim.",
   "options.iris.wynncraftSkyboxOpacity": "Skybox Opacity",
   "options.iris.wynncraftSkyboxOpacity.tooltip": "Controls how visible the Wynncraft custom skybox is. At 100%, the Wynncraft skybox fully replaces the sky. Lower values blend with the shader pack sky.",
+  "options.iris.wynncraftEntityBoost": "Entity Brightness Boost",
+  "options.iris.wynncraftEntityBoost.tooltip": "Boosts entity brightness when a custom skybox is active. Helps readability of names and health bars in dark skybox zones. Only active when a Wynncraft custom skybox is displayed.",
   "label.iris.true": "On",
   "label.iris.false": "Off"
 }

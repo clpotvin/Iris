@@ -825,6 +825,7 @@ public class EntityPatcher {
 			}
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityBoost;");
 
 			// Wynncraft skybox detection: discard skybox display entities so the post-process
 			// skybox renders instead. Variant ID is detected CPU-side (no GL version requirement).
@@ -854,6 +855,15 @@ public class EntityPatcher {
 				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
 				tree.appendMainFunctionBody(t, fo + " *= iris_wynncraft_nearfade;");
+				// Luminance-aware entity brightness boost (auto-scales with time of day from Java).
+				// Dark pixels get full boost, bright pixels get less — prevents over-brightening.
+				tree.appendMainFunctionBody(t, """
+					{
+					    float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
+					    float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
+					    FRAG_OUTPUT.rgb *= irisW_boostScale;
+					}
+					""".replace("FRAG_OUTPUT", fo));
 			} else {
 				// DEFERRED PATH: mid-main injection for packed GBuffer packs (e.g., Photon).
 				// Skybox detection runs early — discard skybox entities before GBuffer packing.
@@ -914,7 +924,10 @@ public class EntityPatcher {
 						mainBody.getStatements().addAll(glintIdx,
 							t.parseStatements(root,
 								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar),
-								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;"));
+								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;",
+								"{ float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
+								"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
+								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }"));
 					}
 				}
 			}
