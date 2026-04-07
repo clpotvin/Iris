@@ -71,7 +71,7 @@ public class VanillaCoreTransformer {
 		    vec2 irisW_ss = iris_globalInfo.ScreenSize;
 		    vec2 irisW_cuv = gl_FragCoord.xy / irisW_ss - 0.5;
 		    float irisW_ar = irisW_ss.y / irisW_ss.x;
-		    vec2 irisW_UV = irisW_cuv / vec2(irisW_ar, 1.0) / 2.0;
+		    vec2 irisW_UV = irisW_cuv / vec2(irisW_ar, 1.0);
 		    float irisW_prog = cos(irisW_transColor.a * IRISW_PI / 2.0);
 		    float irisW_gt = iris_globalInfo.GameTime;
 		    vec3 irisW_rgb = irisW_transColor.rgb;
@@ -264,7 +264,11 @@ public class VanillaCoreTransformer {
 		} else if (irisW_texSample.a > 252.5 && irisW_texSample.a < 253.5) {
 		    irisW_transType = clamp(int(irisW_texSample.b + 0.5), 0, 19);
 
-		    // Shadow detection: shadow text has darkened vertex colors (RP heuristic)
+		    // Shadow detection: MC text shadow = vertex color / 4.
+		    // RP heuristic in 0-1 space: shadow when all channels / 4 < 0.23 (i.e. < 0.92).
+		    // Shadow of white (0.25) → 0.0625 < 0.23 ✓. Normal white (1.0) → 0.25 > 0.23 ✗.
+		    // For black overlay (common), both passes have (0,0,0) → both "shadow" →
+		    // both suppressed. This matches RP behavior; Wynncraft handles via overlay design.
 		    float irisW_shadowMax = max(iris_Color.r, max(iris_Color.g, iris_Color.b));
 		    irisW_transShadow = (irisW_shadowMax / 4.0 < 0.23) ? 1.0 : 0.0;
 
