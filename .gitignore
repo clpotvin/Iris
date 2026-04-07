@@ -54,3 +54,7 @@ run/
 # Local assets / resource packs
 /assets/
 Wynncraft_RP_*/
+.gradle-local/
+/.agents
+CLAUDE.md
+skills-lock.json
