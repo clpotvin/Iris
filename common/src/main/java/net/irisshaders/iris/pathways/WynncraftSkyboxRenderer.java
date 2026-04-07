@@ -67,6 +67,7 @@ public class WynncraftSkyboxRenderer {
 		uniform mat4 InvViewMat;
 		uniform float GameTime;
 		uniform float Opacity;
+		uniform float SceneDarkening;
 		uniform int SkyboxId;
 
 		in vec2 uv;
@@ -469,7 +470,7 @@ public class WynncraftSkyboxRenderer {
 
 		    // Distance fade: baseTint at player, full tint at 512+ blocks
 		    float distanceFade = smoothstep(64.0, 512.0, linearDist);
-		    float tintStrength = mix(baseTint, 1.0, distanceFade) * Opacity;
+		    float tintStrength = mix(baseTint, 1.0, distanceFade) * Opacity * SceneDarkening;
 
 		    // Step 1: Luminance-aware darkening.
 		    // Measure pixel brightness BEFORE tinting. Already-dark pixels (nighttime,
@@ -575,6 +576,8 @@ public class WynncraftSkyboxRenderer {
 		// Dynamic uniforms
 		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "GameTime", () -> gameTime);
 		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "Opacity", () -> opacity);
+		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "SceneDarkening",
+			() -> net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftSceneDarkening / 100.0f);
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "SkyboxId", () -> this.skyboxId);
 
 		// Samplers

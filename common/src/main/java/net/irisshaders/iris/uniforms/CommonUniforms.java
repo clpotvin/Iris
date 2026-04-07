@@ -79,14 +79,12 @@ public final class CommonUniforms {
 		// Wynncraft tint brightness (user-configurable, 0-150%)
 		uniforms.uniform1f("iris_tintBrightness", (FloatSupplier) () -> IrisVideoSettings.tintBrightness / 100.0f, listener -> {});
 		// Wynncraft entity brightness boost — auto-scales with time of day.
-		// Only active when custom skybox is displayed.
-		// Noon (6000 ticks): slider value. Sunrise/sunset: ~1.5x slider. Night: ~2x slider.
-		// The slider (100-300%) acts as a base multiplier that the time scaling adjusts.
+		// Only active when custom skybox is displayed. Fixed 150% base.
 		uniforms.uniform1f("iris_wynncraftEntityBoost", (FloatSupplier) () -> {
 			if (net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogColor == null) {
 				return 1.0f;
 			}
-			float baseBoost = IrisVideoSettings.wynncraftEntityBoost / 100.0f;
+			float baseBoost = 1.0f;
 			net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
 			if (mc.level == null) return baseBoost;
 

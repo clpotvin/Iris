@@ -180,7 +180,7 @@ public class IrisConfig {
 			IrisVideoSettings.glintBrightness = Integer.parseInt(properties.getProperty("glintBrightness", "110"));
 			IrisVideoSettings.tintBrightness = Integer.parseInt(properties.getProperty("tintBrightness", "75"));
 			IrisVideoSettings.wynncraftSkyboxOpacity = Integer.parseInt(properties.getProperty("wynncraftSkyboxOpacity", "100"));
-			IrisVideoSettings.wynncraftEntityBoost = Integer.parseInt(properties.getProperty("wynncraftEntityBoost", "150"));
+			IrisVideoSettings.wynncraftSceneDarkening = Integer.parseInt(properties.getProperty("wynncraftSceneDarkening", "100"));
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
 			IrisVideoSettings.shadowDistance = 32;
@@ -188,7 +188,7 @@ public class IrisConfig {
 			IrisVideoSettings.glintBrightness = 110;
 			IrisVideoSettings.tintBrightness = 75;
 			IrisVideoSettings.wynncraftSkyboxOpacity = 100;
-			IrisVideoSettings.wynncraftEntityBoost = 150;
+			IrisVideoSettings.wynncraftSceneDarkening = 100;
 			save();
 		}
 
@@ -216,7 +216,7 @@ public class IrisConfig {
 		properties.setProperty("glintBrightness", String.valueOf(IrisVideoSettings.glintBrightness));
 		properties.setProperty("tintBrightness", String.valueOf(IrisVideoSettings.tintBrightness));
 		properties.setProperty("wynncraftSkyboxOpacity", String.valueOf(IrisVideoSettings.wynncraftSkyboxOpacity));
-		properties.setProperty("wynncraftEntityBoost", String.valueOf(IrisVideoSettings.wynncraftEntityBoost));
+		properties.setProperty("wynncraftSceneDarkening", String.valueOf(IrisVideoSettings.wynncraftSceneDarkening));
 		// NB: This uses ISO-8859-1 with unicode escapes as the encoding
 		try (OutputStream os = Files.newOutputStream(propertiesPath)) {
 			properties.store(os, COMMENT);
