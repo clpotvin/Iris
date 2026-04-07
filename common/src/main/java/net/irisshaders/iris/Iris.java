@@ -105,6 +105,12 @@ public class Iris {
 	private static KeyMapping toggleShadersKeybind;
 	private static KeyMapping shaderpackScreenKeybind;
 	private static KeyMapping wireframeKeybind;
+	// DEBUG: Wynncraft transition testing keys (remove before release)
+	private static KeyMapping debugTransCycleKeybind;
+	private static KeyMapping debugTransTriggerKeybind;
+	public static int debugTransitionType = 0;
+	public static float debugTransitionProgress = 0.0f;
+	private static boolean debugTransActive = false;
 	// Flag variable used when reloading
 	// Used in favor of queueDefaultShaderPackOptionValues() for resetting as the
 	// behavior is more concrete and therefore is more likely to repair a user's issues
@@ -211,6 +217,20 @@ public class Iris {
 			if (irisConfig.areDebugOptionsEnabled() && minecraft.player != null && !Minecraft.getInstance().isLocalServer()) {
 				minecraft.player.displayClientMessage(Component.literal("No cheating; wireframe only in singleplayer!"), false);
 			}
+		}
+		// DEBUG: Transition test keys (remove before release)
+		if (debugTransCycleKeybind.consumeClick()) {
+			debugTransitionType = (debugTransitionType + 1) % 20; // 0=off, 1-19=effects
+			if (minecraft.player != null) {
+				minecraft.player.displayClientMessage(Component.literal("[DEBUG] Transition: " + debugTransitionType), false);
+			}
+		}
+		if (debugTransTriggerKeybind.isDown()) {
+			debugTransitionProgress = Math.min(debugTransitionProgress + 0.02f, 1.0f);
+			debugTransActive = true;
+		} else if (debugTransActive) {
+			debugTransitionProgress = 0.0f;
+			debugTransActive = false;
 		}
 	}
 
@@ -796,6 +816,9 @@ public class Iris {
 		toggleShadersKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.toggleShaders", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, irisKeybindCategory));
 		shaderpackScreenKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.shaderPackSelection", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_O, irisKeybindCategory));
 		wireframeKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.wireframe", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), irisKeybindCategory));
+		// DEBUG: Transition test keys (remove before release)
+		debugTransCycleKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.debugTransCycle", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7, irisKeybindCategory));
+		debugTransTriggerKeybind = IrisPlatformHelpers.getInstance().registerKeyBinding(new KeyMapping("iris.keybind.debugTransTrigger", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F8, irisKeybindCategory));
 
 		DHCompat.run();
 

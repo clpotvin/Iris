@@ -106,6 +106,10 @@ public final class CommonUniforms {
 			return baseBoost * (1.0f + darkness);
 		}, listener -> {});
 
+		// DEBUG: Transition test uniforms (remove before release)
+		uniforms.uniform1i("iris_debugTransType", () -> net.irisshaders.iris.Iris.debugTransitionType, listener -> {});
+		uniforms.uniform1f("iris_debugTransProgress", (FloatSupplier) () -> net.irisshaders.iris.Iris.debugTransitionProgress, listener -> {});
+
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,
 		//       but we do. How will custom uniforms depending on atlasSize work?
 		//
