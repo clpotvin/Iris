@@ -253,15 +253,7 @@ public class VanillaCoreTransformer {
 		irisW_transColor = vec4(0.0);
 		irisW_transShadow = 0.0;
 
-		// DEBUG: override with debug uniforms if active (remove before release)
-		if (iris_debugTransType > 0) {
-		    irisW_transType = iris_debugTransType;
-		    irisW_transColor = vec4(0.0, 0.0, 0.0, iris_debugTransProgress);
-		    irisW_transShadow = 0.0;
-		    const vec2 irisW_corners[4] = vec2[4](vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(1.0, 0.0));
-		    vec2 irisW_screen = irisW_corners[gl_VertexID % 4];
-		    gl_Position = vec4((irisW_screen * 2.0 - 1.0) * vec2(1.0, -1.0), -1.0, 1.0);
-		} else if (irisW_texSample.a > 252.5 && irisW_texSample.a < 253.5) {
+		if (irisW_texSample.a > 252.5 && irisW_texSample.a < 253.5) {
 		    irisW_transType = clamp(int(irisW_texSample.b + 0.5), 0, 19);
 
 		    // Shadow detection: MC text shadow = vertex color / 4.
@@ -277,8 +269,8 @@ public class VanillaCoreTransformer {
 
 		    if (irisW_transType > 0) {
 		        // Reposition to fullscreen quad
-		        const vec2 irisW_dbgCorners[4] = vec2[4](vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(1.0, 0.0));
-		        vec2 irisW_screen = irisW_dbgCorners[gl_VertexID % 4];
+		        const vec2 irisW_corners[4] = vec2[4](vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(1.0, 0.0));
+		        vec2 irisW_screen = irisW_corners[gl_VertexID % 4];
 		        gl_Position = vec4((irisW_screen * 2.0 - 1.0) * vec2(1.0, -1.0), -1.0, 1.0);
 		    }
 		}
@@ -322,10 +314,6 @@ public class VanillaCoreTransformer {
 			}
 			// Ensure mc_midTexCoord is declared (stable per-quad UV for signal detection)
 			addIfNotExists(root, t, tree, "mc_midTexCoord", Type.F32VEC2, StorageType.IN);
-			// DEBUG: transition test uniforms (remove before release)
-			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
-				"uniform int iris_debugTransType;",
-				"uniform float iris_debugTransProgress;");
 			// Declare varyings for vertex → fragment transport
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 				"flat out int irisW_transType;",

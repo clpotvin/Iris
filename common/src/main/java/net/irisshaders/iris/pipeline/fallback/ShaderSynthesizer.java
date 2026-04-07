@@ -168,8 +168,6 @@ public class ShaderSynthesizer {
 		if (inputs.isText() && inputs.hasTex()) {
 			shader.append("uniform sampler2D Sampler0;\n"); // VS needs sampler for signal detection
 			shader.append("in vec2 mc_midTexCoord;\n");
-			shader.append("uniform int iris_debugTransType;\n"); // DEBUG (remove before release)
-			shader.append("uniform float iris_debugTransProgress;\n"); // DEBUG (remove before release)
 			shader.append("flat out int irisW_transType;\n");
 			shader.append("out vec4 irisW_transColor;\n");
 			shader.append("flat out float irisW_transShadow;\n");
@@ -178,14 +176,7 @@ public class ShaderSynthesizer {
 			    irisW_transType = 0;
 			    irisW_transColor = vec4(0.0);
 			    irisW_transShadow = 0.0;
-			    if (iris_debugTransType > 0) {
-			        irisW_transType = iris_debugTransType;
-			        irisW_transColor = vec4(0.0, 0.0, 0.0, iris_debugTransProgress);
-			        irisW_transShadow = 0.0;
-			        const vec2 irisW_corners[4] = vec2[4](vec2(0.0,0.0), vec2(0.0,1.0), vec2(1.0,1.0), vec2(1.0,0.0));
-			        vec2 irisW_screen = irisW_corners[gl_VertexID % 4];
-			        gl_Position = vec4((irisW_screen * 2.0 - 1.0) * vec2(1.0, -1.0), -1.0, 1.0);
-			    } else if (irisW_texSample.a > 252.5 && irisW_texSample.a < 253.5) {
+			    if (irisW_texSample.a > 252.5 && irisW_texSample.a < 253.5) {
 			        irisW_transType = clamp(int(irisW_texSample.b + 0.5), 0, 19);
 			        float irisW_shadowMax = max(Color.r, max(Color.g, Color.b));
 			        irisW_transShadow = (irisW_shadowMax / 4.0 < 0.23) ? 1.0 : 0.0;

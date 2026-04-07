@@ -1215,11 +1215,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (wynncraftTransitionRenderer != null) {
 			ImmediateState.TransitionDetection cpuTrans = ImmediateState.consumeTransitionDetection();
 
-			boolean debugActive = Iris.debugTransitionType > 0;
-			int transType = debugActive ? Iris.debugTransitionType : cpuTrans.type();
-			float transProgress = debugActive ? Iris.debugTransitionProgress
-				: cpuTrans.opacity() / 255.0f;
-			int transColor = debugActive ? 0x000000 : cpuTrans.color();
+			int transType = cpuTrans.type();
+			float transProgress = cpuTrans.opacity() / 255.0f;
+			int transColor = cpuTrans.color();
 
 			if (transType > 0 && transProgress > 0.001f) {
 				com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
