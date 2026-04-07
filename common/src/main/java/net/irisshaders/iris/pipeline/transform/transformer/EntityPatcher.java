@@ -162,26 +162,16 @@ public class EntityPatcher {
 		    return irisW_blend(texture(Sampler0, uv), color, color.a);
 		}""",
 		"""
-		vec4 irisW_shiny(vec3 iW_color, float iW_intensity, float iW_brightness, vec2 iW_sUV, float iW_time, vec4 iW_tex) {
-		    // Screen-space sparkle grid: each 8x8 pixel cell has a randomly positioned,
-		    // independently flashing highlight. This produces multiple small sparkle points
-		    // scattered across the surface rather than one sweeping blob.
-		    vec2 iW_cell = floor(gl_FragCoord.xy / 8.0);
-		    vec2 iW_f    = fract(gl_FragCoord.xy / 8.0);
-		    float iW_r1  = irisW_random(iW_cell);
-		    float iW_r2  = irisW_random(iW_cell + 31.71);
-		    float iW_r3  = irisW_random(iW_cell + 57.13);
-		    // Spot centre randomised within inner 60% of cell to avoid seam artifacts
-		    vec2  iW_ctr = vec2(0.2 + iW_r2 * 0.6, 0.2 + iW_r3 * 0.6);
-		    // Per-cell flash: random period (0.5-2s) and random phase offset
-		    float iW_flash = sin(iW_time * (13.0 + iW_r1 * 37.0) + iW_r1 * 6.28318) * 0.5 + 0.5;
-		    iW_flash = smoothstep(0.72, 0.98, iW_flash);
-		    // Circular spot (~25% of cell width)
-		    float iW_spot = 1.0 - smoothstep(0.12, 0.30, length(iW_f - iW_ctr));
-		    // Prefer brighter (metallic) texture areas
-		    float iW_luma = dot(iW_tex.rgb, vec3(0.2126, 0.7152, 0.0722));
-		    float iW_mask = iW_spot * iW_flash * smoothstep(0.2, 0.7, iW_luma) * iW_intensity;
-		    return vec4(iW_tex.rgb + iW_color * iW_mask * iW_brightness, iW_tex.a);
+		vec4 irisW_shiny(vec3 iW_color, float iW_intensity, float iW_brightness, vec2 iW_sweepUV, bool iW_isAtlas, float iW_time, vec4 iW_tex) {
+		    // Clean directional sweep — like shadow (case 9) but additive highlight
+		    vec2 iW_dir = iW_isAtlas ? vec2(0.3, 0.0) : vec2(0.3, -0.07);
+		    float iW_speed = iW_isAtlas ? 2.0 : 0.5;
+		    float iW_freq = iW_isAtlas ? 0.25 : 0.5;
+		    float iW_x = dot(iW_dir, iW_sweepUV) - iW_time * iW_speed;
+		    float iW_phase = 1.0 - fract(iW_x * iW_freq);
+		    // Wider, softer band than shadow: smooth leading edge, gradual fade
+		    float iW_wave = smoothstep(0.0, 0.05, iW_phase) * (1.0 - smoothstep(0.1, 0.45, iW_phase));
+		    return vec4(iW_tex.rgb + iW_color * iW_wave * iW_intensity * iW_brightness, iW_tex.a);
 		}""",
 		"""
 		vec4 irisW_tintEffect(vec3 tintColor, vec4 texColor) {
@@ -235,8 +225,10 @@ public class EntityPatcher {
 		    bool iW_applyLighting = true;
 		    bool iW_isTint = (iW_id >= 15 && iW_id <= 24);
 		    bool iW_knownEffect = (iW_id >= 1 && iW_id <= 31);
+		    // Shiny uses continuousSweepUV (same as shadow sweep) for clean directional band
+		    vec2 iW_shinySweep = irisW_continuousSweepUV(iW_uv, iW_midTex, iW_texSize, iW_eUV);
 		    switch (iW_id) {
-		        case 1:  { iW_out = irisW_shiny(irisW_rgb(255, 200, 100), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
+		        case 1:  { iW_out = irisW_shiny(irisW_rgb(255, 200, 100), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
 		        case 2:  { iW_out.a *= 0.5; iW_applyLighting = false; break; }
 		        case 3:  {
 		            iW_out = irisW_grayscale(iW_tex);
@@ -365,13 +357,13 @@ public class EntityPatcher {
 		        case 22: { iW_out = irisW_tintEffect(irisW_rgb(255, 150, 200), iW_tex); break; }
 		        case 23: { iW_out = irisW_tintEffect(irisW_rgb(200, 60,  230), iW_tex); break; }
 		        case 24: { iW_out = irisW_tintEffect(irisW_rgb(240, 240, 80 ), iW_tex); break; }
-		        case 25: { iW_out = irisW_shiny(irisW_rgb(255, 255, 255), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
-		        case 26: { iW_out = irisW_shiny(irisW_rgb(85,  255, 85 ), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
-		        case 27: { iW_out = irisW_shiny(irisW_rgb(255, 255, 85 ), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
-		        case 28: { iW_out = irisW_shiny(irisW_rgb(255, 85,  255), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
-		        case 29: { iW_out = irisW_shiny(irisW_rgb(85,  255, 255), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
-		        case 30: { iW_out = irisW_shiny(irisW_rgb(255, 85,  85 ), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
-		        case 31: { iW_out = irisW_shiny(irisW_rgb(170, 0,   170), 0.4, 1.0, iW_sUV, iW_time, iW_tex); break; }
+		        case 25: { iW_out = irisW_shiny(irisW_rgb(255, 255, 255), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 26: { iW_out = irisW_shiny(irisW_rgb(85,  255, 85 ), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 27: { iW_out = irisW_shiny(irisW_rgb(255, 255, 85 ), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 28: { iW_out = irisW_shiny(irisW_rgb(255, 85,  255), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 29: { iW_out = irisW_shiny(irisW_rgb(85,  255, 255), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 30: { iW_out = irisW_shiny(irisW_rgb(255, 85,  85 ), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
+		        case 31: { iW_out = irisW_shiny(irisW_rgb(170, 0,   170), 0.4, 2.0, iW_shinySweep, iW_isAtlas, iW_time, iW_tex); break; }
 		    }
 		    if (iW_applyLighting && iW_knownEffect) {
 		        float iW_texLuma = max(dot(iW_tex.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.001);
