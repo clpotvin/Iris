@@ -220,6 +220,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private long lastDetectionTimeMs = 0;
 	private long skyboxFadeInStartMs = 0;
 	private float skyboxFadeOpacity = 0.0f;
+	// Crossfade: old skybox fades out while new one fades in
+	private int previousSkyboxId = 0;
+	private long crossfadeStartMs = 0;
+	private static final float CROSSFADE_DURATION_MS = 2000.0f;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		ShaderPrinter.resetPrintState();
@@ -1155,7 +1159,12 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 				if (detectedId > 0 && detectedId <= 7) {
 					if (detectedId != displayedSkyboxId) {
 						if (IrisVideoSettings.wynncraftDebugLogging) {
-							Iris.logger.info("[WynnIris Skybox] Switched to skybox ID={} (was {})", detectedId, displayedSkyboxId);
+							Iris.logger.info("[WynnIris Skybox] Crossfade {} -> {}", displayedSkyboxId, detectedId);
+						}
+						// Start crossfade: old skybox fades out, new one fades in
+						if (displayedSkyboxId > 0) {
+							previousSkyboxId = displayedSkyboxId;
+							crossfadeStartMs = now;
 						}
 						displayedSkyboxId = detectedId;
 						skyboxFadeInStartMs = now;
@@ -1178,11 +1187,29 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 					}
 				}
 
-				// Render with the smoothed state
+				// Expire crossfade after duration
+				if (previousSkyboxId > 0 && (now - crossfadeStartMs) > (long) CROSSFADE_DURATION_MS) {
+					previousSkyboxId = 0;
+				}
+
+				com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+				float gameTime = computeWynncraftGameTime();
+
+				// Render outgoing skybox (crossfade: fading out)
+				if (previousSkyboxId > 0) {
+					float crossfadeProgress = (now - crossfadeStartMs) / CROSSFADE_DURATION_MS;
+					float outgoingOpacity = opacity * (1.0f - crossfadeProgress);
+					if (outgoingOpacity > 0.001f) {
+						wynncraftSkyboxRenderer.render(
+							main.getDepthTexture().iris$getGlId(),
+							(GlTexture) main.getColorTexture(),
+							gameTime, outgoingOpacity, previousSkyboxId);
+					}
+				}
+
+				// Render current skybox
 				if (displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
 					float effectiveOpacity = opacity * skyboxFadeOpacity;
-					com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
-					float gameTime = computeWynncraftGameTime();
 					wynncraftSkyboxRenderer.render(
 						main.getDepthTexture().iris$getGlId(),
 						(GlTexture) main.getColorTexture(),
