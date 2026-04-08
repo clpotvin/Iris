@@ -45,11 +45,11 @@ public class ItemStackStateLayerMixin {
 
 		// Wynncraft skybox CPU detection: check this layer's particle icon texture
 		// for the skybox signal (G=251, A=254, B=variant ID). Works on ALL platforms.
-		iris$checkSkyboxSignal();
+		iris$checkSkyboxSignal(poseStack);
 	}
 
 	@Unique
-	private void iris$checkSkyboxSignal() {
+	private void iris$checkSkyboxSignal(PoseStack poseStack) {
 		// Check quad sprites for the Wynncraft skybox texture signal (G=251, A=254, B=variant ID).
 		// particleIcon is often minecraft:item/empty for custom models — the actual texture is on quads.
 		if (quads == null || quads.isEmpty()) return;
@@ -75,9 +75,16 @@ public class ItemStackStateLayerMixin {
 					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
 					if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
 						int r = (pixel >> 16) & 0xFF;
+						// Extract entity distance from camera via PoseStack model matrix translation
+						float dist = -1f;
+						try {
+							org.joml.Matrix4f mat = poseStack.last().pose();
+							float tx = mat.m30(), ty = mat.m31(), tz = mat.m32();
+							dist = (float) Math.sqrt(tx * tx + ty * ty + tz * tz);
+						} catch (Exception ignored) {}
 						net.irisshaders.iris.Iris.logger.info(
-							"[WynnIris Skybox] CPU detected skybox ID={} from quad sprite {} (pixel argb={},{},{},{})",
-							b, contents.name(), a, r, g, b);
+							"[WynnIris Skybox] CPU detected skybox ID={} dist={} from quad sprite {} (pixel argb={},{},{},{})",
+							b, dist, contents.name(), a, r, g, b);
 					}
 					return;
 				}

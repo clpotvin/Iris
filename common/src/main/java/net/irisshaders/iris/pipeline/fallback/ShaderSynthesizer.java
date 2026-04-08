@@ -162,6 +162,9 @@ public class ShaderSynthesizer {
 
 
 		// Wynncraft effects & movements: inject signal detection + application for text fallback shaders
+		if (inputs.isText() && inputs.hasTex() && net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
+			net.irisshaders.iris.Iris.logger.info("[WynnIris] Synthesizing fallback text VS with effects/movements support");
+		}
 		if (inputs.isText() && inputs.hasTex()) {
 			shader.append("flat out int irisW_moveBlink;\n");
 			// Utilities for effects/movements
