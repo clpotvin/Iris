@@ -87,6 +87,8 @@ public class ImmediateState {
 
 	public static void noteSkyboxDetection(int id, float deltaY) {
 		if (id >= 1 && id <= 7) {
+			// Only consider entities with delta_y between -550 and -700
+			if (deltaY < -700f || deltaY > -550f) return;
 			float deviation = Math.abs(deltaY - SKYBOX_TARGET_DELTA_Y);
 			float currentDeviation = Math.abs(cpuDetectedSkyboxBestDeltaY - SKYBOX_TARGET_DELTA_Y);
 			if (cpuDetectedSkyboxId == 0 || deviation < currentDeviation) {
