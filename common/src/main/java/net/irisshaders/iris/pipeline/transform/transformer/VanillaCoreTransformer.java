@@ -452,18 +452,27 @@ public class VanillaCoreTransformer {
 				root.rename("vaPosition", "iris_Position");
 			}
 			if (parameters.inputs.hasColor()) {
-				// Neutralize Wynncraft glint (G=255) and translucency (G=254) signals to white.
-				// Both get full alpha — translucency is applied fragment-side only to avoid double-multiplication.
-				String signalNeutral = "(iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.99 ? vec4(1.0)"
+				// Neutralize Wynncraft signal colors to white.
+				// Signals: glint (G=255), translucency (G=254), effects (G=240), movements (G=235).
+				// Integer-domain detection: int(round(iris_Color.g * 255.0)) == exact value.
+				// All get full alpha — applied fragment-side or via separate varyings.
+				String effectMovementNeutral =
+					"int(round(iris_Color.g * 255.0)) == 240 || int(round(iris_Color.g * 255.0)) == 235"
+					+ " || int(round(iris_Color.g * 255.0)) == 60 || int(round(iris_Color.g * 255.0)) == 58"
+					+ " || int(round(iris_Color.g * 255.0)) == 59";
+				String signalNeutral = "(iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.13 ? vec4(1.0)"
 					+ " : iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
+					+ " : (" + effectMovementNeutral + ") ? vec4(1.0)"
 					+ " : iris_Color)";
-				String translucencyOnlyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0) : iris_Color)";
+				String translucencyOnlyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
+					+ " : (" + effectMovementNeutral + ") ? vec4(1.0)"
+					+ " : iris_Color)";
 				if (parameters.inputs.hasOverlay() && !parameters.inputs.isText()) {
-					// Entity: neutralize both glint and translucency signals
+					// Entity: neutralize glint, translucency, effects, and movements
 					root.replaceReferenceExpressions(t, "vaColor", signalNeutral + " * iris_transforms.ColorModulator");
 					root.replaceReferenceExpressions(t, "gl_Color", signalNeutral + " * iris_transforms.ColorModulator");
 				} else if (!parameters.inputs.isText() && parameters.inputs.hasNormal()) {
-					// Non-overlay with Normal (entities/display entities): neutralize translucency signals
+					// Non-overlay with Normal (entities/display entities): neutralize translucency + effects/movements
 					root.replaceReferenceExpressions(t, "vaColor", translucencyOnlyNeutral + " * iris_transforms.ColorModulator");
 					root.replaceReferenceExpressions(t, "gl_Color", translucencyOnlyNeutral + " * iris_transforms.ColorModulator");
 				} else {
