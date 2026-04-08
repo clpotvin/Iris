@@ -64,24 +64,28 @@ public class MixinTextDisplayRenderer {
 			}
 		}
 
-		// Debug: log all text display entities with PUA characters
+		// Debug: log text display entities with PUA characters in the transition font
 		if (hasPUA && IrisVideoSettings.wynncraftDebugLogging) {
 			StringBuilder charInfo = new StringBuilder();
 			text.visit((Style style, String content) -> {
 				FontDescription font = style.getFont();
-				String fontName = (font instanceof FontDescription.Resource r) ? r.id().toString() : font.getClass().getSimpleName();
+				if (!(font instanceof FontDescription.Resource r) || !r.id().equals(TRANSITION_FONT)) {
+					return Optional.empty();
+				}
 				for (int i = 0; i < content.length(); i++) {
 					char c = content.charAt(i);
 					if (c >= 0xE000 && c <= 0xE1FF) {
-						charInfo.append(String.format("U+%04X(font=%s) ", (int) c, fontName));
+						charInfo.append(String.format("U+%04X ", (int) c));
 					}
 				}
 				return Optional.empty();
 			}, Style.EMPTY);
-			int opacity = trs.textOpacity().get(interpolationProgress) & 0xFF;
-			net.irisshaders.iris.Iris.logger.info(
-				"[WynnIris Trans] PUA text entity: chars=[{}] opacity={} plainLen={}",
-				charInfo.toString().trim(), opacity, plain.length());
+			if (!charInfo.isEmpty()) {
+				int opacity = trs.textOpacity().get(interpolationProgress) & 0xFF;
+				net.irisshaders.iris.Iris.logger.info(
+					"[WynnIris Trans] PUA text entity: chars=[{}] opacity={} plainLen={}",
+					charInfo.toString().trim(), opacity, plain.length());
+			}
 		}
 
 		if (!hasPUA) return;
