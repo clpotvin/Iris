@@ -218,6 +218,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 	private int displayedSkyboxId = 0;
 	private long lastDetectionTimeMs = 0;
+	private long skyboxFadeInStartMs = 0;
 	private float skyboxFadeOpacity = 0.0f;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
@@ -1152,14 +1153,17 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 				// When multiple skyboxes are detected, ImmediateState picks the one
 				// with delta_y closest to -601.6 (the correct beacon height).
 				if (detectedId > 0 && detectedId <= 7) {
-					lastDetectionTimeMs = now;
 					if (detectedId != displayedSkyboxId) {
 						if (IrisVideoSettings.wynncraftDebugLogging) {
 							Iris.logger.info("[WynnIris Skybox] Switched to skybox ID={} (was {})", detectedId, displayedSkyboxId);
 						}
 						displayedSkyboxId = detectedId;
+						skyboxFadeInStartMs = now;
 					}
-					skyboxFadeOpacity = 1.0f;
+					lastDetectionTimeMs = now;
+					// 2s fade in from first detection
+					float fadeInSeconds = (now - skyboxFadeInStartMs) / 1000.0f;
+					skyboxFadeOpacity = Math.min(fadeInSeconds / 2.0f, 1.0f);
 				} else if (displayedSkyboxId > 0) {
 					// No detection — fade over 2 seconds
 					float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
