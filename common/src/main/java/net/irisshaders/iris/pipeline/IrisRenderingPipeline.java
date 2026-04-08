@@ -1148,47 +1148,29 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 				long now = System.currentTimeMillis();
 
-				// Temporal smoothing state machine.
-				// Once a skybox is active, LOCK the ID until it fully fades out.
-				// Only accept a new detection when no skybox is currently displayed.
+				// Skybox state machine: no locking, instant switch, 2s fade on loss.
+				// When multiple skyboxes are detected, ImmediateState picks the one
+				// with delta_y closest to -601.6 (the correct beacon height).
 				if (detectedId > 0 && detectedId <= 7) {
 					lastDetectionTimeMs = now;
-					if (displayedSkyboxId == 0) {
-						// No skybox active — accept this ID
-						displayedSkyboxId = detectedId;
+					if (detectedId != displayedSkyboxId) {
 						if (IrisVideoSettings.wynncraftDebugLogging) {
-							Iris.logger.info("[WynnIris Skybox] Activated skybox ID={}", detectedId);
+							Iris.logger.info("[WynnIris Skybox] Switched to skybox ID={} (was {})", detectedId, displayedSkyboxId);
 						}
-					} else if (detectedId != displayedSkyboxId && IrisVideoSettings.wynncraftDebugLogging) {
-						Iris.logger.info("[WynnIris Skybox] Ignoring detected ID={} (locked to {})", detectedId, displayedSkyboxId);
+						displayedSkyboxId = detectedId;
 					}
-					// If skybox already active, just refresh the timer (keep current ID)
 					skyboxFadeOpacity = 1.0f;
 				} else if (displayedSkyboxId > 0) {
-					// No detection — persistence/fade timing (wall-clock, TPS-independent)
-					// Long hold (10s) to survive entity culling gaps + flashback replays.
-					// Fade over 3s after hold expires.
+					// No detection — fade over 2 seconds
 					float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
-					if (secondsSince < 10.0f) {
-						// Hold phase: keep skybox fully visible
-						if (IrisVideoSettings.wynncraftDebugLogging && secondsSince < 0.1f) {
-							Iris.logger.info("[WynnIris Skybox] Detection lost for ID={}, entering 10s hold phase", displayedSkyboxId);
-						}
-						skyboxFadeOpacity = 1.0f;
-					} else if (secondsSince < 13.0f) {
-						// Fade phase: linear fade over 3 seconds
-						if (IrisVideoSettings.wynncraftDebugLogging && secondsSince < 10.1f) {
-							Iris.logger.info("[WynnIris Skybox] Hold expired for ID={}, entering 3s fade phase", displayedSkyboxId);
-						}
-						skyboxFadeOpacity = 1.0f - (secondsSince - 10.0f) / 3.0f;
+					if (secondsSince < 2.0f) {
+						skyboxFadeOpacity = 1.0f - secondsSince / 2.0f;
 					} else {
-						// Gone: fully faded, reset
 						if (IrisVideoSettings.wynncraftDebugLogging) {
 							Iris.logger.info("[WynnIris Skybox] Faded out ID={}, resetting", displayedSkyboxId);
 						}
 						skyboxFadeOpacity = 0.0f;
 						displayedSkyboxId = 0;
-
 					}
 				}
 

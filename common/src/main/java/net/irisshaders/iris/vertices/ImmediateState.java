@@ -75,14 +75,23 @@ public class ImmediateState {
 	// Read from IrisRenderingPipeline.finalizeLevelRendering().
 
 	// The skybox ID detected this frame (1-7), or 0 if none detected.
-	// Reset to 0 at frame start. The FIRST detection wins (lowest ID priority).
+	// Reset to 0 at frame start. When multiple skybox entities are detected,
+	// the one with delta_y closest to -601.6 wins (the "correct" beacon height).
+	private static final float SKYBOX_TARGET_DELTA_Y = -601.6f;
 	public static volatile int cpuDetectedSkyboxId = 0;
+	public static volatile float cpuDetectedSkyboxBestDeltaY = Float.MAX_VALUE;
 
 	public static void noteSkyboxDetection(int id) {
+		noteSkyboxDetection(id, Float.MAX_VALUE);
+	}
+
+	public static void noteSkyboxDetection(int id, float deltaY) {
 		if (id >= 1 && id <= 7) {
-			int current = cpuDetectedSkyboxId;
-			if (current == 0 || id < current) {
-				cpuDetectedSkyboxId = id; // lowest ID wins (primary skybox effect)
+			float deviation = Math.abs(deltaY - SKYBOX_TARGET_DELTA_Y);
+			float currentDeviation = Math.abs(cpuDetectedSkyboxBestDeltaY - SKYBOX_TARGET_DELTA_Y);
+			if (cpuDetectedSkyboxId == 0 || deviation < currentDeviation) {
+				cpuDetectedSkyboxId = id;
+				cpuDetectedSkyboxBestDeltaY = deltaY;
 			}
 		}
 	}
@@ -90,6 +99,7 @@ public class ImmediateState {
 	public static int consumeSkyboxDetection() {
 		int id = cpuDetectedSkyboxId;
 		cpuDetectedSkyboxId = 0;
+		cpuDetectedSkyboxBestDeltaY = Float.MAX_VALUE;
 		return id;
 	}
 

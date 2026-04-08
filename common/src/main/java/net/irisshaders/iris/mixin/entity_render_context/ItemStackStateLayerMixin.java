@@ -72,7 +72,9 @@ public class ItemStackStateLayerMixin {
 				int b = (pixel >> 0) & 0xFF;
 
 				if (g == 251 && a == 254 && b >= 1 && b <= 7) {
-					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
+					float deltaY = 0;
+					try { deltaY = poseStack.last().pose().m31(); } catch (Exception ignored) {}
+					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b, deltaY);
 					if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
 						int r = (pixel >> 16) & 0xFF;
 						// Extract entity position: dx/dy/dz from camera + actual world coords
