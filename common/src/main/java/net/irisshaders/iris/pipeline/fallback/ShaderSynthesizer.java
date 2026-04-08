@@ -197,7 +197,7 @@ public class ShaderSynthesizer {
 			        float irisW_mt = GameTime * 12000.0;
 			        vec2 irisW_pivot = vec2[4](vec2(0,0), vec2(0,1), vec2(1,1), vec2(1,0))[gl_VertexID % 4] - 0.5;
 			        float irisW_isTop = (gl_VertexID % 4 == 0 || gl_VertexID % 4 == 3) ? 1.0 : 0.0;
-			        vec3 irisW_mpos = Position;
+			        vec3 irisW_mpos = Position + ModelOffset;
 			        if (irisW_moveB == 0) irisW_mpos.y += sin(irisW_mt) * 3.0; // slide Y
 			        else if (irisW_moveB == 4) irisW_mpos.x += sin(irisW_mt) * 3.0; // slide X
 			        else if (irisW_moveB == 8) irisW_mpos.y += sin(irisW_mt + irisW_mpos.y * 0.05) * 2.0; // warp Y->Y
@@ -250,7 +250,7 @@ public class ShaderSynthesizer {
 			        float irisW_gt = GameTime * 300.0;
 			        vec3 irisW_eCol = vec3(1.0);
 			        float irisW_eAlpha = Color.a;
-			        vec3 irisW_ePos = Position;
+			        vec3 irisW_ePos = Position + ModelOffset;
 			        if (irisW_effectB == 0) { // rainbow
 			            irisW_eCol = irisW_hsvToRgb(vec3(0.005 * (irisW_ePos.x + irisW_ePos.y) - irisW_gt, 0.7, 1.0));
 			        }
@@ -281,7 +281,7 @@ public class ShaderSynthesizer {
 			            irisW_eAlpha = mix(irisW_eAlpha, 0.0, sin(irisW_gt * 1200.0 * 3.14159) * 0.5 + 0.5);
 			            // Shake position
 			            float irisW_smt = GameTime * 12000.0;
-			            vec3 irisW_shPos = Position;
+			            vec3 irisW_shPos = Position + ModelOffset;
 			            irisW_shPos.xy += vec2(irisW_hash(irisW_smt), irisW_hash(irisW_smt + 1.0)) * 0.5;
 			            gl_Position = ProjMat * ModelViewMat * vec4(irisW_shPos, 1.0);
 			        }
@@ -289,7 +289,7 @@ public class ShaderSynthesizer {
 			            irisW_eCol = vec3(0.333, 1.0, 1.0);
 			            float irisW_itop = (gl_VertexID % 4 == 0 || gl_VertexID % 4 == 3) ? 1.0 : 0.0;
 			            if (irisW_itop > 0.5) {
-			                vec3 irisW_ip = Position; irisW_ip.x += -64.0 / 256.0;
+			                vec3 irisW_ip = Position + ModelOffset; irisW_ip.x += -64.0 / 256.0;
 			                gl_Position = ProjMat * ModelViewMat * vec4(irisW_ip, 1.0);
 			            }
 			        }
@@ -297,14 +297,14 @@ public class ShaderSynthesizer {
 			            irisW_eCol = vec3(0.5);
 			            float irisW_itop2 = (gl_VertexID % 4 == 0 || gl_VertexID % 4 == 3) ? 1.0 : 0.0;
 			            if (irisW_itop2 > 0.5) {
-			                vec3 irisW_ip2 = Position; irisW_ip2.x += -64.0 / 256.0;
+			                vec3 irisW_ip2 = Position + ModelOffset; irisW_ip2.x += -64.0 / 256.0;
 			                gl_Position = ProjMat * ModelViewMat * vec4(irisW_ip2, 1.0);
 			            }
 			        }
 			        else if (irisW_effectB == 36) { // warp + grey (hybrid)
 			            irisW_eCol = vec3(0.5);
 			            float irisW_wmt = GameTime * 12000.0;
-			            vec3 irisW_wp = Position;
+			            vec3 irisW_wp = Position + ModelOffset;
 			            irisW_wp.x += sin(irisW_wmt + irisW_wp.x * 0.05) * 2.0;
 			            gl_Position = ProjMat * ModelViewMat * vec4(irisW_wp, 1.0);
 			        }
