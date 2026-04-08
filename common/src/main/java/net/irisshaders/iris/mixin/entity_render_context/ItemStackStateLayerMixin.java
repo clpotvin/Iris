@@ -75,16 +75,15 @@ public class ItemStackStateLayerMixin {
 					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
 					if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
 						int r = (pixel >> 16) & 0xFF;
-						// Extract entity distance from camera via PoseStack model matrix translation
-						float dist = -1f;
+						// Extract entity position relative to camera from PoseStack model matrix
+						float tx = 0, ty = 0, tz = 0;
 						try {
 							org.joml.Matrix4f mat = poseStack.last().pose();
-							float tx = mat.m30(), ty = mat.m31(), tz = mat.m32();
-							dist = (float) Math.sqrt(tx * tx + ty * ty + tz * tz);
+							tx = mat.m30(); ty = mat.m31(); tz = mat.m32();
 						} catch (Exception ignored) {}
 						net.irisshaders.iris.Iris.logger.info(
-							"[WynnIris Skybox] CPU detected skybox ID={} dist={} from quad sprite {} (pixel argb={},{},{},{})",
-							b, dist, contents.name(), a, r, g, b);
+							"[WynnIris Skybox] CPU detected skybox ID={} pos=({},{},{}) from quad sprite {} (pixel argb={},{},{},{})",
+							b, tx, ty, tz, contents.name(), a, r, g, b);
 					}
 					return;
 				}
