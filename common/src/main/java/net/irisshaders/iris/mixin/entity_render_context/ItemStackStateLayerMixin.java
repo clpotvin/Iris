@@ -75,15 +75,21 @@ public class ItemStackStateLayerMixin {
 					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b);
 					if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
 						int r = (pixel >> 16) & 0xFF;
-						// Extract entity position relative to camera from PoseStack model matrix
-						float tx = 0, ty = 0, tz = 0;
+						// Extract entity position: dx/dy/dz from camera + actual world coords
+						float dx = 0, dy = 0, dz = 0;
+						double wx = 0, wy = 0, wz = 0;
 						try {
 							org.joml.Matrix4f mat = poseStack.last().pose();
-							tx = mat.m30(); ty = mat.m31(); tz = mat.m32();
+							dx = mat.m30(); dy = mat.m31(); dz = mat.m32();
+							var cam = net.minecraft.client.Minecraft.getInstance().gameRenderer.getMainCamera();
+							var camPos = cam.position();
+							wx = camPos.x() + dx; wy = camPos.y() + dy; wz = camPos.z() + dz;
 						} catch (Exception ignored) {}
 						net.irisshaders.iris.Iris.logger.info(
-							"[WynnIris Skybox] CPU detected skybox ID={} pos=({},{},{}) from quad sprite {} (pixel argb={},{},{},{})",
-							b, tx, ty, tz, contents.name(), a, r, g, b);
+							"[WynnIris Skybox] CPU detected skybox ID={} world=({},{},{}) delta=({},{},{}) sprite={} (argb={},{},{},{})",
+							b, String.format("%.1f", wx), String.format("%.1f", wy), String.format("%.1f", wz),
+							String.format("%.1f", dx), String.format("%.1f", dy), String.format("%.1f", dz),
+							contents.name(), a, r, g, b);
 					}
 					return;
 				}
