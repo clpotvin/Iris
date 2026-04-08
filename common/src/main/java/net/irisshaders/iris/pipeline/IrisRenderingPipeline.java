@@ -1171,18 +1171,24 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 					float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
 					if (secondsSince < 10.0f) {
 						// Hold phase: keep skybox fully visible
+						if (IrisVideoSettings.wynncraftDebugLogging && secondsSince < 0.1f) {
+							Iris.logger.info("[WynnIris Skybox] Detection lost for ID={}, entering 10s hold phase", displayedSkyboxId);
+						}
 						skyboxFadeOpacity = 1.0f;
 					} else if (secondsSince < 13.0f) {
 						// Fade phase: linear fade over 3 seconds
+						if (IrisVideoSettings.wynncraftDebugLogging && secondsSince < 10.1f) {
+							Iris.logger.info("[WynnIris Skybox] Hold expired for ID={}, entering 3s fade phase", displayedSkyboxId);
+						}
 						skyboxFadeOpacity = 1.0f - (secondsSince - 10.0f) / 3.0f;
 					} else {
 						// Gone: fully faded, reset
 						if (IrisVideoSettings.wynncraftDebugLogging) {
-							Iris.logger.info("[WynnIris Skybox] Faded out, resetting");
+							Iris.logger.info("[WynnIris Skybox] Faded out ID={}, resetting", displayedSkyboxId);
 						}
 						skyboxFadeOpacity = 0.0f;
 						displayedSkyboxId = 0;
-		
+
 					}
 				}
 
