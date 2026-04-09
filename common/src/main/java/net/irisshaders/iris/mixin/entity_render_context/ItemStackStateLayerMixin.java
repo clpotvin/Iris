@@ -46,6 +46,30 @@ public class ItemStackStateLayerMixin {
 		// Wynncraft skybox CPU detection: check this layer's particle icon texture
 		// for the skybox signal (G=251, A=254, B=variant ID). Works on ALL platforms.
 		iris$checkSkyboxSignal(poseStack);
+
+		// Debug: log item display layers above the player
+		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
+			try {
+				float dy = poseStack.last().pose().m31();
+				if (dy > 2.0f) {
+					String sprites = "";
+					if (quads != null) {
+						for (int qi = 0; qi < Math.min(quads.size(), 3); qi++) {
+							var q = quads.get(qi);
+							if (q.sprite() != null && q.sprite().contents() != null) {
+								sprites += q.sprite().contents().name() + " ";
+							}
+						}
+					}
+					String particle = particleIcon != null && particleIcon.contents() != null
+						? particleIcon.contents().name().toString() : "null";
+					net.irisshaders.iris.Iris.logger.info(
+						"[WynnIris Debug] Item layer above: dy={} particle={} quadSprites=[{}] quadCount={}",
+						String.format("%.1f", dy), particle, sprites.trim(),
+						quads != null ? quads.size() : 0);
+				}
+			} catch (Exception ignored) {}
+		}
 	}
 
 	@Unique
