@@ -48,9 +48,48 @@ public class MixinEntityRenderDispatcher {
 	@Unique
 	private static final Object2ObjectMap<EntityType<?>, NamespacedId> ENTITY_IDS = new Object2ObjectOpenHashMap<>();
 
+	@Unique
+	private static long iris$lastAboveEntityDumpMs = 0;
+	@Unique
+	private static boolean iris$collectingAboveEntities = false;
+	@Unique
+	private static final java.util.Set<String> iris$aboveEntitySet = new java.util.LinkedHashSet<>();
+
 	// Inject after MatrixStack#push since at this point we know that most cancellation checks have already passed.
 	@Inject(method = "submit", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;pushPose()V", shift = At.Shift.AFTER))
 	private <E extends Entity, S extends EntityRenderState> void iris$beginEntityRender(S entity, CameraRenderState cameraRenderState, double d, double e, double f, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CallbackInfo ci) {
+		// Debug: log unique entities above the player, dump every 5 seconds
+		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging && e > 2.0) {
+			long now = System.currentTimeMillis();
+			// Start a new collection window every 5 seconds
+			if (now - iris$lastAboveEntityDumpMs > 5000) {
+				if (!iris$aboveEntitySet.isEmpty()) {
+					net.irisshaders.iris.Iris.logger.info("[WynnIris Debug] === {} unique entities above player ===", iris$aboveEntitySet.size());
+					for (String line : iris$aboveEntitySet) {
+						net.irisshaders.iris.Iris.logger.info("[WynnIris Debug] {}", line);
+					}
+					iris$aboveEntitySet.clear();
+				}
+				iris$lastAboveEntityDumpMs = now;
+				iris$collectingAboveEntities = true;
+			}
+			// Only collect for 50ms after window opens (roughly 1 frame at 60fps)
+			if (iris$collectingAboveEntities && (now - iris$lastAboveEntityDumpMs) < 50) {
+				var cam = Minecraft.getInstance().gameRenderer.getMainCamera();
+				var camPos = cam.position();
+				double wx = camPos.x() + d, wy = camPos.y() + e, wz = camPos.z() + f;
+				String entityTypeName = entity.entityType != null
+					? BuiltInRegistries.ENTITY_TYPE.getKey(entity.entityType).toString() : "unknown";
+				String nameTag = entity.nameTag != null ? entity.nameTag.getString() : "none";
+				String cls = entity.getClass().getSimpleName();
+				// Key on type+approx position to deduplicate multi-layer renders of same entity
+				String key = String.format(
+					"type=%s class=%s world=(%.0f,%.0f,%.0f) delta=(%.1f,%.1f,%.1f) name=%s",
+					entityTypeName, cls, wx, wy, wz, d, e, f, nameTag);
+				iris$aboveEntitySet.add(key);
+			}
+		}
+
 		Object2IntFunction<NamespacedId> entityIds = WorldRenderingSettings.INSTANCE.getEntityIds();
 
 		if (entityIds == null || !ImmediateState.isRenderingLevel) {
