@@ -48,10 +48,14 @@ public class ItemStackStateLayerMixin {
 		iris$checkSkyboxSignal(poseStack);
 
 		// Debug: log item display layers above the player
-		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-			try {
-				float dy = poseStack.last().pose().m31();
-				if (dy > 2.0f) {
+		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) try {
+			float dy = poseStack.last().pose().m31();
+			if (dy > 2.0f) {
+				String particle = particleIcon != null && particleIcon.contents() != null
+					? particleIcon.contents().name().toString() : "null";
+				int qc = quads != null ? quads.size() : 0;
+				String key = "item-above-" + particle + "-" + qc;
+				if (net.irisshaders.iris.gui.option.WynncraftDebugLog.shouldLog(key)) {
 					String sprites = "";
 					if (quads != null) {
 						for (int qi = 0; qi < Math.min(quads.size(), 3); qi++) {
@@ -61,15 +65,12 @@ public class ItemStackStateLayerMixin {
 							}
 						}
 					}
-					String particle = particleIcon != null && particleIcon.contents() != null
-						? particleIcon.contents().name().toString() : "null";
-					net.irisshaders.iris.Iris.logger.info(
+					net.irisshaders.iris.gui.option.WynncraftDebugLog.info(key,
 						"[WynnIris Debug] Item layer above: dy={} particle={} quadSprites=[{}] quadCount={}",
-						String.format("%.1f", dy), particle, sprites.trim(),
-						quads != null ? quads.size() : 0);
+						String.format("%.1f", dy), particle, sprites.trim(), qc);
 				}
-			} catch (Exception ignored) {}
-		}
+			}
+		} catch (Exception ignored) {}
 	}
 
 	@Unique
@@ -99,9 +100,8 @@ public class ItemStackStateLayerMixin {
 					float deltaY = 0;
 					try { deltaY = poseStack.last().pose().m31(); } catch (Exception ignored) {}
 					net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(b, deltaY);
-					if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
+					if (net.irisshaders.iris.gui.option.WynncraftDebugLog.shouldLog("skybox-detect-" + b)) {
 						int r = (pixel >> 16) & 0xFF;
-						// Extract entity position: dx/dy/dz from camera + actual world coords
 						float dx = 0, dy = 0, dz = 0;
 						double wx = 0, wy = 0, wz = 0;
 						try {
@@ -111,7 +111,7 @@ public class ItemStackStateLayerMixin {
 							var camPos = cam.position();
 							wx = camPos.x() + dx; wy = camPos.y() + dy; wz = camPos.z() + dz;
 						} catch (Exception ignored) {}
-						net.irisshaders.iris.Iris.logger.info(
+						net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-detect-" + b,
 							"[WynnIris Skybox] CPU detected skybox ID={} world=({},{},{}) delta=({},{},{}) sprite={} (argb={},{},{},{})",
 							b, String.format("%.1f", wx), String.format("%.1f", wy), String.format("%.1f", wz),
 							String.format("%.1f", dx), String.format("%.1f", dy), String.format("%.1f", dz),
@@ -121,9 +121,8 @@ public class ItemStackStateLayerMixin {
 				}
 			}
 		} catch (Exception e) {
-			if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-				net.irisshaders.iris.Iris.logger.warn("[WynnIris Skybox] CPU detection error: {}", e.toString());
-			}
+			net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-error",
+				"[WynnIris Skybox] CPU detection error: {}", e.toString());
 		}
 	}
 

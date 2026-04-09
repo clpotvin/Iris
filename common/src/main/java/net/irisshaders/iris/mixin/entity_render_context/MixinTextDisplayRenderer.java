@@ -82,7 +82,7 @@ public class MixinTextDisplayRenderer {
 			}, Style.EMPTY);
 			if (!charInfo.isEmpty()) {
 				int opacity = trs.textOpacity().get(interpolationProgress) & 0xFF;
-				net.irisshaders.iris.Iris.logger.info(
+				net.irisshaders.iris.gui.option.WynncraftDebugLog.info("trans-pua",
 					"[WynnIris Trans] PUA text entity: chars=[{}] opacity={} plainLen={}",
 					charInfo.toString().trim(), opacity, plain.length());
 			}
@@ -121,11 +121,9 @@ public class MixinTextDisplayRenderer {
 			// Extract opacity
 			int opacity = trs.textOpacity().get(interpolationProgress) & 0xFF;
 
-			if (IrisVideoSettings.wynncraftDebugLogging) {
-				net.irisshaders.iris.Iris.logger.info(
-					"[WynnIris Trans] MATCHED: type={} opacity={} color=0x{}",
-					detectedType.get(), opacity, Integer.toHexString(detectedColor.get()));
-			}
+			net.irisshaders.iris.gui.option.WynncraftDebugLog.info("trans-match-" + detectedType.get(),
+				"[WynnIris Trans] MATCHED: type={} opacity={} color=0x{}",
+				detectedType.get(), opacity, Integer.toHexString(detectedColor.get()));
 
 			// Only suppress + redirect when Iris pipeline is active (it renders the transition).
 			// When shaders are off, let the vanilla RP text shaders handle it natively.

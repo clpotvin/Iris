@@ -162,8 +162,9 @@ public class ShaderSynthesizer {
 
 
 		// Wynncraft effects & movements: inject signal detection + application for text fallback shaders
-		if (inputs.isText() && inputs.hasTex() && net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-			net.irisshaders.iris.Iris.logger.info("[WynnIris] Synthesizing fallback text VS with effects/movements support");
+		if (inputs.isText() && inputs.hasTex()) {
+			net.irisshaders.iris.gui.option.WynncraftDebugLog.info("synth-effects",
+				"[WynnIris] Synthesizing fallback text VS with effects/movements support");
 		}
 		if (inputs.isText() && inputs.hasTex()) {
 			shader.append("flat out int irisW_moveBlink;\n");
@@ -320,7 +321,7 @@ public class ShaderSynthesizer {
 		// Wynncraft transition: inject signal detection + fullscreen remap for text fallback shaders
 		// INVARIANT: transition is always the LAST gl_Position writer (overrides movements if active)
 		if (inputs.isText() && inputs.hasTex() && net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-			System.out.println("[WynnIris] Synthesizing fallback text VS with transition support");
+			net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris] Synthesizing fallback text VS with transition support");
 		}
 		if (inputs.isText() && inputs.hasTex()) {
 			shader.append("uniform sampler2D Sampler0;\n"); // VS needs sampler for signal detection
@@ -457,7 +458,7 @@ public class ShaderSynthesizer {
 
 		// Wynncraft transition: inject fullscreen effects for text fallback shaders
 		if (inputs.isText() && inputs.hasTex() && net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-			System.out.println("[WynnIris] Synthesizing fallback text FS with transition support");
+			net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris] Synthesizing fallback text FS with transition support");
 		}
 		if (inputs.isText() && inputs.hasTex()) {
 			shader.append("""

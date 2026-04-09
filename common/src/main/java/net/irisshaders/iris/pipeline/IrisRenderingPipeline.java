@@ -1158,9 +1158,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 				// with delta_y closest to -601.6 (the correct beacon height).
 				if (detectedId > 0 && detectedId <= 7) {
 					if (detectedId != displayedSkyboxId) {
-						if (IrisVideoSettings.wynncraftDebugLogging) {
-							Iris.logger.info("[WynnIris Skybox] Crossfade {} -> {}", displayedSkyboxId, detectedId);
-						}
+						net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-crossfade",
+							"[WynnIris Skybox] Crossfade {} -> {}", displayedSkyboxId, detectedId);
 						// Start crossfade: old skybox fades out, new one fades in
 						if (displayedSkyboxId > 0) {
 							previousSkyboxId = displayedSkyboxId;
@@ -1179,9 +1178,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 					if (secondsSince < 2.0f) {
 						skyboxFadeOpacity = 1.0f - secondsSince / 2.0f;
 					} else {
-						if (IrisVideoSettings.wynncraftDebugLogging) {
-							Iris.logger.info("[WynnIris Skybox] Faded out ID={}, resetting", displayedSkyboxId);
-						}
+						net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-fadeout",
+							"[WynnIris Skybox] Faded out ID={}, resetting", displayedSkyboxId);
 						skyboxFadeOpacity = 0.0f;
 						displayedSkyboxId = 0;
 					}

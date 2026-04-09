@@ -297,15 +297,15 @@ public class VanillaCoreTransformer {
 		// Detects transition signal (texture alpha=253) and remaps quad to fullscreen.
 		// Gated: text only, no geometry/tessellation shaders (varyings would be zeroed).
 		if (parameters.inputs.isText() && net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-			System.out.println("[WynnIris] Text shader detected: type=" + parameters.type
+			net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris] Text shader detected: type=" + parameters.type
 				+ " hasGeo=" + parameters.hasGeometry + " hasTes=" + parameters.hasTesselation);
 		}
 		if (parameters.inputs.isText() && !parameters.hasGeometry && !parameters.hasTesselation
 			&& parameters.type == PatchShaderType.VERTEX) {
 			if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-				System.out.println("[WynnIris] Injecting transition VS code");
-				System.out.println("[WynnIris]   has Sampler0=" + root.identifierIndex.has("Sampler0"));
-				System.out.println("[WynnIris]   has mc_midTexCoord=" + root.identifierIndex.has("mc_midTexCoord"));
+				net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris] Injecting transition VS code");
+				net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris]   has Sampler0=" + root.identifierIndex.has("Sampler0"));
+				net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris]   has mc_midTexCoord=" + root.identifierIndex.has("mc_midTexCoord"));
 			}
 			// Inject Sampler0 for vertex texture sampling if not already declared
 			if (!root.identifierIndex.has("Sampler0")) {
@@ -346,11 +346,11 @@ public class VanillaCoreTransformer {
 
 			// Wynncraft transition fragment injection (gated by same conditions as vertex)
 			if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-				System.out.println("[WynnIris] Text FS: textOutput=" + textOutput + " hasGeo=" + parameters.hasGeometry + " hasTes=" + parameters.hasTesselation);
+				net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris] Text FS: textOutput=" + textOutput + " hasGeo=" + parameters.hasGeometry + " hasTes=" + parameters.hasTesselation);
 			}
 			if (!parameters.hasGeometry && !parameters.hasTesselation && textOutput != null) {
 				if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) {
-					System.out.println("[WynnIris] Injecting transition FS code with output=" + textOutput);
+					net.irisshaders.iris.gui.option.WynncraftDebugLog.info("compile", "[WynnIris] Injecting transition FS code with output=" + textOutput);
 				}
 				// Declare varying inputs from vertex shader
 				tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,

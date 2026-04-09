@@ -32,20 +32,17 @@ public abstract class MixinBufferBuilder_SeparateAo implements VertexConsumer {
 	public void putBulkData(PoseStack.Pose matrixEntry, BakedQuad quad, float[] brightnesses, float red, float green,
 							float blue, float alpha, int[] lights, int overlay) {
 		// DEBUG: Log tint colors that could trigger WynnIris glint signal detection
-		// Signal condition: G>0.998, B<0.01, R in (0.002, 0.99)
-		if (IrisVideoSettings.wynncraftDebugLogging && green > 0.99f && blue < 0.05f) {
-			long now = System.currentTimeMillis();
-			if (now - iris$lastSignalLog > 200) {
-				iris$lastSignalLog = now;
-				int rInt = Math.round(red * 255);
+		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging && green > 0.99f && blue < 0.05f) {
+			int rInt = Math.round(red * 255);
+			String key = "glint-signal-" + rInt;
+			if (net.irisshaders.iris.gui.option.WynncraftDebugLog.shouldLog(key)) {
 				int gInt = Math.round(green * 255);
 				int bInt = Math.round(blue * 255);
 				int aInt = Math.round(alpha * 255);
 				String spriteName = quad.sprite() != null ? quad.sprite().contents().name().toString() : "null";
-				System.out.println("[WynnIris GLINT-DEBUG] tint RGBA=(" + rInt + "," + gInt + "," + bInt + "," + aInt
-					+ ") raw=(" + red + "," + green + "," + blue + "," + alpha + ")"
-					+ " tintIdx=" + quad.tintIndex()
-					+ " sprite=" + spriteName);
+				net.irisshaders.iris.gui.option.WynncraftDebugLog.info(key,
+					"[WynnIris GLINT-DEBUG] tint RGBA=({},{},{},{}) raw=({},{},{},{}) tintIdx={} sprite={}",
+					rInt, gInt, bInt, aInt, red, green, blue, alpha, quad.tintIndex(), spriteName);
 			}
 		}
 
