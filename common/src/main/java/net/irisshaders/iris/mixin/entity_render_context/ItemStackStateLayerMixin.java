@@ -20,6 +20,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ItemStackRenderState.LayerRenderState.class)
@@ -38,6 +39,8 @@ public class ItemStackStateLayerMixin {
 		this.parentState = itemStackRenderState;
 	}
 
+	// DEBUG: tint item entities for identification (2-quad=white, 6-quad=green)
+	// Only active when debug logging is enabled.
 	@Inject(method = "submit", at = @At("HEAD"))
 	private void onRender(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int i, int j, int k, CallbackInfo ci, @Share("lastBState") LocalIntRef ref) {
 		ref.set(CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
@@ -47,30 +50,6 @@ public class ItemStackStateLayerMixin {
 		// for the skybox signal (G=251, A=254, B=variant ID). Works on ALL platforms.
 		iris$checkSkyboxSignal(poseStack);
 
-		// Debug: log item display layers above the player
-		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging) try {
-			float dy = poseStack.last().pose().m31();
-			if (dy > 2.0f) {
-				String particle = particleIcon != null && particleIcon.contents() != null
-					? particleIcon.contents().name().toString() : "null";
-				int qc = quads != null ? quads.size() : 0;
-				String key = "item-above-" + particle + "-" + qc;
-				if (net.irisshaders.iris.gui.option.WynncraftDebugLog.shouldLog(key)) {
-					String sprites = "";
-					if (quads != null) {
-						for (int qi = 0; qi < Math.min(quads.size(), 3); qi++) {
-							var q = quads.get(qi);
-							if (q.sprite() != null && q.sprite().contents() != null) {
-								sprites += q.sprite().contents().name() + " ";
-							}
-						}
-					}
-					net.irisshaders.iris.gui.option.WynncraftDebugLog.info(key,
-						"[WynnIris Debug] Item layer above: dy={} particle={} quadSprites=[{}] quadCount={}",
-						String.format("%.1f", dy), particle, sprites.trim(), qc);
-				}
-			}
-		} catch (Exception ignored) {}
 	}
 
 	@Unique

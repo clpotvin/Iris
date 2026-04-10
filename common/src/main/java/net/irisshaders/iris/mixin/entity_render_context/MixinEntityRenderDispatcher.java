@@ -51,25 +51,6 @@ public class MixinEntityRenderDispatcher {
 	// Inject after MatrixStack#push since at this point we know that most cancellation checks have already passed.
 	@Inject(method = "submit", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;pushPose()V", shift = At.Shift.AFTER))
 	private <E extends Entity, S extends EntityRenderState> void iris$beginEntityRender(S entity, CameraRenderState cameraRenderState, double d, double e, double f, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CallbackInfo ci) {
-		// Debug: log entities above the player, rate-limited per unique type+position
-		if (net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftDebugLogging && e > 2.0) {
-			// Key by entity type only (not position) to avoid unbounded key growth from camera movement
-			String entityTypeName = entity.entityType != null
-				? BuiltInRegistries.ENTITY_TYPE.getKey(entity.entityType).toString() : "unknown";
-			String key = "entity-above-" + entityTypeName;
-			if (net.irisshaders.iris.gui.option.WynncraftDebugLog.shouldLog(key)) {
-				var cam = Minecraft.getInstance().gameRenderer.getMainCamera();
-				var camPos = cam.position();
-				double wx = camPos.x() + d, wy = camPos.y() + e, wz = camPos.z() + f;
-				String nameTag = entity.nameTag != null ? entity.nameTag.getString() : "none";
-				net.irisshaders.iris.gui.option.WynncraftDebugLog.info(key,
-					"[WynnIris Debug] Entity above: type={} class={} world=({},{},{}) delta=({},{},{}) name={}",
-					entityTypeName, entity.getClass().getSimpleName(),
-					String.format("%.1f", wx), String.format("%.1f", wy), String.format("%.1f", wz),
-					String.format("%.1f", d), String.format("%.1f", e), String.format("%.1f", f),
-					nameTag);
-			}
-		}
 
 		Object2IntFunction<NamespacedId> entityIds = WorldRenderingSettings.INSTANCE.getEntityIds();
 
