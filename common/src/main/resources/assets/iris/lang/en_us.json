@@ -78,6 +78,8 @@
   "options.iris.wynncraftSkyboxOpacity.tooltip": "Controls how visible the Wynncraft custom skybox is. At 100%, the Wynncraft skybox fully replaces the sky. Lower values blend with the shader pack sky.",
   "options.iris.wynncraftSceneDarkening": "Scene Darkening",
   "options.iris.wynncraftSceneDarkening.tooltip": "Controls how much the scene is darkened when a Wynncraft custom skybox is active. At 100%, full darkening is applied. At 0%, no darkening. Only active when a custom skybox is displayed.",
+  "options.iris.wynncraftEntityEmissivity": "Entity Emissivity",
+  "options.iris.wynncraftEntityEmissivity.tooltip": "Controls the brightness of Wynncraft emissive entities (rift structures, decorations marked as emissive). At 100%, entities are fully bright. At 0%, normal shader pack lighting applies.",
   "options.iris.wynncraftDebugLogging": "Debug Logging",
   "options.iris.wynncraftDebugLogging.tooltip": "Enables verbose debug logging for WynnIris features (transitions, glint effects, skybox detection). Logs to latest.log. Turn off for normal play.",
   "label.iris.true": "On",

@@ -138,6 +138,22 @@ public class IrisConfig implements ConfigEntryPoint {
 						.setRange(new Range(0, 100, 5))
 						.setImpact(OptionImpact.LOW)
 					)
+					.addOption(builder.createIntegerOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_entity_emissivity"))
+						.setDefaultValue(100)
+						.setBinding(value -> IrisVideoSettings.wynncraftEntityEmissivity = value, () -> IrisVideoSettings.wynncraftEntityEmissivity)
+						.setName(Component.translatable("options.iris.wynncraftEntityEmissivity"))
+						.setTooltip(Component.translatable("options.iris.wynncraftEntityEmissivity.tooltip"))
+						.setValueFormatter(ControlValueFormatterImpls.percentage())
+						.setStorageHandler(() -> {
+							try {
+								Iris.getIrisConfig().save();
+							} catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+						})
+						.setRange(new Range(0, 100, 5))
+						.setImpact(OptionImpact.LOW)
+					)
 					.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_debug_logging"))
 						.setDefaultValue(false)
 						.setBinding(value -> IrisVideoSettings.wynncraftDebugLogging = value, () -> IrisVideoSettings.wynncraftDebugLogging)
