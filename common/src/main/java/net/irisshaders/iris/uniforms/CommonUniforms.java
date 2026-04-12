@@ -78,32 +78,31 @@ public final class CommonUniforms {
 		uniforms.uniform1f("iris_glintBrightness", (FloatSupplier) () -> IrisVideoSettings.glintBrightness / 100.0f, listener -> {});
 		// Wynncraft tint brightness (user-configurable, 0-150%)
 		uniforms.uniform1f("iris_tintBrightness", (FloatSupplier) () -> IrisVideoSettings.tintBrightness / 100.0f, listener -> {});
-		// Wynncraft entity brightness boost — auto-scales with time of day.
-		// Only active when custom skybox is displayed. Fixed 150% base.
+		// Wynncraft entity brightness boost — auto-scales with time of day and scene darkening.
+		// Only active when dark skybox fog is active (cases 3,4,5,7, not raining).
+		// Scaled by skyboxFogBlendFactor so scene darkening slider modulates boost intensity.
 		uniforms.uniform1f("iris_wynncraftEntityBoost", (FloatSupplier) () -> {
-			if (net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogColor == null) {
+			float blend = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogBlendFactor;
+			if (blend < 0.001f) {
 				return 1.0f;
 			}
-			float baseBoost = 1.0f;
 			net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-			if (mc.level == null) return baseBoost;
+			if (mc.level == null) return 1.0f;
 
 			// MC day cycle: 0=sunrise, 6000=noon, 12000=sunset, 18000=midnight
 			long dayTime = mc.level.getDayTime() % 24000L;
 			// Compute a darkness factor: 0.0 at noon, 1.0 at midnight
-			// Smooth transition using the day cycle
 			float darkness;
 			if (dayTime < 12000) {
-				// 0-12000: day phase. Darkest at 0 and 12000 (sunrise/sunset), brightest at 6000 (noon)
 				darkness = 1.0f - (float) Math.sin(dayTime * Math.PI / 12000.0);
 			} else {
-				// 12000-24000: night phase. Gets darker toward 18000, lighter toward 24000
 				darkness = 1.0f + (float) Math.sin((dayTime - 12000) * Math.PI / 12000.0);
 			}
 			darkness = Math.max(0.0f, Math.min(1.0f, darkness * 0.5f));
 
-			// Scale boost: at noon (darkness≈0) → baseBoost, at night (darkness≈1) → baseBoost * 2
-			return baseBoost * (1.0f + darkness);
+			// Base boost scales with time of day; then modulated by blend factor
+			float fullBoost = 1.0f + darkness;
+			return 1.0f + (fullBoost - 1.0f) * blend;
 		}, listener -> {});
 
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,

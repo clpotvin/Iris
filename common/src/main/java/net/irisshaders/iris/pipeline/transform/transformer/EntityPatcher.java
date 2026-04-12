@@ -93,22 +93,398 @@ public class EntityPatcher {
 		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
 
 	// ====================================================================================
-	// WYNNCRAFT SKYBOX DETECTION
+	// WYNNCRAFT SKYBOX RENDERING (GLSL injection mirroring vanilla RP)
 	// ====================================================================================
 	// Skybox signal is TEXTURE-based (not vertex-color): textureColor.g ≈ 251/255 and
-	// textureColor.a ≈ 254/255. When a skybox entity is detected, the fragment is discarded
-	// to hide the display entity geometry. The variant ID is detected CPU-side by reading
-	// item texture pixels in ItemStackStateLayerMixin (no GL version requirements).
+	// textureColor.a ≈ 254/255. Blue channel encodes effect variant ID (1-7).
+	// Instead of discarding skybox entities, we replace their fragment color with
+	// procedural skybox effects — exactly how the vanilla Wynncraft resource pack works.
+	// CPU-side detection (ItemStackStateLayerMixin) still runs for fog/sky color state.
 
-	// Discard skybox display entities so the post-process skybox renders instead.
-	private static final String IRISW_SKYBOX_DETECT = """
-		{
-		    vec4 irisW_skyTex = texture(Sampler0, iris_wynncraft_texcoord);
-		    int irisW_g = int(round(irisW_skyTex.g * 255.0));
-		    int irisW_a = int(round(irisW_skyTex.a * 255.0));
-		    if (irisW_g == 251 && irisW_a == 254) {
-		        discard;
+	// Signal decode helper — shared by forward apply, deferred apply, and deferred fallback.
+	// Returns skybox ID (1-7) or 0 if no match.
+	private static final String IRISW_SKYBOX_SIGNAL_HELPER = """
+		int irisW_skyboxSignal(sampler2D tex, vec2 uv) {
+		    vec4 sc = texture(tex, uv);
+		    int sg = int(round(sc.g * 255.0));
+		    int sa = int(round(sc.a * 255.0));
+		    if (sg == 251 && sa == 254) {
+		        int sid = int(round(sc.b * 255.0));
+		        if (sid >= 1 && sid <= 7) return sid;
 		    }
+		    return 0;
+		}""";
+
+	// Forward path: detect skybox signal and apply procedural effect to FRAG_OUTPUT.
+	// Sets irisW_skyboxApplied flag to prevent subsequent glint/translucency/boost from running.
+	// FRAG_OUTPUT is replaced with the actual variable name at injection time.
+	private static final String IRISW_SKYBOX_APPLY_FORWARD = """
+		{
+		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
+		    if (irisW_skyId > 0) {
+		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
+		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
+		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
+		        FRAG_OUTPUT = irisW_skyColor;
+		        irisW_skyboxApplied = true;
+		    }
+		}""";
+
+	// Forward path (premultiplied output): same as above but premultiplies RGB by alpha.
+	private static final String IRISW_SKYBOX_APPLY_FORWARD_PREMUL = """
+		{
+		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
+		    if (irisW_skyId > 0) {
+		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
+		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
+		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
+		        FRAG_OUTPUT = vec4(irisW_skyColor.rgb * irisW_skyColor.a, irisW_skyColor.a);
+		        irisW_skyboxApplied = true;
+		    }
+		}""";
+
+	// Deferred path: detect skybox signal and replace albedo variable at anchor point.
+	// ALBEDO_VAR is replaced with the actual variable name at injection time.
+	private static final String IRISW_SKYBOX_APPLY_DEFERRED = """
+		{
+		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
+		    if (irisW_skyId > 0) {
+		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
+		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
+		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
+		        ALBEDO_VAR = irisW_skyColor;
+		        irisW_skyboxApplied = true;
+		    }
+		}""";
+
+	// Deferred fallback: discard skybox entities when no anchors found (prepended near top of main).
+	private static final String IRISW_SKYBOX_FALLBACK_DISCARD = """
+		{
+		    int irisW_skyFB = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
+		    if (irisW_skyFB > 0) discard;
+		}""";
+
+	// Skybox GLSL helpers — noise functions and procedural generators needed by the
+	// skybox effects but not by glint effects. Injected via BEFORE_FUNCTIONS.
+	private static final String[] IRISW_SKYBOX_HELPERS = {
+		// fbm(vec2) — 5-octave fractional Brownian motion (ported from RP util.glsl)
+		"""
+		float irisW_fbm(vec2 p) {
+		    float v = 0.0, a = 0.5, freq = 1.0;
+		    for (int i = 0; i < 5; i++) {
+		        v += a * irisW_smoothNoise(p * freq);
+		        freq *= 2.0; a *= 0.5;
+		    }
+		    return v;
+		}""",
+		// fbm(vec3) — combines three 2D fbm samples (ported from RP util.glsl)
+		"""
+		float irisW_fbm(vec3 p) {
+		    return irisW_fbm(p.xy) + irisW_fbm(p.yz) + irisW_fbm(p.zx);
+		}""",
+		// rotateAxis — Rodrigues rotation formula (ported from RP util.glsl)
+		"""
+		vec3 irisW_rotateAxis(vec3 v, vec3 axis, float angle) {
+		    return mix(dot(v, axis) * axis, v, cos(angle)) + cross(axis, v) * sin(angle);
+		}""",
+		// crystalNoise — 8-iteration crystalline noise (ported from RP util.glsl)
+		"""
+		float irisW_crystalNoise(vec3 position, float time) {
+		    const float IRISW_PI = 3.14159265359;
+		    const float IRISW_TAU = IRISW_PI * 2.0;
+		    int iterations = 8;
+		    float start = 2.20, expand = 1.20, edgeThickness = 0.25;
+		    vec3 axis1 = vec3(0.8506, 0.5257, 0.0);
+		    vec3 axis2 = vec3(0.0, 0.5257, 0.8506);
+		    float angle1 = IRISW_PI / 7.0, angle2 = IRISW_PI / 27.0;
+		    float expand1 = 1.0, expand2 = 1.25;
+		    float centralise = 0.5, dampen = 1.8;
+		    float n = 0.0, scale = start;
+		    vec3 travel1 = position;
+		    vec3 travel2 = abs(fract(position) - 0.5) * 0.15;
+		    for (int i = 0; i < iterations; i++) {
+		        travel1 = irisW_rotateAxis(travel1, axis1, angle1);
+		        travel1 *= expand1;
+		        vec3 pt = cos(travel1 * scale + travel2 + time);
+		        n += sin(IRISW_TAU * dot(pt, vec3(0.3))) * 0.5 + 0.5;
+		        scale *= expand;
+		        travel2 += cos(smoothstep(0.0, edgeThickness, pt));
+		        travel2 = irisW_rotateAxis(travel2, axis2, angle2);
+		        travel2 *= expand2;
+		    }
+		    n = n / float(iterations);
+		    n = n * 2.0 - 1.0;
+		    n = pow(abs(n), centralise) * sign(n);
+		    n = n * 0.5 + 0.5;
+		    n = pow(n, dampen);
+		    return n;
+		}""",
+		// lightningBolt — procedural bolt with branches (ported from RP skybox.glsl)
+		"""
+		float irisW_lightningBolt(vec2 uv, vec2 start, vec2 end, float seed, float width) {
+		    vec2 dir = end - start;
+		    float len = length(dir);
+		    vec2 norm = dir / len;
+		    vec2 perp = vec2(-norm.y, norm.x);
+		    vec2 toPoint = uv - start;
+		    float t = clamp(dot(toPoint, norm) / len, 0.0, 1.0);
+		    float across = dot(toPoint, perp);
+		    float disp = 0.0;
+		    disp += 0.06 * sin(t * 8.0 + seed * 3.7) * smoothstep(0.0, 0.3, t) * smoothstep(1.0, 0.7, t);
+		    disp += 0.03 * sin(t * 17.0 + seed * 7.1);
+		    disp += 0.015 * sin(t * 31.0 + seed * 11.3);
+		    disp += 0.008 * sin(t * 61.0 + seed * 19.7);
+		    float dist = abs(across - disp);
+		    float core = smoothstep(width * 0.5, 0.0, dist);
+		    float glow1 = smoothstep(width * 3.0, 0.0, dist) * 0.6;
+		    float glow2 = smoothstep(width * 8.0, 0.0, dist) * 0.2;
+		    float bolt = (core + glow1 + glow2) * step(0.0, t) * step(t, 1.0);
+		    float branch = 0.0;
+		    float bt1 = 0.4 + 0.2 * fract(seed * 1.618);
+		    vec2 branchPt1 = start + dir * bt1 + perp * disp;
+		    vec2 branchEnd1 = branchPt1 + vec2(0.08, -0.12) + vec2(fract(seed * 2.71) * 0.1 - 0.05, 0.0);
+		    { vec2 bd = branchEnd1 - branchPt1; float bl = length(bd); vec2 bn = bd / bl; vec2 bp = vec2(-bn.y, bn.x);
+		      vec2 tp = uv - branchPt1; float bt = clamp(dot(tp, bn) / bl, 0.0, 1.0); float ba = dot(tp, bp);
+		      float bd2 = 0.04 * sin(bt * 12.0 + seed * 5.3); float bd3 = abs(ba - bd2);
+		      branch += smoothstep(width * 0.3, 0.0, bd3) * step(0.0, bt) * step(bt, 1.0);
+		      branch += smoothstep(width * 2.0, 0.0, bd3) * 0.4 * step(0.0, bt) * step(bt, 1.0); }
+		    float bt2 = 0.65 + 0.15 * fract(seed * 2.414);
+		    vec2 branchPt2 = start + dir * bt2 + perp * disp;
+		    vec2 branchEnd2 = branchPt2 + vec2(-0.10, -0.09) + vec2(fract(seed * 1.41) * 0.08 - 0.04, 0.0);
+		    { vec2 bd = branchEnd2 - branchPt2; float bl = length(bd); vec2 bn = bd / bl; vec2 bp = vec2(-bn.y, bn.x);
+		      vec2 tp = uv - branchPt2; float bt = clamp(dot(tp, bn) / bl, 0.0, 1.0); float ba = dot(tp, bp);
+		      float bd2 = 0.03 * sin(bt * 15.0 + seed * 8.1); float bd3 = abs(ba - bd2);
+		      branch += smoothstep(width * 0.25, 0.0, bd3) * step(0.0, bt) * step(bt, 1.0);
+		      branch += smoothstep(width * 2.0, 0.0, bd3) * 0.35 * step(0.0, bt) * step(bt, 1.0); }
+		    return clamp(bolt + branch * 0.7, 0.0, 1.0);
+		}""",
+		// lightningFlash — flash timing envelope (ported from RP skybox.glsl)
+		"""
+		float irisW_lightningFlash(float time, float seed) {
+		    float period = 35.0 + 25.0 * irisW_random(seed);
+		    float phase = fract((time + seed * 37.3) / period);
+		    float numFlashes = floor(irisW_random(seed + floor((time + seed * 37.3) / period) * 7.91) * 3.0) + 1.0;
+		    float spacing = 0.012 + 0.018 * irisW_random(seed + 44.1);
+		    float duration = 0.025 + 0.015 * irisW_random(seed + 88.3);
+		    float result = 0.0;
+		    for (int f = 0; f < 3; f++) {
+		        if (float(f) >= numFlashes) break;
+		        float offset = float(f) * spacing;
+		        float brightness = pow(0.55, float(f));
+		        result += brightness * smoothstep(0.0, 0.003, phase - offset) * smoothstep(duration + offset, duration + offset - 0.008, phase);
+		    }
+		    return clamp(result, 0.0, 1.0);
+		}""",
+		// distantCloudFlash — distant cloud illumination (ported from RP skybox.glsl)
+		"""
+		float irisW_distantCloudFlash(float time, float seed) {
+		    float period = 40.0 + 80.0 * irisW_random(seed + 100.0);
+		    float phase = fract((time + seed * 53.7) / period);
+		    float duration = 0.08 + 0.06 * irisW_random(seed + 200.0);
+		    float envelope = smoothstep(0.0, duration * 0.4, phase) * smoothstep(duration, duration * 0.6, phase);
+		    return envelope * 0.18;
+		}""",
+	};
+
+	// Main skybox apply function — dispatches to 7 procedural effects based on ID.
+	// Ported from Wynncraft RP skybox.glsl + config/skybox.glsl.
+	// Each effect returns vec4(color.rgb, alpha). Most return alpha=1.0;
+	// Memory Fog (ID 2) uses partial alpha for transparency.
+	private static final String IRISW_APPLY_SKYBOX_FUNC = """
+		vec4 irisW_applySkybox(int id, float time, vec3 direction) {
+		    const float IRISW_PI = 3.14159265359;
+		    vec3 color = vec3(0.0);
+		    float alpha = 1.0;
+
+		    // Sub-function: red cloudy sky base (used by cases 3-5, 7)
+		    // Inlined as a block to avoid needing a separate function declaration.
+		    // After this block, color holds the red cloudy result.
+		    // Cases that use it will call this macro-like pattern.
+
+		    switch (id) {
+		        case 1: {
+		            // Memory Mist (RP skyboxMemoryMist)
+		            vec3 mistColor = vec3(0.89, 0.91, 0.95);
+		            float shiftS = 0.025 * time;
+		            float mystifyA = irisW_fbm(direction + vec3(0.0, sin(shiftS), 0.0));
+		            vec2 reMiss = vec2(0.8 * irisW_fbm(direction.xy + vec2(mystifyA, 0.1)),
+		                               irisW_fbm(direction.yz - mystifyA));
+		            float mystifyB = irisW_fbm(0.25 * (direction + vec3(0.0, atan(reMiss.x, reMiss.y) / IRISW_PI, 0.0)));
+		            color = mix(vec3(-0.15), mistColor + vec3(0.25), mystifyB);
+		            break;
+		        }
+		        case 2: {
+		            // Memory Fog (RP skyboxMemoryFog) — uses alpha for transparency
+		            vec3 fogColor = vec3(0.55, 0.5, 0.6);
+		            float shiftS = -0.05 * time;
+		            vec3 pos = direction + 0.25 * vec3(sin(shiftS), shiftS, cos(shiftS));
+		            float noises = irisW_fbm(pos + vec3(0.2, 0.3, 0.2)) * 0.3;
+		            float redir = direction.y + noises;
+		            float q = (1.0 - redir * redir * 1.4) * 0.9;
+		            float fogAlpha = 1.0 - smoothstep(0.0, 0.6, redir);
+		            color = mix(vec3(-0.2), fogColor + vec3(0.2), q);
+		            alpha = 0.85 * fogAlpha;
+		            break;
+		        }
+		        case 3: {
+		            // Stormy (RP skyboxStormy) — red cloudy base with dark horizon
+		            vec3 valuationUpper = vec3(0.106, 0.358, 0.036);
+		            vec3 colorHorizon = vec3(0.05, 0.05, 0.05);
+		            float heightHorizon = 0.15, widthHorizon = 0.30, mixHorizon = 0.10;
+		            // Inline redCloudy
+		            float rcSpeed = 0.01, rcIntensity = 2.5, rcScale = 1.2;
+		            vec3 rc1 = vec3(0.6, 0.0, 0.0), rc2 = vec3(1.0, 0.2, 0.0);
+		            vec3 rc3 = vec3(0.0, 0.2, 0.0), rc4 = vec3(1.0, 0.6, 0.6);
+		            vec3 rc5 = vec3(0.3, 0.3, 0.3), rc6 = vec3(1.2, 1.2, 1.2);
+		            float rcShift = time * rcSpeed;
+		            vec3 rcPos1 = direction * rcIntensity + vec3(0.0, rcShift, rcShift);
+		            float rcNoise1 = irisW_fbm(rcScale * rcPos1);
+		            vec2 rcPos2 = vec2(irisW_fbm(rcPos1.xy + rcNoise1), irisW_fbm(rcPos1.yz - rcNoise1));
+		            float rcNoise2 = irisW_fbm(rcScale * (rcPos1 + vec3(rcPos2, 0.0)));
+		            vec3 rcColor = mix(rc1, rc2, rcNoise2);
+		            rcColor += mix(rc3, rc4, rcPos2.x);
+		            rcColor -= mix(rc5, rc6, rcPos2.y);
+		            rcColor = clamp(rcColor, 0.0, 1.0);
+		            // Apply stormy horizon
+		            vec3 colorUpperSky = vec3(dot(rcColor, valuationUpper));
+		            float influenceUpper = smoothstep(heightHorizon - widthHorizon, heightHorizon, direction.y);
+		            vec3 colorSky = mix(vec3(0.0), colorUpperSky, influenceUpper);
+		            float influenceSky = mix(mixHorizon, 1.0, smoothstep(0.0, widthHorizon, abs(direction.y - heightHorizon)));
+		            color = mix(colorHorizon, colorSky, influenceSky);
+		            break;
+		        }
+		        case 4: {
+		            // War Surface (RP skyboxWarSurface) — red cloudy fading to black at horizon
+		            float heightHorizon = 0.5;
+		            // Inline redCloudy
+		            float rcSpeed = 0.01, rcIntensity = 2.5, rcScale = 1.2;
+		            vec3 rc1 = vec3(0.6, 0.0, 0.0), rc2 = vec3(1.0, 0.2, 0.0);
+		            vec3 rc3 = vec3(0.0, 0.2, 0.0), rc4 = vec3(1.0, 0.6, 0.6);
+		            vec3 rc5 = vec3(0.3, 0.3, 0.3), rc6 = vec3(1.2, 1.2, 1.2);
+		            float rcShift = time * rcSpeed;
+		            vec3 rcPos1 = direction * rcIntensity + vec3(0.0, rcShift, rcShift);
+		            float rcNoise1 = irisW_fbm(rcScale * rcPos1);
+		            vec2 rcPos2 = vec2(irisW_fbm(rcPos1.xy + rcNoise1), irisW_fbm(rcPos1.yz - rcNoise1));
+		            float rcNoise2 = irisW_fbm(rcScale * (rcPos1 + vec3(rcPos2, 0.0)));
+		            vec3 rcColor = mix(rc1, rc2, rcNoise2);
+		            rcColor += mix(rc3, rc4, rcPos2.x);
+		            rcColor -= mix(rc5, rc6, rcPos2.y);
+		            rcColor = clamp(rcColor, 0.0, 1.0);
+		            // Apply war surface horizon
+		            float influenceSky = smoothstep(0.0, heightHorizon, direction.y);
+		            color = mix(vec3(0.0), rcColor, influenceSky);
+		            break;
+		        }
+		        case 5: {
+		            // War Heights (RP skyboxWarHeights) — variant of stormy with brightness shift
+		            vec3 valuationUpper = vec3(0.106, 0.358, 0.036);
+		            vec3 colorHorizon = vec3(0.05, 0.05, 0.05);
+		            float heightHorizon = 0.15, widthHorizon = 0.30, mixHorizon = 0.10;
+		            // Inline redCloudy
+		            float rcSpeed = 0.01, rcIntensity = 2.5, rcScale = 1.2;
+		            vec3 rc1 = vec3(0.6, 0.0, 0.0), rc2 = vec3(1.0, 0.2, 0.0);
+		            vec3 rc3 = vec3(0.0, 0.2, 0.0), rc4 = vec3(1.0, 0.6, 0.6);
+		            vec3 rc5 = vec3(0.3, 0.3, 0.3), rc6 = vec3(1.2, 1.2, 1.2);
+		            float rcShift = time * rcSpeed;
+		            vec3 rcPos1 = direction * rcIntensity + vec3(0.0, rcShift, rcShift);
+		            float rcNoise1 = irisW_fbm(rcScale * rcPos1);
+		            vec2 rcPos2 = vec2(irisW_fbm(rcPos1.xy + rcNoise1), irisW_fbm(rcPos1.yz - rcNoise1));
+		            float rcNoise2 = irisW_fbm(rcScale * (rcPos1 + vec3(rcPos2, 0.0)));
+		            vec3 rcColor = mix(rc1, rc2, rcNoise2);
+		            rcColor += mix(rc3, rc4, rcPos2.x);
+		            rcColor -= mix(rc5, rc6, rcPos2.y);
+		            rcColor = clamp(rcColor, 0.0, 1.0);
+		            // Apply war heights horizon (differs from stormy: uses colorLowerSky)
+		            vec3 colorLowerSky = rcColor;
+		            vec3 colorUpperSky = vec3(dot(colorLowerSky, valuationUpper));
+		            float influenceUpper = smoothstep(heightHorizon - widthHorizon, heightHorizon, direction.y);
+		            vec3 colorSky = mix(colorLowerSky, colorUpperSky, influenceUpper);
+		            float influenceSky = mix(mixHorizon, 1.0, smoothstep(0.0, widthHorizon, abs(direction.y - heightHorizon)));
+		            color = mix(colorHorizon, colorSky, influenceSky);
+		            break;
+		        }
+		        case 6: {
+		            // Light (RP skyboxLight) — crystal noise patterns
+		            vec3 color1 = vec3(0.85, 0.85, 1.0);
+		            vec3 color2 = vec3(0.75, 0.4, 0.0);
+		            float cn = irisW_crystalNoise(direction * 3.0, time * 0.01);
+		            vec3 baseColor = mix(color1, color2, cn);
+		            color = mix(vec3(1.0, 0.9, 0.8), baseColor, smoothstep(0.1, 0.5, direction.y));
+		            break;
+		        }
+		        case 7: {
+		            // Red Lightning (RP skyboxRedLightning) — red cloudy + lightning bolts + screen flash
+		            vec3 valuationUpper = vec3(0.106, 0.358, 0.036);
+		            vec3 colorUpper = vec3(1.0, 1.0, 1.0);
+		            vec3 colorHorizon = vec3(0.05, 0.05, 0.05);
+		            float heightHorizon = 0.15, widthHorizon = 0.30, mixHorizon = 0.10;
+		            // Inline redCloudy
+		            float rcSpeed = 0.01, rcIntensity = 2.5, rcScale = 1.2;
+		            vec3 rc1 = vec3(0.6, 0.0, 0.0), rc2 = vec3(1.0, 0.2, 0.0);
+		            vec3 rc3 = vec3(0.0, 0.2, 0.0), rc4 = vec3(1.0, 0.6, 0.6);
+		            vec3 rc5 = vec3(0.3, 0.3, 0.3), rc6 = vec3(1.2, 1.2, 1.2);
+		            float rcShift = time * rcSpeed;
+		            vec3 rcPos1 = direction * rcIntensity + vec3(0.0, rcShift, rcShift);
+		            float rcNoise1 = irisW_fbm(rcScale * rcPos1);
+		            vec2 rcPos2 = vec2(irisW_fbm(rcPos1.xy + rcNoise1), irisW_fbm(rcPos1.yz - rcNoise1));
+		            float rcNoise2 = irisW_fbm(rcScale * (rcPos1 + vec3(rcPos2, 0.0)));
+		            vec3 rcColor = mix(rc1, rc2, rcNoise2);
+		            rcColor += mix(rc3, rc4, rcPos2.x);
+		            rcColor -= mix(rc5, rc6, rcPos2.y);
+		            rcColor = clamp(rcColor, 0.0, 1.0);
+		            // Stormy sky base
+		            vec3 colorUpperSky = vec3(dot(rcColor, valuationUpper) * colorUpper);
+		            float influenceUpper = smoothstep(heightHorizon - widthHorizon, heightHorizon, direction.y);
+		            vec3 colorSky = mix(vec3(0.0), colorUpperSky, influenceUpper);
+		            float influenceSky = mix(mixHorizon, 1.0, smoothstep(0.0, widthHorizon, abs(direction.y - heightHorizon)));
+		            color = mix(colorHorizon, colorSky, influenceSky);
+		            // Distant cloud flashes
+		            float cloudGlow = 0.0;
+		            for (int ci = 0; ci < 3; ci++) {
+		                float cseed = float(ci) * 17.13 + 3.7;
+		                float glow = irisW_distantCloudFlash(time, cseed);
+		                float cycle = floor((time + cseed * 53.7) / (20.0 + 40.0 * irisW_random(cseed + 100.0)));
+		                float az = fract(cseed * 0.137 + cycle * 0.318) * 6.28318;
+		                vec3 flashDir = vec3(cos(az), 0.0, sin(az));
+		                float azimuthalFocus = dot(normalize(direction.xz), flashDir.xz);
+		                float azimuthalMask = smoothstep(0.55, 0.90, azimuthalFocus);
+		                float flashEl = 0.25 + fract(cseed * 0.331 + cycle * 0.271) * 0.30;
+		                float elevationMask = smoothstep(0.18, 0.0, abs(direction.y - flashEl));
+		                cloudGlow += glow * azimuthalMask * elevationMask;
+		            }
+		            color += vec3(1.0, 0.10, 0.05) * clamp(cloudGlow, 0.0, 0.35);
+		            // Lightning bolts
+		            float totalLightning = 0.0, totalScreenFlash = 0.0;
+		            for (int li = 0; li < 4; li++) {
+		                float lseed = float(li) * 31.41592 + 7.3;
+		                float strikeIntensity = irisW_lightningFlash(time, lseed);
+		                if (strikeIntensity > 0.0) {
+		                    float lcycle = floor((time + lseed * 37.3) / (35.0 + 25.0 * irisW_random(lseed)));
+		                    float laz = fract(lseed * 0.137 + lcycle * 0.419) * 6.28318;
+		                    float lel = 0.3 + fract(lseed * 0.271 + lcycle * 0.347) * 0.35;
+		                    vec3 boltCenter = normalize(vec3(cos(laz) * sqrt(1.0 - lel * lel), lel, sin(laz) * sqrt(1.0 - lel * lel)));
+		                    vec3 up = vec3(0.0, 1.0, 0.0);
+		                    vec3 tangentX = normalize(cross(up, boltCenter));
+		                    vec3 tangentY = normalize(cross(boltCenter, tangentX));
+		                    vec3 d = normalize(direction);
+		                    vec2 localUV = vec2(dot(d, tangentX), dot(d, tangentY));
+		                    vec2 origin = vec2(fract(lseed * 0.413 + lcycle * 0.531) * 0.3 - 0.15, 0.25);
+		                    vec2 target = origin + vec2(fract(lseed * 0.619 + lcycle * 0.217) * 0.16 - 0.08, -0.5);
+		                    float proximity = smoothstep(0.5, 0.85, dot(d, boltCenter));
+		                    float bolt = irisW_lightningBolt(localUV, origin, target, lseed + lcycle, 0.003);
+		                    totalLightning += bolt * strikeIntensity * proximity;
+		                    totalScreenFlash += strikeIntensity * 0.25 * proximity;
+		                }
+		            }
+		            totalLightning = clamp(totalLightning, 0.0, 1.0);
+		            totalScreenFlash = clamp(totalScreenFlash, 0.0, 1.0);
+		            vec3 boltColor = mix(vec3(1.0, 0.05, 0.02), vec3(1.0, 0.85, 0.80), totalLightning);
+		            vec3 flashColor = vec3(0.9, 0.08, 0.04) * totalScreenFlash;
+		            color = clamp(color + flashColor + boltColor * totalLightning, 0.0, 1.0);
+		            break;
+		        }
+		    }
+		    return vec4(color, alpha);
 		}""";
 
 	// GLSL helpers for Wynncraft glint effects — one function per element, since
@@ -675,6 +1051,7 @@ public class EntityPatcher {
 				"flat out int iris_wynncraft_translucency;",
 				"out vec2 iris_wynncraft_texcoord;",
 				"out vec2 iris_wynncraft_midtex;",
+				"out vec3 iris_wynncraft_position;",
 				"vec3 irisw_pos;",
 				"vec2 irisw_uv0;",
 				"out float iris_wynncraft_nearfade;",
@@ -694,6 +1071,7 @@ public class EntityPatcher {
 				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : 0;",
 				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;",
 				"irisw_pos = iris_Position;",
+				"iris_wynncraft_position = iris_Position;",
 				"irisw_uv0 = iris_UV0;",
 				"float irisw_nf = 1.0;",
 				"irisw_applyPlayer(irisw_pos, irisw_uv0, irisw_nf);",
@@ -730,6 +1108,8 @@ public class EntityPatcher {
 				"out vec2 iris_wynncraft_texcoordTCS[];",
 				"in vec2 iris_wynncraft_midtex[];",
 				"out vec2 iris_wynncraft_midtexTCS[];",
+				"in vec3 iris_wynncraft_position[];",
+				"out vec3 iris_wynncraft_positionTCS[];",
 				"in float iris_wynncraft_nearfade[];",
 				"out float iris_wynncraft_nearfadeTCS[];");
 			tree.prependMainFunctionBody(t,
@@ -739,6 +1119,7 @@ public class EntityPatcher {
 				"iris_wynncraft_translucencyTCS[gl_InvocationID] = iris_wynncraft_translucency[gl_InvocationID];",
 				"iris_wynncraft_texcoordTCS[gl_InvocationID] = iris_wynncraft_texcoord[gl_InvocationID];",
 				"iris_wynncraft_midtexTCS[gl_InvocationID] = iris_wynncraft_midtex[gl_InvocationID];",
+				"iris_wynncraft_positionTCS[gl_InvocationID] = iris_wynncraft_position[gl_InvocationID];",
 				"iris_wynncraft_nearfadeTCS[gl_InvocationID] = iris_wynncraft_nearfade[gl_InvocationID];");
 		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_EVAL) {
 			// replace read references to grab the color from the first vertex.
@@ -758,6 +1139,8 @@ public class EntityPatcher {
 				"out vec2 iris_wynncraft_texcoordTES;",
 				"in vec2 iris_wynncraft_midtexTCS[];",
 				"out vec2 iris_wynncraft_midtexTES;",
+				"in vec3 iris_wynncraft_positionTCS[];",
+				"out vec3 iris_wynncraft_positionTES;",
 				"in float iris_wynncraft_nearfadeTCS[];",
 				"out float iris_wynncraft_nearfadeTES;");
 			tree.prependMainFunctionBody(t,
@@ -767,6 +1150,7 @@ public class EntityPatcher {
 				"iris_wynncraft_translucencyTES = iris_wynncraft_translucencyTCS[0];",
 				"iris_wynncraft_texcoordTES = iris_wynncraft_texcoordTCS[0];",
 				"iris_wynncraft_midtexTES = iris_wynncraft_midtexTCS[0];",
+				"iris_wynncraft_positionTES = iris_wynncraft_positionTCS[0];",
 				"iris_wynncraft_nearfadeTES = iris_wynncraft_nearfadeTCS[0];");
 		} else if (parameters.type.glShaderType == ShaderType.GEOMETRY) {
 			// replace read references to grab the color from the first vertex.
@@ -786,6 +1170,8 @@ public class EntityPatcher {
 				"out vec2 iris_wynncraft_texcoordGS;",
 				"in vec2 iris_wynncraft_midtex[];",
 				"out vec2 iris_wynncraft_midtexGS;",
+				"in vec3 iris_wynncraft_position[];",
+				"out vec3 iris_wynncraft_positionGS;",
 				"in float iris_wynncraft_nearfade[];",
 				"out float iris_wynncraft_nearfadeGS;");
 			tree.prependMainFunctionBody(t,
@@ -795,6 +1181,7 @@ public class EntityPatcher {
 				"iris_wynncraft_translucencyGS = iris_wynncraft_translucency[0];",
 				"iris_wynncraft_texcoordGS = iris_wynncraft_texcoord[0];",
 				"iris_wynncraft_midtexGS = iris_wynncraft_midtex[0];",
+				"iris_wynncraft_positionGS = iris_wynncraft_position[0];",
 				"iris_wynncraft_nearfadeGS = iris_wynncraft_nearfade[0];");
 
 			if (parameters.hasTesselation) {
@@ -804,6 +1191,7 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
+				root.rename("iris_wynncraft_position", "iris_wynncraft_positionTES");
 				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeTES");
 			}
 		} else if (parameters.type.glShaderType == ShaderType.FRAGMENT) {
@@ -813,11 +1201,13 @@ public class EntityPatcher {
 				"flat in int iris_wynncraft_translucency;",
 				"in vec2 iris_wynncraft_texcoord;",
 				"in vec2 iris_wynncraft_midtex;",
+				"in vec3 iris_wynncraft_position;",
 				"in float iris_wynncraft_nearfade;");
 
 			tree.prependMainFunctionBody(t,
 				"float iris_vertexColorAlpha = iris_vertexColor.a;",
-				"if (iris_wynncraft_nearfade <= 0.01) discard;");
+				"if (iris_wynncraft_nearfade <= 0.01) discard;",
+				"bool irisW_skyboxApplied = false;");
 
 			// Inject Sampler0 if not already declared (needed by glint effects to sample entity texture).
 			// Entity textures are always on texture unit 0; Sampler0 is the conventional name.
@@ -828,38 +1218,40 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityBoost;");
 
-			// Wynncraft skybox detection: discard skybox display entities so the post-process
-			// skybox renders instead. Variant ID is detected CPU-side (no GL version requirement).
-			String skyboxDetectCode = IRISW_SKYBOX_DETECT;
-
-			// Inject Wynncraft glint GLSL helpers and apply function.
+			// Inject Wynncraft GLSL functions into fragment shader.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.
-			// (BEFORE_DECLARATIONS pushes functions before uniforms, breaking GLSL compilers
-			// that require declarations before use in function bodies.)
-			// Inject apply function FIRST so that when helpers are inserted at BEFORE_FUNCTIONS
-			// they end up before the apply function (each addAll goes to first-FunctionDef index).
+			// Inject in reverse order since BEFORE_FUNCTIONS prepends:
+			//   HELPERS → SKYBOX_HELPERS → APPLY_SKYBOX → SIGNAL_HELPER → APPLY_GLINT
 			// Hardcoded frequency: 2.0 (was configurable via wyncraftGlintFreq slider, now removed)
 			String glintFunc = IRISW_APPLY_GLINT_FUNC.replace("IRIS_WYNNCRAFT_GLINT_FREQ", "2.00");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, glintFunc);
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_SKYBOX_SIGNAL_HELPER);
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_APPLY_SKYBOX_FUNC);
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_SKYBOX_HELPERS);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_HELPERS);
 
-			// Apply glint and translucency effects.
+			// Apply skybox, glint, and translucency effects.
 			// Forward packs: append to end of main() targeting the fragment output.
 			// Deferred packs: inject mid-main targeting the albedo variable before GBuffer packing.
 			FragOutput fragOutput = resolveFragOutput(root);
 
 			if (fragOutput != null) {
-				// FORWARD PATH: append effects after main() — existing behavior, unchanged.
-				// Skybox detection runs first — if it matches, discard immediately.
-				tree.appendMainFunctionBody(t, skyboxDetectCode);
+				// FORWARD PATH: append effects after main().
+				// Skybox apply runs first — replaces fragment color for skybox entities.
+				// Guard flag prevents subsequent effects from mutating skybox output.
 				String fo = fragOutput.name();
+				String skyboxApplyCode = (fragOutput.premultiplied()
+					? IRISW_SKYBOX_APPLY_FORWARD_PREMUL : IRISW_SKYBOX_APPLY_FORWARD)
+					.replace("FRAG_OUTPUT", fo);
+				tree.appendMainFunctionBody(t, skyboxApplyCode);
+				// Glint and translucency skip naturally for skybox entities (signal is in
+				// texture, not vertex color, so iris_wynncraft_glint/translucency == 0).
 				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
-				tree.appendMainFunctionBody(t, fo + " *= iris_wynncraft_nearfade;");
-				// Luminance-aware entity brightness boost (auto-scales with time of day from Java).
-				// Dark pixels get full boost, bright pixels get less — prevents over-brightening.
+				// Nearfade and entity boost guarded — these would otherwise modify skybox output.
+				tree.appendMainFunctionBody(t, "if (!irisW_skyboxApplied) " + fo + " *= iris_wynncraft_nearfade;");
 				tree.appendMainFunctionBody(t, """
-					{
+					if (!irisW_skyboxApplied) {
 					    float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
 					    float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
 					    FRAG_OUTPUT.rgb *= irisW_boostScale;
@@ -867,69 +1259,70 @@ public class EntityPatcher {
 					""".replace("FRAG_OUTPUT", fo));
 			} else {
 				// DEFERRED PATH: mid-main injection for packed GBuffer packs (e.g., Photon).
-				// Skybox detection runs early — discard skybox entities before GBuffer packing.
-				// This is appended after the nearfade discard that was prepended above.
-				tree.appendMainFunctionBody(t, skyboxDetectCode);
+				// irisW_skyboxApplied already declared at top of main via prependMainFunctionBody.
 
-				// Two injection points:
-				// 1. Translucency → BEFORE alpha-discard (so reduced alpha affects discard)
-				// 2. Glint + NearFade → AFTER entityColor overlay (so effects apply to final color)
+				// Find anchors for mid-main injection
 				CompoundStatement mainBody = null;
 				try { mainBody = tree.getOneMainDefinitionBody(); } catch (Exception ignored) {}
 
 				if (mainBody != null) {
-					// IMPORTANT: Insert translucency FIRST (earlier in main), then glint (later).
-					// This avoids index offset issues since translucency inserts at an earlier index.
-
-					// Find both anchors
 					OverlayAnchor overlayAnchor = findOverlayAnchorInMain(root, tree);
 					AlphaDiscardAnchor discardAnchor = findAlphaDiscardAnchorInMain(root, tree,
 						overlayAnchor != null ? overlayAnchor.albedoVar() : null);
 
 					// 1. Translucency at alpha-discard anchor (BEFORE discard)
-					// Deferred packs don't alpha-blend at GBuffer stage, so use dithered discard
-					// instead of alpha reduction for screen-door transparency.
 					int translucencyStmtsInserted = 0;
 					if (discardAnchor != null) {
 						String av = discardAnchor.albedoVar();
 						Collection<? extends Statement> stmts = t.parseStatements(root,
-							IRISW_DEFERRED_TRANSLUCENCY_CODE.replace("ALBEDO_VAR", av));
+							"if (!irisW_skyboxApplied) {" +
+							IRISW_DEFERRED_TRANSLUCENCY_CODE.replace("ALBEDO_VAR", av) + "}");
 						translucencyStmtsInserted = stmts.size();
 						mainBody.getStatements().addAll(discardAnchor.topLevelInsertBeforeIndex(), stmts);
 					}
 
-					// 2. Glint + NearFade
-					// Preferred: entityColor overlay anchor (AFTER overlay, e.g., gbuffers_entities)
-					// Fallback: alpha-discard anchor (AFTER discard, e.g., gbuffers_hand where
-					//   Photon doesn't use entityColor — it's guarded by PROGRAM_GBUFFERS_ENTITIES only)
+					// 2. Skybox + Glint + NearFade + Boost at anchor point
 					String glintAlbedoVar = null;
 					int glintIdx = -1;
 
 					if (overlayAnchor != null) {
-						// Insert after entityColor overlay
 						glintAlbedoVar = overlayAnchor.albedoVar();
 						glintIdx = overlayAnchor.topLevelInsertAfterIndex();
 						if (discardAnchor != null && discardAnchor.topLevelInsertBeforeIndex() <= glintIdx) {
 							glintIdx += translucencyStmtsInserted;
 						}
 					} else if (discardAnchor != null) {
-						// Fallback: insert after the alpha-discard statement
-						// (fragments that survive get glint applied before GBuffer packing)
 						glintAlbedoVar = discardAnchor.albedoVar();
-						// Insert AFTER the discard statement: discardIndex + 1
-						// (discardIndex already had translucency inserted before it, so offset)
 						glintIdx = discardAnchor.topLevelInsertBeforeIndex() + translucencyStmtsInserted + 1;
 					}
 
 					if (glintAlbedoVar != null && glintIdx >= 0) {
-						mainBody.getStatements().addAll(glintIdx,
+						// Insert skybox apply FIRST at the anchor, then glint/nearfade/boost after
+						String skyboxDeferred = IRISW_SKYBOX_APPLY_DEFERRED.replace("ALBEDO_VAR", glintAlbedoVar);
+						Collection<? extends Statement> skyboxStmts = t.parseStatements(root, skyboxDeferred);
+						int skyboxStmtsCount = skyboxStmts.size();
+						mainBody.getStatements().addAll(glintIdx, skyboxStmts);
+
+						// Glint + nearfade + boost — guarded by skybox flag
+						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount,
 							t.parseStatements(root,
-								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar),
-								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;",
+								"if (!irisW_skyboxApplied) {" +
+								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar) +
+								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;" +
 								"{ float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
 								"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
-								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }"));
+								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }" +
+								"}"));
+					} else {
+						// No anchors found — fallback: discard skybox entities (prepended near top).
+						// This prevents raw signal quads from leaking through.
+						net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-deferred-fallback",
+							"[WynnIris] Deferred skybox: no anchors found, falling back to discard");
+						tree.prependMainFunctionBody(t, IRISW_SKYBOX_FALLBACK_DISCARD);
 					}
+				} else {
+					// No main body accessible — fallback to discard
+					tree.prependMainFunctionBody(t, IRISW_SKYBOX_FALLBACK_DISCARD);
 				}
 			}
 
@@ -941,6 +1334,7 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyGS");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordGS");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexGS");
+				root.rename("iris_wynncraft_position", "iris_wynncraft_positionGS");
 				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeGS");
 			} else if (parameters.hasTesselation) {
 				root.rename("entityColor", "entityColorTES");
@@ -949,6 +1343,7 @@ public class EntityPatcher {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
+				root.rename("iris_wynncraft_position", "iris_wynncraft_positionTES");
 				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeTES");
 			}
 		}

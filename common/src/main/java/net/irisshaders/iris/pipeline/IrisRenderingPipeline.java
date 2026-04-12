@@ -47,7 +47,6 @@ import net.irisshaders.iris.mixin.LevelRendererAccessor;
 import net.irisshaders.iris.pathways.CenterDepthSampler;
 import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pathways.HorizonRenderer;
-import net.irisshaders.iris.pathways.WynncraftSkyboxRenderer;
 import net.irisshaders.iris.pathways.WynncraftTransitionRenderer;
 import net.irisshaders.iris.pathways.colorspace.ColorSpace;
 import net.irisshaders.iris.pathways.colorspace.ColorSpaceConverter;
@@ -153,8 +152,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final ImmutableSet<Integer> flippedAfterTranslucent;
 	private final HorizonRenderer horizonRenderer = new HorizonRenderer();
 	@Nullable
-	private WynncraftSkyboxRenderer wynncraftSkyboxRenderer;
-	@Nullable
 	private WynncraftTransitionRenderer wynncraftTransitionRenderer;
 	@Nullable
 	private final ComputeProgram[] shadowComputes;
@@ -214,16 +211,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private int albedoTex;
 
 
-	// Skybox temporal smoothing: persist skybox for 2.5s after entity disappears, then fade 2.5s.
-
+	// Skybox fog/sky state: tracks active skybox for fog color override (no post-process rendering).
 	private int displayedSkyboxId = 0;
 	private long lastDetectionTimeMs = 0;
 	private long skyboxFadeInStartMs = 0;
 	private float skyboxFadeOpacity = 0.0f;
-	// Crossfade: old skybox fades out while new one fades in
-	private int previousSkyboxId = 0;
-	private long crossfadeStartMs = 0;
-	private static final float CROSSFADE_DURATION_MS = 2000.0f;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		ShaderPrinter.resetPrintState();
@@ -286,9 +278,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			.map(ImageClearPass::create)
 			.collect(ImmutableList.toImmutableList());
 
-		// Skybox renderer — detection is CPU-side (ItemStackStateLayerMixin reads texture pixels),
-		// so no GL version requirement.
-		wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height);
+		// Transition renderer (skybox post-process removed — effects now render in-shader).
 		wynncraftTransitionRenderer = new WynncraftTransitionRenderer(main.width, main.height);
 
 		if (programSet.getPackDirectives().getParticleRenderingSettings() != ParticleRenderingSettings.UNSET) {
@@ -981,9 +971,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 			customImages.forEach(image -> image.updateNewSize(main.width, main.height));
 
-			if (wynncraftSkyboxRenderer != null) {
-				wynncraftSkyboxRenderer.rebuild(main.width, main.height);
-			}
 			if (wynncraftTransitionRenderer != null) {
 				wynncraftTransitionRenderer.rebuild(main.width, main.height);
 			}
@@ -1069,13 +1056,13 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 	private static final float[][] SKYBOX_FOG_COLORS = {
 		null,                          // 0: unused
-		{0.75f, 0.78f, 0.85f},        // 1: Memory Mist — cool blue-gray
-		{0.35f, 0.30f, 0.40f},        // 2: Memory Fog — dark purple-gray
-		{0.08f, 0.08f, 0.09f},        // 3: Stormy — near-black
-		{0.25f, 0.05f, 0.03f},        // 4: War Surface — dark red
-		{0.20f, 0.05f, 0.03f},        // 5: War Heights — dark red
-		{0.85f, 0.80f, 0.70f},        // 6: Light — warm
-		{0.15f, 0.04f, 0.02f},        // 7: Red Lightning — very dark red
+		null,                          // 1: Memory Mist — light, no darkening
+		null,                          // 2: Memory Fog — light, no darkening
+		{0.05f, 0.05f, 0.05f},        // 3: Stormy — near-black
+		{0.10f, 0.02f, 0.02f},        // 4: War Surface — dark red
+		{0.05f, 0.05f, 0.05f},        // 5: War Heights — near-black
+		null,                          // 6: Light — bright, no darkening
+		{0.08f, 0.02f, 0.02f},        // 7: Red Lightning — dark red
 	};
 
 	@Override
@@ -1136,94 +1123,54 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		compositeRenderer.renderAll();
 		finalPassRenderer.renderFinalPass();
 
-		// Wynncraft skybox post-process with temporal smoothing.
-		// Persists skybox 10s after entity disappears, then fades over 3s.
-		if (wynncraftSkyboxRenderer != null) {
-			// Always consume CPU detection and clear fog state, even when opacity is 0.
-			// Prevents stale state from persisting across opacity changes.
+		// Wynncraft skybox fog/sky state — no post-process rendering.
+		// Skybox effects now render in-shader (EntityPatcher GLSL injection).
+		// This section only manages fog/sky/boost environmental state for dark skyboxes.
+		{
 			int detectedId = ImmediateState.consumeSkyboxDetection();
-			float opacity = IrisVideoSettings.wynncraftSkyboxOpacity / 100.0f;
-			if (opacity <= 0.001f) {
+			boolean isDarkSkybox = (detectedId == 3 || detectedId == 4 || detectedId == 5 || detectedId == 7);
+
+			// Skip darkening when MC is raining — scene is already dark enough.
+			boolean mcIsRaining = Minecraft.getInstance().level != null
+				&& Minecraft.getInstance().level.getRainLevel(
+					CapturedRenderingState.INSTANCE.getTickDelta()) > 0.2f;
+
+			long now = System.currentTimeMillis();
+			if (isDarkSkybox && !mcIsRaining) {
+				float sceneDarken = IrisVideoSettings.wynncraftSceneDarkening / 100.0f;
+				if (detectedId != displayedSkyboxId) {
+					displayedSkyboxId = detectedId;
+					skyboxFadeInStartMs = now;
+				}
+				lastDetectionTimeMs = now;
+				float fadeIn = Math.min((now - skyboxFadeInStartMs) / 2000.0f, 1.0f);
+				skyboxFadeOpacity = fadeIn * sceneDarken;
+			} else if (detectedId > 0 && detectedId <= 7) {
+				// Light skybox (1,2,6) or raining — no fog/darkening
+				displayedSkyboxId = detectedId;
+				lastDetectionTimeMs = now;
+				skyboxFadeInStartMs = now; // Reset so fade-in restarts cleanly when rain stops
+				skyboxFadeOpacity = 0.0f;
+			} else if (displayedSkyboxId > 0) {
+				// No detection — direct linear fade over 2s from last detection
+				float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
+				if (secondsSince < 2.0f) {
+					skyboxFadeOpacity = (1.0f - secondsSince / 2.0f)
+						* (IrisVideoSettings.wynncraftSceneDarkening / 100.0f);
+				} else {
+					skyboxFadeOpacity = 0.0f;
+					displayedSkyboxId = 0;
+				}
+			}
+
+			// Set fog color override for NEXT frame's shader pack rendering.
+			if (displayedSkyboxId > 0 && displayedSkyboxId < SKYBOX_FOG_COLORS.length
+				&& SKYBOX_FOG_COLORS[displayedSkyboxId] != null && skyboxFadeOpacity > 0.001f) {
+				skyboxFogColor = SKYBOX_FOG_COLORS[displayedSkyboxId];
+				skyboxFogBlendFactor = skyboxFadeOpacity;
+			} else {
 				skyboxFogColor = null;
 				skyboxFogBlendFactor = 0.0f;
-				displayedSkyboxId = 0;
-
-				skyboxFadeOpacity = 0.0f;
-			} else {
-
-				long now = System.currentTimeMillis();
-
-				// Skybox state machine: no locking, instant switch, 2s fade on loss.
-				// When multiple skyboxes are detected, ImmediateState picks the one
-				// with delta_y closest to -601.6 (the correct beacon height).
-				if (detectedId > 0 && detectedId <= 7) {
-					if (detectedId != displayedSkyboxId) {
-						net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-crossfade",
-							"[WynnIris Skybox] Crossfade {} -> {}", displayedSkyboxId, detectedId);
-						// Start crossfade: old skybox fades out, new one fades in
-						if (displayedSkyboxId > 0) {
-							previousSkyboxId = displayedSkyboxId;
-							crossfadeStartMs = now;
-						}
-						displayedSkyboxId = detectedId;
-						skyboxFadeInStartMs = now;
-					}
-					lastDetectionTimeMs = now;
-					// 2s fade in from first detection
-					float fadeInSeconds = (now - skyboxFadeInStartMs) / 1000.0f;
-					skyboxFadeOpacity = Math.min(fadeInSeconds / 2.0f, 1.0f);
-				} else if (displayedSkyboxId > 0) {
-					// No detection — fade over 2 seconds
-					float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
-					if (secondsSince < 2.0f) {
-						skyboxFadeOpacity = 1.0f - secondsSince / 2.0f;
-					} else {
-						net.irisshaders.iris.gui.option.WynncraftDebugLog.info("skybox-fadeout",
-							"[WynnIris Skybox] Faded out ID={}, resetting", displayedSkyboxId);
-						skyboxFadeOpacity = 0.0f;
-						displayedSkyboxId = 0;
-					}
-				}
-
-				// Expire crossfade after duration
-				if (previousSkyboxId > 0 && (now - crossfadeStartMs) > (long) CROSSFADE_DURATION_MS) {
-					previousSkyboxId = 0;
-				}
-
-				com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
-				float gameTime = computeWynncraftGameTime();
-
-				// Render outgoing skybox (crossfade: fading out)
-				if (previousSkyboxId > 0) {
-					float crossfadeProgress = (now - crossfadeStartMs) / CROSSFADE_DURATION_MS;
-					float outgoingOpacity = opacity * (1.0f - crossfadeProgress);
-					if (outgoingOpacity > 0.001f) {
-						wynncraftSkyboxRenderer.render(
-							main.getDepthTexture().iris$getGlId(),
-							(GlTexture) main.getColorTexture(),
-							gameTime, outgoingOpacity, previousSkyboxId);
-					}
-				}
-
-				// Render current skybox
-				if (displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
-					float effectiveOpacity = opacity * skyboxFadeOpacity;
-					wynncraftSkyboxRenderer.render(
-						main.getDepthTexture().iris$getGlId(),
-						(GlTexture) main.getColorTexture(),
-						gameTime, effectiveOpacity, displayedSkyboxId);
-				}
-
-				// Set fog color override for NEXT frame's shader pack rendering.
-				// Blended with vanilla fog using fade opacity for smooth transitions.
-				if (displayedSkyboxId > 0 && displayedSkyboxId < SKYBOX_FOG_COLORS.length
-					&& SKYBOX_FOG_COLORS[displayedSkyboxId] != null) {
-					skyboxFogColor = SKYBOX_FOG_COLORS[displayedSkyboxId];
-					skyboxFogBlendFactor = skyboxFadeOpacity * opacity;
-				} else {
-					skyboxFogColor = null;
-					skyboxFogBlendFactor = 0.0f;
-				}
 			}
 		}
 
@@ -1404,10 +1351,6 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		horizonRenderer.destroy();
 
-		if (wynncraftSkyboxRenderer != null) {
-			wynncraftSkyboxRenderer.destroy();
-			wynncraftSkyboxRenderer = null;
-		}
 		if (wynncraftTransitionRenderer != null) {
 			wynncraftTransitionRenderer.destroy();
 			wynncraftTransitionRenderer = null;

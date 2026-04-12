@@ -16,7 +16,6 @@ public class IrisVideoSettings {
 	public static ColorSpace colorSpace = ColorSpace.SRGB;
 	public static int glintBrightness = 110;
 	public static int tintBrightness = 75;
-	public static int wynncraftSkyboxOpacity = 100;
 	public static int wynncraftSceneDarkening = 100;
 	public static int wynncraftEntityEmissivity = 100;
 	public static boolean wynncraftDebugLogging = false;
