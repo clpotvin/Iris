@@ -47,6 +47,7 @@ import net.irisshaders.iris.mixin.LevelRendererAccessor;
 import net.irisshaders.iris.pathways.CenterDepthSampler;
 import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pathways.HorizonRenderer;
+import net.irisshaders.iris.pathways.WynncraftSkyboxRenderer;
 import net.irisshaders.iris.pathways.WynncraftTransitionRenderer;
 import net.irisshaders.iris.pathways.colorspace.ColorSpace;
 import net.irisshaders.iris.pathways.colorspace.ColorSpaceConverter;
@@ -152,6 +153,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final ImmutableSet<Integer> flippedAfterTranslucent;
 	private final HorizonRenderer horizonRenderer = new HorizonRenderer();
 	@Nullable
+	private WynncraftSkyboxRenderer wynncraftSkyboxRenderer;
+	@Nullable
 	private WynncraftTransitionRenderer wynncraftTransitionRenderer;
 	@Nullable
 	private final ComputeProgram[] shadowComputes;
@@ -211,8 +214,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private int albedoTex;
 
 
-	// Skybox fog/sky state: tracks active skybox for fog color override (no post-process rendering).
-	private int displayedSkyboxId = 0;
+	// Skybox fog/sky state: tracks active skybox for fog color override + post-process primary.
+	// Public for iris_wynncraftPrimarySkyboxId uniform access from CommonUniforms.
+	public static int displayedSkyboxId = 0;
 	private long lastDetectionTimeMs = 0;
 	private long skyboxFadeInStartMs = 0;
 	private float skyboxFadeOpacity = 0.0f;
@@ -278,7 +282,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			.map(ImageClearPass::create)
 			.collect(ImmutableList.toImmutableList());
 
-		// Transition renderer (skybox post-process removed — effects now render in-shader).
+		// Post-process skybox (primary only — cutouts render in-shader via EntityPatcher).
+		wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height);
 		wynncraftTransitionRenderer = new WynncraftTransitionRenderer(main.width, main.height);
 
 		if (programSet.getPackDirectives().getParticleRenderingSettings() != ParticleRenderingSettings.UNSET) {
@@ -971,6 +976,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 			customImages.forEach(image -> image.updateNewSize(main.width, main.height));
 
+			if (wynncraftSkyboxRenderer != null) {
+				wynncraftSkyboxRenderer.rebuild(main.width, main.height);
+			}
 			if (wynncraftTransitionRenderer != null) {
 				wynncraftTransitionRenderer.rebuild(main.width, main.height);
 			}
@@ -1174,6 +1182,18 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 
+		// Render primary skybox as post-process (replaces sky pixels with procedural effect).
+		// Cutout/secondary skyboxes are handled in-shader by EntityPatcher GLSL injection.
+		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
+			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+			wynncraftSkyboxRenderer.render(
+				main.getDepthTexture().iris$getGlId(),
+				(GlTexture) main.getColorTexture(),
+				computeWynncraftGameTime(),
+				skyboxFadeOpacity,
+				displayedSkyboxId);
+		}
+
 		// Wynncraft transition rendering — independent of skybox state.
 		// CPU-detected transitions from text display entities OR debug keys.
 		if (wynncraftTransitionRenderer != null) {
@@ -1351,6 +1371,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		horizonRenderer.destroy();
 
+		if (wynncraftSkyboxRenderer != null) {
+			wynncraftSkyboxRenderer.destroy();
+			wynncraftSkyboxRenderer = null;
+		}
 		if (wynncraftTransitionRenderer != null) {
 			wynncraftTransitionRenderer.destroy();
 			wynncraftTransitionRenderer = null;

@@ -122,6 +122,9 @@ public class EntityPatcher {
 		{
 		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
 		    if (irisW_skyId > 0) {
+		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
+		            discard;
+		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
 		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
 		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
@@ -135,6 +138,9 @@ public class EntityPatcher {
 		{
 		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
 		    if (irisW_skyId > 0) {
+		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
+		            discard;
+		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
 		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
 		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
@@ -149,6 +155,9 @@ public class EntityPatcher {
 		{
 		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
 		    if (irisW_skyId > 0) {
+		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
+		            discard;
+		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
 		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
 		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
@@ -1217,6 +1226,7 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityBoost;");
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform int iris_wynncraftPrimarySkyboxId;");
 
 			// Inject Wynncraft GLSL functions into fragment shader.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.
