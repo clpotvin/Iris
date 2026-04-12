@@ -90,9 +90,22 @@ public class ItemStackStateLayerMixin {
 						skyboxPixelG = g;
 						skyboxPixelB = b;
 					}
-				} else if (a == 254) {
-					// Emissive signal (A=254 but NOT skybox G=251)
-					foundEmissive = true;
+				} else if (!foundEmissive && g != 251) {
+					// Emissive signal: A=254 anywhere in the texture.
+					// Scan 9-point grid (center, 4 corners, 4 edge midpoints) because
+					// RP uses different pixel positions for texture properties.
+					int[][] samplePositions = {
+						{w/2, h/2}, {0, 0}, {w-1, 0}, {0, h-1}, {w-1, h-1},
+						{w/2, 0}, {w/2, h-1}, {0, h/2}, {w-1, h/2}
+					};
+					for (int[] pos : samplePositions) {
+						int sx = Math.max(0, Math.min(pos[0], w-1));
+						int sy = Math.max(0, Math.min(pos[1], h-1));
+						int sp = image.getPixel(sx, sy);
+						int sa = (sp >> 24) & 0xFF;
+						int sg = (sp >> 8) & 0xFF;
+						if (sa == 254 && sg != 251) { foundEmissive = true; break; }
+					}
 				}
 			}
 		} catch (Exception e) {
