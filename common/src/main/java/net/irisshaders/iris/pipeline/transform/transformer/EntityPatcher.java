@@ -848,6 +848,31 @@ public class EntityPatcher {
 		}
 		""";
 
+	// Shadeless code for the FORWARD path. Wynncraft texture alpha = 251/255 signals
+	// "shadeless" — the pixel should be flat-lit with no directional entity shading.
+	// We divide out iris_vertexColor.rgb to remove the baked-in vertex color shading.
+	// FRAG_OUTPUT is replaced with the actual fragment output variable at injection time.
+	private static final String IRISW_SHADELESS_FORWARD = """
+		if (!irisW_skyboxApplied) {
+		    vec4 irisW_shadelessTex = texture(Sampler0, iris_wynncraft_texcoord);
+		    if (abs(irisW_shadelessTex.a * 255.0 - 251.0) < 0.5) {
+		        FRAG_OUTPUT.rgb /= max(iris_vertexColor.rgb, vec3(0.05));
+		    }
+		}
+		""";
+
+	// Shadeless code for the DEFERRED path. Same logic as forward but targets the
+	// pack's albedo variable before GBuffer packing.
+	// ALBEDO_VAR is replaced with the albedo variable name at injection time.
+	private static final String IRISW_SHADELESS_DEFERRED = """
+		if (!irisW_skyboxApplied) {
+		    vec4 irisW_shadelessTex = texture(Sampler0, iris_wynncraft_texcoord);
+		    if (abs(irisW_shadelessTex.a * 255.0 - 251.0) < 0.5) {
+		        ALBEDO_VAR.rgb /= max(iris_vertexColor.rgb, vec3(0.05));
+		    }
+		}
+		""";
+
 	// ====================================================================================
 	// WYNNCRAFT PLAYER EMOTE SUPPORT
 	// ====================================================================================
@@ -1254,6 +1279,8 @@ public class EntityPatcher {
 					? IRISW_SKYBOX_APPLY_FORWARD_PREMUL : IRISW_SKYBOX_APPLY_FORWARD)
 					.replace("FRAG_OUTPUT", fo);
 				tree.appendMainFunctionBody(t, skyboxApplyCode);
+				// Shadeless: remove vertex color shading for textures with alpha = 251/255.
+				tree.appendMainFunctionBody(t, IRISW_SHADELESS_FORWARD.replace("FRAG_OUTPUT", fo));
 				// Glint and translucency skip naturally for skybox entities (signal is in
 				// texture, not vertex color, so iris_wynncraft_glint/translucency == 0).
 				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
@@ -1307,14 +1334,20 @@ public class EntityPatcher {
 					}
 
 					if (glintAlbedoVar != null && glintIdx >= 0) {
-						// Insert skybox apply FIRST at the anchor, then glint/nearfade/boost after
+						// Insert skybox apply FIRST at the anchor, then shadeless, then glint/nearfade/boost
 						String skyboxDeferred = IRISW_SKYBOX_APPLY_DEFERRED.replace("ALBEDO_VAR", glintAlbedoVar);
 						Collection<? extends Statement> skyboxStmts = t.parseStatements(root, skyboxDeferred);
 						int skyboxStmtsCount = skyboxStmts.size();
 						mainBody.getStatements().addAll(glintIdx, skyboxStmts);
 
+						// Shadeless: remove vertex color shading for textures with alpha = 251/255.
+						String shadelessDeferred = IRISW_SHADELESS_DEFERRED.replace("ALBEDO_VAR", glintAlbedoVar);
+						Collection<? extends Statement> shadelessStmts = t.parseStatements(root, shadelessDeferred);
+						int shadelessStmtsCount = shadelessStmts.size();
+						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount, shadelessStmts);
+
 						// Glint + nearfade + boost — guarded by skybox flag
-						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount,
+						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount + shadelessStmtsCount,
 							t.parseStatements(root,
 								"if (!irisW_skyboxApplied) {" +
 								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar) +
