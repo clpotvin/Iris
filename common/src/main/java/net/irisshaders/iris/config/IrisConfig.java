@@ -181,6 +181,7 @@ public class IrisConfig {
 			IrisVideoSettings.tintBrightness = Integer.parseInt(properties.getProperty("tintBrightness", "75"));
 			IrisVideoSettings.wynncraftSceneDarkening = Integer.parseInt(properties.getProperty("wynncraftSceneDarkening", "100"));
 			IrisVideoSettings.wynncraftEntityEmissivity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftEntityEmissivity", "100"))));
+			IrisVideoSettings.wynncraftNightVisionDisablesBoost = !"false".equals(properties.getProperty("wynncraftNightVisionDisablesBoost", "true"));
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
 			IrisVideoSettings.shadowDistance = 32;
@@ -189,6 +190,7 @@ public class IrisConfig {
 			IrisVideoSettings.tintBrightness = 75;
 			IrisVideoSettings.wynncraftSceneDarkening = 100;
 			IrisVideoSettings.wynncraftEntityEmissivity = 100;
+			IrisVideoSettings.wynncraftNightVisionDisablesBoost = true;
 			save();
 		}
 
@@ -218,6 +220,7 @@ public class IrisConfig {
 
 		properties.setProperty("wynncraftSceneDarkening", String.valueOf(IrisVideoSettings.wynncraftSceneDarkening));
 		properties.setProperty("wynncraftEntityEmissivity", String.valueOf(IrisVideoSettings.wynncraftEntityEmissivity));
+		properties.setProperty("wynncraftNightVisionDisablesBoost", String.valueOf(IrisVideoSettings.wynncraftNightVisionDisablesBoost));
 		// NB: This uses ISO-8859-1 with unicode escapes as the encoding
 		try (OutputStream os = Files.newOutputStream(propertiesPath)) {
 			properties.store(os, COMMENT);

@@ -138,6 +138,20 @@ public class IrisConfig implements ConfigEntryPoint {
 						.setRange(new Range(0, 100, 5))
 						.setImpact(OptionImpact.LOW)
 					)
+					.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_night_vision_disables_boost"))
+						.setDefaultValue(true)
+						.setBinding(value -> IrisVideoSettings.wynncraftNightVisionDisablesBoost = value, () -> IrisVideoSettings.wynncraftNightVisionDisablesBoost)
+						.setName(Component.translatable("options.iris.wynncraftNightVisionDisablesBoost"))
+						.setTooltip(Component.translatable("options.iris.wynncraftNightVisionDisablesBoost.tooltip"))
+						.setStorageHandler(() -> {
+							try {
+								Iris.getIrisConfig().save();
+							} catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+						})
+						.setImpact(OptionImpact.LOW)
+					)
 					.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_debug_logging"))
 						.setDefaultValue(false)
 						.setBinding(value -> IrisVideoSettings.wynncraftDebugLogging = value, () -> IrisVideoSettings.wynncraftDebugLogging)

@@ -18,6 +18,7 @@ public class IrisVideoSettings {
 	public static int tintBrightness = 75;
 	public static int wynncraftSceneDarkening = 100;
 	public static int wynncraftEntityEmissivity = 100;
+	public static boolean wynncraftNightVisionDisablesBoost = true;
 	public static boolean wynncraftDebugLogging = false;
 	public static final OptionInstance<Integer> RENDER_DISTANCE = new ShadowDistanceOption<>("options.iris.shadowDistance",
 		mc -> {

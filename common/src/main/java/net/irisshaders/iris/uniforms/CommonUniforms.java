@@ -78,31 +78,28 @@ public final class CommonUniforms {
 		uniforms.uniform1f("iris_glintBrightness", (FloatSupplier) () -> IrisVideoSettings.glintBrightness / 100.0f, listener -> {});
 		// Wynncraft tint brightness (user-configurable, 0-150%)
 		uniforms.uniform1f("iris_tintBrightness", (FloatSupplier) () -> IrisVideoSettings.tintBrightness / 100.0f, listener -> {});
-		// Wynncraft entity brightness boost — auto-scales with time of day and scene darkening.
-		// Only active when dark skybox fog is active (cases 3,4,5,7, not raining).
-		// Scaled by skyboxFogBlendFactor so scene darkening slider modulates boost intensity.
+		// Wynncraft entity brightness boost — compensates for dark skybox scene tinting.
+		// Active when a dark skybox is detected (3,4,5,7), regardless of time of day or rain.
+		// (Unlike fog darkening, the boost is BRIGHTNESS COMPENSATION — needed most at night.)
+		// Scales with scene darkening slider and detection fade opacity.
+		// Disabled when player has night vision (if setting enabled).
 		uniforms.uniform1f("iris_wynncraftEntityBoost", (FloatSupplier) () -> {
-			float blend = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFogBlendFactor;
-			if (blend < 0.001f) {
+			// Check if a dark skybox is active
+			int skyId = net.irisshaders.iris.pipeline.IrisRenderingPipeline.displayedSkyboxId;
+			float fadeOpacity = net.irisshaders.iris.pipeline.IrisRenderingPipeline.skyboxFadeOpacity;
+			boolean isDark = (skyId == 3 || skyId == 4 || skyId == 5 || skyId == 7);
+			if (!isDark || fadeOpacity < 0.001f) {
 				return 1.0f;
 			}
-			net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-			if (mc.level == null) return 1.0f;
-
-			// MC day cycle: 0=sunrise, 6000=noon, 12000=sunset, 18000=midnight
-			long dayTime = mc.level.getDayTime() % 24000L;
-			// Compute a darkness factor: 0.0 at noon, 1.0 at midnight
-			float darkness;
-			if (dayTime < 12000) {
-				darkness = 1.0f - (float) Math.sin(dayTime * Math.PI / 12000.0);
-			} else {
-				darkness = 1.0f + (float) Math.sin((dayTime - 12000) * Math.PI / 12000.0);
+			// Skip boost when player has night vision (if setting enabled)
+			if (IrisVideoSettings.wynncraftNightVisionDisablesBoost && getNightVision() > 0.5f) {
+				return 1.0f;
 			}
-			darkness = Math.max(0.0f, Math.min(1.0f, darkness * 0.5f));
-
-			// Base boost scales with time of day; then modulated by blend factor
-			float fullBoost = 1.0f + darkness;
-			return 1.0f + (fullBoost - 1.0f) * blend;
+			// Flat 50% boost, scaled by fade opacity and scene darkening slider.
+			// Compensates for our fog darkening making entities hard to see.
+			// (No day/night curve — Wynncraft overrides MC time per-area.)
+			float sceneDarken = IrisVideoSettings.wynncraftSceneDarkening / 100.0f;
+			return 1.0f + 0.5f * fadeOpacity * sceneDarken;
 		}, listener -> {});
 
 		// Wynncraft primary skybox ID — entities matching this ID are discarded (post-process renders them).

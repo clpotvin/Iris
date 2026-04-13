@@ -219,7 +219,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	public static int displayedSkyboxId = 0;
 	private long lastDetectionTimeMs = 0;
 	private long skyboxFadeInStartMs = 0;
-	private float skyboxFadeOpacity = 0.0f;
+	public static float skyboxFadeOpacity = 0.0f;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		ShaderPrinter.resetPrintState();
@@ -1131,51 +1131,64 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		compositeRenderer.renderAll();
 		finalPassRenderer.renderFinalPass();
 
-		// Wynncraft skybox fog/sky state — no post-process rendering.
-		// Skybox effects now render in-shader (EntityPatcher GLSL injection).
-		// This section only manages fog/sky/boost environmental state for dark skyboxes.
+		// Wynncraft skybox state machine.
+		// skyboxFadeOpacity tracks DETECTION state only (fade-in/out) — controls post-process sky overlay.
+		// Fog/boost state is separately gated by dark skybox type + rain (doesn't affect sky overlay).
 		{
 			int detectedId = ImmediateState.consumeSkyboxDetection();
-			boolean isDarkSkybox = (detectedId == 3 || detectedId == 4 || detectedId == 5 || detectedId == 7);
-
-			// Skip darkening when MC is raining — scene is already dark enough.
-			boolean mcIsRaining = Minecraft.getInstance().level != null
-				&& Minecraft.getInstance().level.getRainLevel(
-					CapturedRenderingState.INSTANCE.getTickDelta()) > 0.2f;
-
 			long now = System.currentTimeMillis();
-			if (isDarkSkybox && !mcIsRaining) {
-				float sceneDarken = IrisVideoSettings.wynncraftSceneDarkening / 100.0f;
+
+			// Track detection state — fade in/out regardless of skybox type or weather
+			if (detectedId > 0 && detectedId <= 7) {
 				if (detectedId != displayedSkyboxId) {
 					displayedSkyboxId = detectedId;
 					skyboxFadeInStartMs = now;
 				}
 				lastDetectionTimeMs = now;
 				float fadeIn = Math.min((now - skyboxFadeInStartMs) / 2000.0f, 1.0f);
-				skyboxFadeOpacity = fadeIn * sceneDarken;
-			} else if (detectedId > 0 && detectedId <= 7) {
-				// Light skybox (1,2,6) or raining — no fog/darkening
-				displayedSkyboxId = detectedId;
-				lastDetectionTimeMs = now;
-				skyboxFadeInStartMs = now; // Reset so fade-in restarts cleanly when rain stops
-				skyboxFadeOpacity = 0.0f;
+				skyboxFadeOpacity = fadeIn;
 			} else if (displayedSkyboxId > 0) {
-				// No detection — direct linear fade over 2s from last detection
+				// No detection — hold for 5s then fade out over 3s.
+				// Hold prevents flicker from intermittent entity culling/unloading.
 				float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
-				if (secondsSince < 2.0f) {
-					skyboxFadeOpacity = (1.0f - secondsSince / 2.0f)
-						* (IrisVideoSettings.wynncraftSceneDarkening / 100.0f);
+				if (secondsSince < 5.0f) {
+					// Hold at full opacity — entity may just be temporarily culled
+					skyboxFadeOpacity = 1.0f;
+				} else if (secondsSince < 8.0f) {
+					// Fade out over 3s after the hold period
+					skyboxFadeOpacity = 1.0f - (secondsSince - 5.0f) / 3.0f;
 				} else {
 					skyboxFadeOpacity = 0.0f;
 					displayedSkyboxId = 0;
 				}
 			}
 
-			// Set fog color override for NEXT frame's shader pack rendering.
-			if (displayedSkyboxId > 0 && displayedSkyboxId < SKYBOX_FOG_COLORS.length
-				&& SKYBOX_FOG_COLORS[displayedSkyboxId] != null && skyboxFadeOpacity > 0.001f) {
-				skyboxFogColor = SKYBOX_FOG_COLORS[displayedSkyboxId];
-				skyboxFogBlendFactor = skyboxFadeOpacity;
+			// Fog/sky/boost state — only for dark skyboxes (3,4,5,7), NOT when raining,
+			// and scaled by daylight (no darkening at night — scene already dark).
+			// This is separate from the sky overlay which always renders.
+			boolean isDarkSkybox = (displayedSkyboxId == 3 || displayedSkyboxId == 4
+				|| displayedSkyboxId == 5 || displayedSkyboxId == 7);
+			boolean mcIsRaining = Minecraft.getInstance().level != null
+				&& Minecraft.getInstance().level.getRainLevel(
+					CapturedRenderingState.INSTANCE.getTickDelta()) > 0.2f;
+
+			if (isDarkSkybox && !mcIsRaining && skyboxFadeOpacity > 0.001f) {
+				// Daylight factor: 1.0 at noon, 0.0 at midnight.
+				// No darkening at night since the scene is already dark.
+				float daylightFactor = 0.0f;
+				if (Minecraft.getInstance().level != null) {
+					long dayTime = Minecraft.getInstance().level.getDayTime() % 24000L;
+					if (dayTime < 12000) {
+						daylightFactor = (float) Math.sin(dayTime * Math.PI / 12000.0);
+					} else {
+						daylightFactor = Math.max(0.0f,
+							-(float) Math.sin((dayTime - 12000) * Math.PI / 12000.0));
+					}
+				}
+				float sceneDarken = IrisVideoSettings.wynncraftSceneDarkening / 100.0f;
+				skyboxFogColor = (displayedSkyboxId < SKYBOX_FOG_COLORS.length)
+					? SKYBOX_FOG_COLORS[displayedSkyboxId] : null;
+				skyboxFogBlendFactor = skyboxFadeOpacity * sceneDarken * daylightFactor;
 			} else {
 				skyboxFogColor = null;
 				skyboxFogBlendFactor = 0.0f;
@@ -1186,12 +1199,15 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// Cutout/secondary skyboxes are handled in-shader by EntityPatcher GLSL injection.
 		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
 			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+			// Get DH depth texture if available (0 if DH not present)
+			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
 			wynncraftSkyboxRenderer.render(
 				main.getDepthTexture().iris$getGlId(),
 				(GlTexture) main.getColorTexture(),
 				computeWynncraftGameTime(),
 				skyboxFadeOpacity,
-				displayedSkyboxId);
+				displayedSkyboxId,
+				dhDepthTex);
 		}
 
 		// Wynncraft transition rendering — independent of skybox state.

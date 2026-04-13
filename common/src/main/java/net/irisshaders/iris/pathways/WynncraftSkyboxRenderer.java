@@ -63,12 +63,15 @@ public class WynncraftSkyboxRenderer {
 
 		uniform sampler2D DepthTex;
 		uniform sampler2D ColorTex;
+		uniform sampler2D DhDepthTex;
 		uniform mat4 InvProjMat;
 		uniform mat4 InvViewMat;
 		uniform float GameTime;
 		uniform float Opacity;
 		uniform float SceneDarkening;
+		uniform float LodFarPlane;
 		uniform int SkyboxId;
+		uniform bool HasDH;
 
 		in vec2 uv;
 		out vec4 fragColor;
@@ -469,7 +472,7 @@ public class WynncraftSkyboxRenderer {
 		    float skyTime = GameTime * 12000.0;
 
 		    // Distance fade: baseTint at player, full tint at 512+ blocks
-		    float distanceFade = smoothstep(64.0, 512.0, linearDist);
+		    float distanceFade = smoothstep(64.0, LodFarPlane, linearDist);
 		    float tintStrength = mix(baseTint, 1.0, distanceFade) * Opacity * SceneDarkening;
 
 		    // Step 1: Luminance-aware darkening.
@@ -488,7 +491,7 @@ public class WynncraftSkyboxRenderer {
 
 		    // Step 3: Directional fog — blend distant pixels toward actual skybox color.
 		    // NOT luminance-gated: fog always transitions regardless of pixel brightness.
-		    float fogFade = smoothstep(32.0, 256.0, linearDist);
+		    float fogFade = smoothstep(32.0, LodFarPlane * 0.5, linearDist);
 		    float fogBlend = fogFade * tintStrength;
 		    vec3 tinted = mix(darkened, skyColor.rgb, fogBlend);
 
@@ -499,6 +502,11 @@ public class WynncraftSkyboxRenderer {
 		    // This works at ALL distances (nearby blocks too) because it checks neighbor
 		    // depths, not the current pixel's depth alone.
 		    bool isSky = (depth > 0.999999);
+		    // DH terrain depth is in a separate buffer — check it too.
+		    // If DH rendered terrain at this pixel, don't treat it as sky.
+		    if (HasDH && isSky) {
+		        isSky = (texture(DhDepthTex, uv).r > 0.999999);
+		    }
 
 		    if (isSky) {
 		        // Sky pixel: replace with procedural skybox
@@ -511,6 +519,15 @@ public class WynncraftSkyboxRenderer {
 		        float dR = texture(DepthTex, uv + vec2( texelSize.x, 0)).r;
 		        float dU = texture(DepthTex, uv + vec2(0,  texelSize.y)).r;
 		        float dD = texture(DepthTex, uv + vec2(0, -texelSize.y)).r;
+		        // When DH is present, a neighbor is only "sky" if BOTH depth buffers show sky
+		        if (HasDH) {
+		            float dhL = texture(DhDepthTex, uv + vec2(-texelSize.x, 0)).r;
+		            float dhR = texture(DhDepthTex, uv + vec2( texelSize.x, 0)).r;
+		            float dhU = texture(DhDepthTex, uv + vec2(0,  texelSize.y)).r;
+		            float dhD = texture(DhDepthTex, uv + vec2(0, -texelSize.y)).r;
+		            dL = min(dL, dhL); dR = min(dR, dhR);
+		            dU = min(dU, dhU); dD = min(dD, dhD);
+		        }
 		        float skyNeighbors = float(dL > 0.999999) + float(dR > 0.999999)
 		                           + float(dU > 0.999999) + float(dD > 0.999999);
 
@@ -534,6 +551,8 @@ public class WynncraftSkyboxRenderer {
 
 	// Mutable state set before each render
 	private int depthTexId;
+	private int dhDepthTexId; // DH depth texture (0 if DH not present)
+	private boolean hasDH;
 	private int colorTexId; // main color texture (read source — NOT swapTexture)
 	private float gameTime;
 	private float opacity;
@@ -578,10 +597,21 @@ public class WynncraftSkyboxRenderer {
 		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "Opacity", () -> opacity);
 		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "SceneDarkening",
 			() -> net.irisshaders.iris.gui.option.IrisVideoSettings.wynncraftSceneDarkening / 100.0f);
+		// LOD far plane: scales tinting/fog distance for DH/Bobby/Voxy compatibility.
+		// When no LOD mod: 512 (vanilla default). When DH: uses DH far plane.
+		// When Bobby extends render distance: accounts for the larger vanilla distance.
+		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "LodFarPlane", () -> {
+			float dhFar = net.irisshaders.iris.compat.dh.DHCompat.getFarPlane();
+			float vanillaFar = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16.0f;
+			return Math.max(Math.max(dhFar, vanillaFar * 1.5f), 512.0f);
+		});
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "SkyboxId", () -> this.skyboxId);
+		// DH depth integration — when DH is present, check its depth to avoid overlaying skybox on LOD terrain
+		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "HasDH", () -> this.hasDH ? 1 : 0);
 
 		// Samplers
 		builder.addDynamicSampler(() -> depthTexId, GlSampler.NEAREST, "DepthTex");
+		builder.addDynamicSampler(() -> dhDepthTexId > 0 ? dhDepthTexId : depthTexId, GlSampler.NEAREST, "DhDepthTex");
 
 		// ColorTex reads the main color texture (set per-frame via colorTexId field).
 		// swapTexture is the WRITE target (via framebuffer). No read/write feedback.
@@ -601,11 +631,13 @@ public class WynncraftSkyboxRenderer {
 	 * Renders the skybox post-process pass.
 	 * Reads the detection texture GPU-side, paints sky pixels, blends with existing color.
 	 */
-	public void render(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId) {
+	public void render(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
 		if (opacity <= 0.001f || skyboxId <= 0) return;
 
 		// Set state for uniform suppliers
 		this.depthTexId = depthTexId;
+		this.dhDepthTexId = dhDepthTexId;
+		this.hasDH = (dhDepthTexId > 0);
 		this.colorTexId = colorTex.iris$getGlId();
 		this.gameTime = gameTime;
 		this.opacity = opacity;
