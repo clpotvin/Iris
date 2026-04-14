@@ -84,7 +84,7 @@ public class MixinFogRenderer {
 					.map(key -> key.identifier().toString().equals("minecraft:mushroom_fields"))
 					.orElse(false);
 			}
-			if (inMushroomFields) {
+			if (inMushroomFields && IrisVideoSettings.wynncraftMistWoodsFog) {
 				float tickDelta = CapturedRenderingState.INSTANCE.getTickDelta();
 				net.irisshaders.iris.pipeline.IrisRenderingPipeline.biomeFogStart =
 					camera.attributeProbe().getValue(EnvironmentAttributes.FOG_START_DISTANCE, tickDelta);

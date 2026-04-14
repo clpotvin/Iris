@@ -151,6 +151,20 @@ public class IrisConfig implements ConfigEntryPoint {
 					}
 				})
 				.setImpact(OptionImpact.LOW)
+			)
+			.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_mist_woods_fog"))
+				.setDefaultValue(true)
+				.setBinding(value -> IrisVideoSettings.wynncraftMistWoodsFog = value, () -> IrisVideoSettings.wynncraftMistWoodsFog)
+				.setName(Component.translatable("options.iris.wynncraftMistWoodsFog"))
+				.setTooltip(Component.translatable("options.iris.wynncraftMistWoodsFog.tooltip"))
+				.setStorageHandler(() -> {
+					try {
+						Iris.getIrisConfig().save();
+					} catch (IOException e) {
+						throw new RuntimeException(e);
+					}
+				})
+				.setImpact(OptionImpact.LOW)
 			);
 
 		if (net.irisshaders.iris.BuildConfig.WYNNIRIS_EXPERIMENTAL) {

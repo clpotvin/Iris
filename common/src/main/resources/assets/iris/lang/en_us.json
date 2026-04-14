@@ -81,6 +81,8 @@
   "options.iris.wynncraftDebugLogging": "Debug Logging",
   "options.iris.wynncraftNightVisionDisablesBoost": "Night Vision Disables Boost",
   "options.iris.wynncraftNightVisionDisablesBoost.tooltip": "When enabled, the entity brightness boost from dark skyboxes is disabled while the Night Vision potion effect is active. Turn off if you want the boost to apply regardless of night vision.",
+  "options.iris.wynncraftMistWoodsFog": "Mist Woods Fog",
+  "options.iris.wynncraftMistWoodsFog.tooltip": "Enables the close fog effect in the Mist Woods area of Fruma, matching the vanilla Wynncraft experience. Disable if you prefer to see further in the Mist Woods.",
   "options.iris.wynncraftDebugLogging.tooltip": "Enables verbose debug logging for WynnIris features (transitions, glint effects, skybox detection). Logs to latest.log. Turn off for normal play.",
   "label.iris.true": "On",
   "label.iris.false": "Off"
