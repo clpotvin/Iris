@@ -35,7 +35,7 @@ base {
 tasks.named<org.gradle.jvm.tasks.Jar>("remapJar") {
     archiveVersion.set(
         if (project.hasProperty("build.release")) "${WYNNIRIS_VERSION}+${MINECRAFT_VERSION}-fabric"
-        else "${WYNNIRIS_VERSION}-dev+${MINECRAFT_VERSION}-fabric"
+        else "${WYNNIRIS_VERSION}-experimental+${MINECRAFT_VERSION}-fabric"
     )
     archiveClassifier.set("")
 }

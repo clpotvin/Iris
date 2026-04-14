@@ -47,6 +47,7 @@ import net.irisshaders.iris.mixin.LevelRendererAccessor;
 import net.irisshaders.iris.pathways.CenterDepthSampler;
 import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pathways.HorizonRenderer;
+import net.irisshaders.iris.pathways.WynncraftBiomeFogRenderer;
 import net.irisshaders.iris.pathways.WynncraftSkyboxRenderer;
 import net.irisshaders.iris.pathways.WynncraftTransitionRenderer;
 import net.irisshaders.iris.pathways.colorspace.ColorSpace;
@@ -152,6 +153,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final ImmutableSet<Integer> flippedAfterPrepare;
 	private final ImmutableSet<Integer> flippedAfterTranslucent;
 	private final HorizonRenderer horizonRenderer = new HorizonRenderer();
+	@Nullable
+	private WynncraftBiomeFogRenderer wynncraftBiomeFogRenderer;
 	@Nullable
 	private WynncraftSkyboxRenderer wynncraftSkyboxRenderer;
 	@Nullable
@@ -282,6 +285,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			.map(ImageClearPass::create)
 			.collect(ImmutableList.toImmutableList());
 
+		// Post-process biome fog (mushroom_fields close fog for Mist Woods).
+		wynncraftBiomeFogRenderer = new WynncraftBiomeFogRenderer(main.width, main.height);
 		// Post-process skybox (primary only — cutouts render in-shader via EntityPatcher).
 		wynncraftSkyboxRenderer = new WynncraftSkyboxRenderer(main.width, main.height);
 		wynncraftTransitionRenderer = new WynncraftTransitionRenderer(main.width, main.height);
@@ -976,6 +981,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 			customImages.forEach(image -> image.updateNewSize(main.width, main.height));
 
+			if (wynncraftBiomeFogRenderer != null) {
+				wynncraftBiomeFogRenderer.rebuild(main.width, main.height);
+			}
 			if (wynncraftSkyboxRenderer != null) {
 				wynncraftSkyboxRenderer.rebuild(main.width, main.height);
 			}
@@ -1061,6 +1069,13 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	// Blended with vanilla fog using skyboxFadeOpacity for smooth transitions.
 	public static float[] skyboxFogColor = null;
 	public static float skyboxFogBlendFactor = 0.0f;
+
+	// Biome fog: set by MixinFogRenderer when player is in mushroom_fields (Mist Woods).
+	// Read by finalizeLevelRendering() to drive post-process fog pass.
+	public static volatile boolean biomeFogActive = false;
+	public static volatile float biomeFogStart = 0.0f;
+	public static volatile float biomeFogEnd = 0.0f;
+	private float biomeFogOpacity = 0.0f;
 
 	private static final float[][] SKYBOX_FOG_COLORS = {
 		null,                          // 0: unused
@@ -1213,6 +1228,25 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			} else {
 				skyboxFogColor = null;
 				skyboxFogBlendFactor = 0.0f;
+			}
+		}
+
+		// Wynncraft biome fog: post-process close fog for mushroom_fields (Mist Woods).
+		// Applied BEFORE skybox so that skybox overlay renders on top of fogged terrain.
+		if (wynncraftBiomeFogRenderer != null) {
+			// Smooth fade: ramp opacity up/down over ~1 second for biome transitions.
+			float targetOpacity = biomeFogActive ? 1.0f : 0.0f;
+			biomeFogOpacity += (targetOpacity - biomeFogOpacity) * 0.05f; // ~1s at 60fps
+			if (Math.abs(biomeFogOpacity - targetOpacity) < 0.005f) biomeFogOpacity = targetOpacity;
+
+			if (biomeFogOpacity > 0.001f) {
+				com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
+				wynncraftBiomeFogRenderer.render(
+					mainRT.getDepthTexture().iris$getGlId(),
+					(GlTexture) mainRT.getColorTexture(),
+					biomeFogStart,
+					biomeFogEnd,
+					biomeFogOpacity);
 			}
 		}
 
@@ -1408,6 +1442,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		horizonRenderer.destroy();
 
+		if (wynncraftBiomeFogRenderer != null) {
+			wynncraftBiomeFogRenderer.destroy();
+			wynncraftBiomeFogRenderer = null;
+		}
 		if (wynncraftSkyboxRenderer != null) {
 			wynncraftSkyboxRenderer.destroy();
 			wynncraftSkyboxRenderer = null;

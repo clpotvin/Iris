@@ -35,11 +35,17 @@ buildConfig {
     packageName("net.irisshaders.iris")  // forces the package. Defaults to '${project.group}'
     useJavaOutput()
 
+    val isRelease = rootProject.hasProperty("build.release")
+
     // TODO hook this up
     buildConfigField("IS_SHARED_BETA", false)
     buildConfigField("ACTIVATE_RENDERDOC", false)
     buildConfigField("BETA_TAG", "")
     buildConfigField("BETA_VERSION", 0)
+
+    // WynnIris: true for experimental/dev builds, false for release.
+    // Gates debug logging toggle visibility and all WynnIris debug output.
+    buildConfigField("WYNNIRIS_EXPERIMENTAL", !isRelease)
 
     sourceSets.getByName("desktop") {
         buildConfigField("IS_SHARED_BETA", false)
