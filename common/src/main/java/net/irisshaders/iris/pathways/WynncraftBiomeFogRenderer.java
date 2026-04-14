@@ -69,9 +69,10 @@ public class WynncraftBiomeFogRenderer {
 		    float depth = texture(DepthTex, uv).r;
 		    vec4 existing = texture(ColorTex, uv);
 
-		    // Sky pixels (depth >= 1.0) — don't fog, let skybox/shader pack handle
+		    // Sky pixels (depth >= 1.0) get full fog color — in vanilla, the sky
+		    // is completely hidden by the biome fog at this distance.
 		    if (depth > 0.999999) {
-		        fragColor = existing;
+		        fragColor = vec4(mix(existing.rgb, FogColor, Opacity), existing.a);
 		        return;
 		    }
 
