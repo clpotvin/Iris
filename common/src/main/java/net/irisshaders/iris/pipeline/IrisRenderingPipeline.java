@@ -1135,8 +1135,29 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// skyboxFadeOpacity tracks DETECTION state only (fade-in/out) — controls post-process sky overlay.
 		// Fog/boost state is separately gated by dark skybox type + rain (doesn't affect sky overlay).
 		{
-			int detectedId = ImmediateState.consumeSkyboxDetection();
+			int preferredId = ImmediateState.consumeSkyboxPreferred();
+			int fallbackId = ImmediateState.consumeSkyboxFallback();
 			long now = System.currentTimeMillis();
+
+			// Sticky primary selection:
+			// - Preferred (delta_y range) detection always wins — switch to it
+			// - No preferred, fallback MATCHES current → keep current (sticky, refresh timestamp)
+			// - No preferred, fallback DIFFERENT from current → don't refresh (let old fade out,
+			//   then fallback takes over as initial detection once displayedSkyboxId resets to 0)
+			// - No preferred, no current, fallback exists → use fallback as initial detection
+			int detectedId;
+			if (preferredId > 0) {
+				detectedId = preferredId;
+			} else if (fallbackId > 0 && displayedSkyboxId > 0 && fallbackId == displayedSkyboxId) {
+				// Same ID — keep current, refresh timestamp (entity just drifted out of range)
+				detectedId = displayedSkyboxId;
+			} else if (fallbackId > 0 && displayedSkyboxId == 0) {
+				// No existing primary — use fallback as initial detection
+				detectedId = fallbackId;
+			} else {
+				// Either nothing detected, or fallback has different ID — let current fade out
+				detectedId = 0;
+			}
 
 			// Track detection state — fade in/out regardless of skybox type or weather
 			if (detectedId > 0 && detectedId <= 7) {

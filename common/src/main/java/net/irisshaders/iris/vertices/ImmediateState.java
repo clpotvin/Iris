@@ -85,23 +85,39 @@ public class ImmediateState {
 		noteSkyboxDetection(id, Float.MAX_VALUE);
 	}
 
+	// Fallback: any skybox entity, used when no entity is in the preferred delta_y range.
+	// Prevents detection from dropping to 0 when entities are rendered but outside range.
+	public static volatile int cpuDetectedSkyboxFallbackId = 0;
+
 	public static void noteSkyboxDetection(int id, float deltaY) {
 		if (id >= 1 && id <= 7) {
-			// Only consider entities with delta_y between -550 and -700
-			if (deltaY < -700f || deltaY > -550f) return;
-			float deviation = Math.abs(deltaY - SKYBOX_TARGET_DELTA_Y);
-			float currentDeviation = Math.abs(cpuDetectedSkyboxBestDeltaY - SKYBOX_TARGET_DELTA_Y);
-			if (cpuDetectedSkyboxId == 0 || deviation < currentDeviation) {
-				cpuDetectedSkyboxId = id;
-				cpuDetectedSkyboxBestDeltaY = deltaY;
+			// Always track as fallback (any skybox entity is better than none)
+			cpuDetectedSkyboxFallbackId = id;
+
+			// Preferred: entities in the expected primary skybox delta_y range
+			if (deltaY >= -700f && deltaY <= -550f) {
+				float deviation = Math.abs(deltaY - SKYBOX_TARGET_DELTA_Y);
+				float currentDeviation = Math.abs(cpuDetectedSkyboxBestDeltaY - SKYBOX_TARGET_DELTA_Y);
+				if (cpuDetectedSkyboxId == 0 || deviation < currentDeviation) {
+					cpuDetectedSkyboxId = id;
+					cpuDetectedSkyboxBestDeltaY = deltaY;
+				}
 			}
 		}
 	}
 
-	public static int consumeSkyboxDetection() {
+	/** Returns the preferred (delta_y range) detection, or 0 if none in range. */
+	public static int consumeSkyboxPreferred() {
 		int id = cpuDetectedSkyboxId;
 		cpuDetectedSkyboxId = 0;
 		cpuDetectedSkyboxBestDeltaY = Float.MAX_VALUE;
+		return id;
+	}
+
+	/** Returns any skybox detection (fallback), or 0 if no skybox entities rendered. */
+	public static int consumeSkyboxFallback() {
+		int id = cpuDetectedSkyboxFallbackId;
+		cpuDetectedSkyboxFallbackId = 0;
 		return id;
 	}
 
