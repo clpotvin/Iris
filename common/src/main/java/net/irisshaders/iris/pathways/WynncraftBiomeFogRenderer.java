@@ -69,10 +69,24 @@ public class WynncraftBiomeFogRenderer {
 		    float depth = texture(DepthTex, uv).r;
 		    vec4 existing = texture(ColorTex, uv);
 
+		    // Fog color with minimum brightness floor.
+		    // Dense fog scatters ambient light, so even at night it should feel
+		    // misty/atmospheric rather than pitch black. Preserves the fog's hue
+		    // but lifts it to a minimum luminance.
+		    float fogLuma = dot(FogColor, vec3(0.2126, 0.7152, 0.0722));
+		    float minLuma = 0.12;
+		    vec3 fog = FogColor;
+		    if (fogLuma < minLuma && fogLuma > 0.001) {
+		        fog = FogColor * (minLuma / fogLuma);
+		    } else if (fogLuma <= 0.001) {
+		        // Near-zero color: use a neutral dark gray-green mist
+		        fog = vec3(0.08, 0.10, 0.08);
+		    }
+
 		    // Sky pixels (depth >= 1.0) get full fog color — in vanilla, the sky
 		    // is completely hidden by the biome fog at this distance.
 		    if (depth > 0.999999) {
-		        fragColor = vec4(mix(existing.rgb, FogColor, Opacity), existing.a);
+		        fragColor = vec4(mix(existing.rgb, fog, Opacity), existing.a);
 		        return;
 		    }
 
@@ -87,7 +101,7 @@ public class WynncraftBiomeFogRenderer {
 		    // Blend with opacity for smooth biome transitions
 		    fogFactor *= Opacity;
 
-		    fragColor = vec4(mix(existing.rgb, FogColor, fogFactor), existing.a);
+		    fragColor = vec4(mix(existing.rgb, fog, fogFactor), existing.a);
 		}
 		""";
 
