@@ -1243,6 +1243,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 				com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
 				wynncraftBiomeFogRenderer.render(
 					mainRT.getDepthTexture().iris$getGlId(),
+					renderTargets.getDepthTextureNoTranslucents().iris$getGlId(),
 					(GlTexture) mainRT.getColorTexture(),
 					biomeFogStart,
 					biomeFogEnd,

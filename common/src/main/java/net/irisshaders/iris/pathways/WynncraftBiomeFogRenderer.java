@@ -55,6 +55,7 @@ public class WynncraftBiomeFogRenderer {
 		#version 330 core
 
 		uniform sampler2D DepthTex;
+		uniform sampler2D DepthTexNoTranslucents;
 		uniform sampler2D ColorTex;
 		uniform mat4 InvProjMat;
 		uniform float FogStart;
@@ -79,19 +80,29 @@ public class WynncraftBiomeFogRenderer {
 		    if (fogLuma < minLuma && fogLuma > 0.001) {
 		        fog = FogColor * (minLuma / fogLuma);
 		    } else if (fogLuma <= 0.001) {
-		        // Near-zero color: use a neutral dark gray-green mist
 		        fog = vec3(0.08, 0.10, 0.08);
 		    }
 
-		    // Sky pixels (depth >= 1.0) get full fog color — in vanilla, the sky
-		    // is completely hidden by the biome fog at this distance.
+		    // Sky pixels (depth >= 1.0) get full fog color.
 		    if (depth > 0.999999) {
 		        fragColor = vec4(mix(existing.rgb, fog, Opacity), existing.a);
 		        return;
 		    }
 
-		    // Reconstruct linear view-space distance from depth
-		    vec4 viewPos = InvProjMat * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+		    // Use the pre-translucent depth (opaque-only) for fog distance.
+		    // This ensures fog renders correctly behind glass/water: the fog
+		    // samples the terrain depth behind the translucent surface, not
+		    // the glass surface depth itself.
+		    float opaqueDepth = texture(DepthTexNoTranslucents, uv).r;
+
+		    // If the opaque depth is sky (nothing behind the glass), use full fog.
+		    if (opaqueDepth > 0.999999) {
+		        fragColor = vec4(mix(existing.rgb, fog, Opacity), existing.a);
+		        return;
+		    }
+
+		    // Reconstruct linear view-space distance from opaque depth
+		    vec4 viewPos = InvProjMat * vec4(uv * 2.0 - 1.0, opaqueDepth * 2.0 - 1.0, 1.0);
 		    float linearDist = (abs(viewPos.w) > 1e-6) ? -viewPos.z / viewPos.w : 0.0;
 		    linearDist = max(linearDist, 0.0);
 
@@ -113,6 +124,7 @@ public class WynncraftBiomeFogRenderer {
 
 	// Mutable state set before each render
 	private int depthTexId;
+	private int depthTexNoTranslucentsId;
 	private int colorTexId;
 	private float fogStart;
 	private float fogEnd;
@@ -155,6 +167,7 @@ public class WynncraftBiomeFogRenderer {
 		builder.uniform1f(UniformUpdateFrequency.PER_FRAME, "Opacity", () -> opacity);
 
 		builder.addDynamicSampler(() -> depthTexId, GlSampler.NEAREST, "DepthTex");
+		builder.addDynamicSampler(() -> depthTexNoTranslucentsId, GlSampler.NEAREST, "DepthTexNoTranslucents");
 		builder.addDynamicSampler(() -> colorTexId, GlSampler.NEAREST, "ColorTex");
 
 		swapTexture = GlStateManager._genTexture();
@@ -166,10 +179,11 @@ public class WynncraftBiomeFogRenderer {
 		this.program = builder.build();
 	}
 
-	public void render(int depthTexId, GlTexture colorTex, float fogStart, float fogEnd, float opacity) {
+	public void render(int depthTexId, int depthTexNoTranslucentsId, GlTexture colorTex, float fogStart, float fogEnd, float opacity) {
 		if (opacity <= 0.001f) return;
 
 		this.depthTexId = depthTexId;
+		this.depthTexNoTranslucentsId = depthTexNoTranslucentsId;
 		this.colorTexId = colorTex.iris$getGlId();
 		this.fogStart = fogStart;
 		this.fogEnd = fogEnd;
