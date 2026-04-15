@@ -34,6 +34,9 @@ public class ItemStackStateLayerMixin {
 	@Shadow
 	private java.util.List<net.minecraft.client.renderer.block.model.BakedQuad> quads;
 
+	@Shadow
+	int[] tintLayers;
+
 	@Inject(method = "<init>", at = @At("TAIL"))
 	private void iris$catchParent(ItemStackRenderState itemStackRenderState, CallbackInfo ci) {
 		this.parentState = itemStackRenderState;
@@ -138,12 +141,35 @@ public class ItemStackStateLayerMixin {
 		if (foundEmissive) {
 			int emissivity = IrisVideoSettings.wynncraftEntityEmissivity;
 			if (emissivity <= 0) return packedLight;
-			if (emissivity >= 100) return 0xF000F0; // LightTexture.FULL_BRIGHT
+
+			// Scale emissive by (1 - level/100) when the entity also carries the Wynncraft
+			// translucency signal, so a half-translucent VFX gets half the emissive boost
+			// instead of either full fullbright (washes out translucent VFX) or zero
+			// emissive (cuts glow off entirely). Signal arrives as a tintLayers[] entry
+			// with ARGB pattern G=254, B=0, R in [1,254].
+			float translucencyScale = 1.0f;
+			if (tintLayers != null) {
+				int translucencyLevel = 0;
+				for (int tint : tintLayers) {
+					int r = (tint >> 16) & 0xFF;
+					int g = (tint >> 8) & 0xFF;
+					int b = tint & 0xFF;
+					if (g == 254 && b == 0 && r >= 1 && r <= 254 && r > translucencyLevel) {
+						translucencyLevel = r;
+					}
+				}
+				if (translucencyLevel > 0) {
+					translucencyScale = Math.max(0.0f, 1.0f - translucencyLevel / 100.0f);
+				}
+			}
+
+			float t = (emissivity / 100.0f) * translucencyScale;
+			if (t >= 1.0f) return 0xF000F0; // LightTexture.FULL_BRIGHT
+			if (t <= 0.0f) return packedLight;
 
 			// Channel-wise lerp toward fullbright
 			int block = (packedLight >> 4) & 0xF;
 			int sky = (packedLight >> 20) & 0xF;
-			float t = emissivity / 100.0f;
 			int blockOut = Math.round(block + (15 - block) * t);
 			int skyOut = Math.round(sky + (15 - sky) * t);
 			return (blockOut << 4) | (skyOut << 20);

@@ -842,11 +842,12 @@ public class EntityPatcher {
 	// TODO: Investigate routing translucent entities to the forward translucent path.
 	private static final String IRISW_DEFERRED_TRANSLUCENCY_CODE = """
 		if (iris_wynncraft_translucency > 0) {
-		    // Deferred translucency: reduce alpha for packs that consume it via discard/dither.
-		    // This has limited visual effect in fully deferred packs without alpha blending.
+		    // Deferred translucency: clamp alpha to the target rather than multiply, so this
+		    // composes cleanly with vertex-side propagation (no double-attenuation).
 		    // Formula mirrors Wynncraft RP include/translucency.glsl:
 		    //   color.a = mix(color.a, 0.0, level / 100.0) = color.a * (1.0 - level / 100.0)
-		    ALBEDO_VAR.a *= max(0.0, 1.0 - float(iris_wynncraft_translucency) / 100.0);
+		    // Floor at 0.10 so level=100 VFX remains barely visible.
+		    ALBEDO_VAR.a = min(ALBEDO_VAR.a, max(0.10, 1.0 - float(iris_wynncraft_translucency) / 100.0));
 		}
 		""";
 
@@ -1813,22 +1814,34 @@ public class EntityPatcher {
 	//   channels (rgba) — the blend equation (ONE, ONE_MINUS_SRC_ALPHA) expects rgb to
 	//   already be scaled by alpha.
 	private static void appendTranslucencyAlpha(ASTParser t, TranslationUnit tree, String fragOutput, boolean premultiplied) {
-		// Formula mirrors Wynncraft RP include/translucency.glsl exactly:
+		// Target alpha mirrors Wynncraft RP include/translucency.glsl:
 		//   applyTranslucent(level/100.0) => color.a = mix(color.a, 0.0, level/100.0)
 		//                                 = color.a * (1.0 - level/100.0)
-		// max(0.0, ...) guards against out-of-range levels producing negative alpha.
-		// premultiplied=true: deferred-forward blend (ONE, ONE_MINUS_SRC_ALPHA)
-		//   expects rgb pre-scaled by alpha, so multiply the whole vec4.
+		// We CLAMP to the target rather than multiply so this composes safely with vertex-side
+		// propagation in VanillaCoreTransformer / VanillaTransformer: if the pack already
+		// honored reduced vaColor.a / gl_Color.a, FRAG_OUTPUT.a is already ≤ target and min(...)
+		// leaves it untouched; if the pack overwrote alpha back to 1.0, min(...) restores the
+		// target. This avoids the prior double-multiplication that pushed alpha below pack
+		// discard thresholds and invisibilized low-VFX particles.
+		// premultiplied=true (deferred-forward blend ONE, ONE_MINUS_SRC_ALPHA): scale rgb to
+		// match the clamped alpha so pre-multiplication stays consistent.
 		if (premultiplied) {
 			tree.appendMainFunctionBody(t, """
 				if (iris_wynncraft_translucency > 0) {
-				    FRAG_OUTPUT *= max(0.0, 1.0 - float(iris_wynncraft_translucency) / 100.0);
+				    float irisW_targetA = max(0.10, 1.0 - float(iris_wynncraft_translucency) / 100.0);
+				    float irisW_newA = min(FRAG_OUTPUT.a, irisW_targetA);
+				    // When no clamp is needed (newA == oldA), scale is 1.0 — RGB stays put.
+				    // When oldA is exactly 0.0, rgb is already 0 under premultiplied so any scale
+				    // is a no-op; use 0.0 to avoid a division.
+				    float irisW_scale = FRAG_OUTPUT.a > 0.0 ? irisW_newA / FRAG_OUTPUT.a : 0.0;
+				    FRAG_OUTPUT.rgb *= irisW_scale;
+				    FRAG_OUTPUT.a = irisW_newA;
 				}
 				""".replace("FRAG_OUTPUT", fragOutput));
 		} else {
 			tree.appendMainFunctionBody(t, """
 				if (iris_wynncraft_translucency > 0) {
-				    FRAG_OUTPUT.a *= max(0.0, 1.0 - float(iris_wynncraft_translucency) / 100.0);
+				    FRAG_OUTPUT.a = min(FRAG_OUTPUT.a, max(0.10, 1.0 - float(iris_wynncraft_translucency) / 100.0));
 				}
 				""".replace("FRAG_OUTPUT", fragOutput));
 		}

@@ -453,18 +453,30 @@ public class VanillaCoreTransformer {
 			}
 			if (parameters.inputs.hasColor()) {
 				// Neutralize Wynncraft signal colors to white.
-				// Signals: glint (G=255), translucency (G=254), effects (G=240), movements (G=235).
-				// Integer-domain detection: int(round(iris_Color.g * 255.0)) == exact value.
-				// All get full alpha — applied fragment-side or via separate varyings.
+				// Signals: glint (G=255), translucency (G=254), effects (G=240, G=60, G=58, G=59),
+				// movements (G=235). Integer-domain detection: int(round(iris_Color.g * 255.0)) == exact value.
+				// Glint/effect/movement branches use full alpha. Translucency (G=254) uses reduced
+				// alpha (level encoded in R byte) so the pack's downstream fragment logic —
+				// anything that multiplies by vaColor.a / gl_Color.a — propagates the translucency
+				// weight, mirroring Wynncraft RP's applyTranslucent(). End-of-main fragment-side
+				// fallback in EntityPatcher.appendTranslucencyAlpha stays to cover packs that
+				// overwrite alpha mid-shader (double-attenuation is the accepted trade-off).
 				String effectMovementNeutral =
 					"int(round(iris_Color.g * 255.0)) == 240 || int(round(iris_Color.g * 255.0)) == 235"
 					+ " || int(round(iris_Color.g * 255.0)) == 60 || int(round(iris_Color.g * 255.0)) == 58"
 					+ " || int(round(iris_Color.g * 255.0)) == 59";
+				// Alpha factor mirrors Wynncraft RP include/translucency.glsl's applyTranslucent():
+				//   color.a = mix(color.a, 0.0, level/100.0) = color.a * (1.0 - level/100.0)
+				// Integer-domain decode matches EntityPatcher's iris_wynncraft_translucency.
+				// Floor at 0.10 (instead of 0.0) so level=100 VFX remains barely visible —
+				// fully-invisible at level=100 looked too aggressive in shader-pack testing.
+				String translucencyAlphaFactor = "max(0.10, 1.0 - float(int(round(iris_Color.r * 255.0))) / 100.0)";
+				String translucencyBranch = "vec4(1.0, 1.0, 1.0, " + translucencyAlphaFactor + ")";
 				String signalNeutral = "(iris_Color.g > 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.13 ? vec4(1.0)"
-					+ " : iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
+					+ " : iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? " + translucencyBranch
 					+ " : (" + effectMovementNeutral + ") ? vec4(1.0)"
 					+ " : iris_Color)";
-				String translucencyOnlyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? vec4(1.0)"
+				String translucencyOnlyNeutral = "(iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998 ? " + translucencyBranch
 					+ " : (" + effectMovementNeutral + ") ? vec4(1.0)"
 					+ " : iris_Color)";
 				if (parameters.inputs.hasOverlay() && !parameters.inputs.isText()) {
