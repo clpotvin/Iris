@@ -183,6 +183,10 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftEntityEmissivity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftEntityEmissivity", "100"))));
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = !"false".equals(properties.getProperty("wynncraftNightVisionDisablesBoost", "true"));
 			IrisVideoSettings.wynncraftMistWoodsFog = !"false".equals(properties.getProperty("wynncraftMistWoodsFog", "true"));
+			IrisVideoSettings.wynncraftMistWoodsFogDensity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogDensity", "100"))));
+			IrisVideoSettings.wynncraftMistWoodsFogMinDistance = Math.max(0, Math.min(300, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogMinDistance", "0"))));
+			IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction = "true".equals(properties.getProperty("wynncraftMistWoodsFogSunTintReduction", "false"));
+			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogSunTintAmount", "50"))));
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
 			IrisVideoSettings.shadowDistance = 32;
@@ -193,6 +197,10 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftEntityEmissivity = 100;
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = true;
 			IrisVideoSettings.wynncraftMistWoodsFog = true;
+			IrisVideoSettings.wynncraftMistWoodsFogDensity = 100;
+			IrisVideoSettings.wynncraftMistWoodsFogMinDistance = 0;
+			IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction = false;
+			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = 50;
 			save();
 		}
 
@@ -224,6 +232,10 @@ public class IrisConfig {
 		properties.setProperty("wynncraftEntityEmissivity", String.valueOf(IrisVideoSettings.wynncraftEntityEmissivity));
 		properties.setProperty("wynncraftNightVisionDisablesBoost", String.valueOf(IrisVideoSettings.wynncraftNightVisionDisablesBoost));
 		properties.setProperty("wynncraftMistWoodsFog", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFog));
+		properties.setProperty("wynncraftMistWoodsFogDensity", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogDensity));
+		properties.setProperty("wynncraftMistWoodsFogMinDistance", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogMinDistance));
+		properties.setProperty("wynncraftMistWoodsFogSunTintReduction", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction));
+		properties.setProperty("wynncraftMistWoodsFogSunTintAmount", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount));
 		// NB: This uses ISO-8859-1 with unicode escapes as the encoding
 		try (OutputStream os = Files.newOutputStream(propertiesPath)) {
 			properties.store(os, COMMENT);

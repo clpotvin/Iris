@@ -14,6 +14,7 @@ public class CapturedRenderingState {
 	private Matrix4fc gbufferModelView;
 	private Matrix4fc gbufferProjection;
 	private Vector3d fogColor;
+	private Vector3d untintedFogColor;
 	private float fogDensity;
 	private float darknessLightFactor;
 	private float tickDelta;
@@ -55,6 +56,17 @@ public class CapturedRenderingState {
 
 	public void setFogColor(float red, float green, float blue) {
 		fogColor = new Vector3d(red, green, blue);
+	}
+
+	public Vector3d getUntintedFogColor() {
+		if (Minecraft.getInstance().level == null || untintedFogColor == null) {
+			return getFogColor();
+		}
+		return untintedFogColor;
+	}
+
+	public void setUntintedFogColor(float red, float green, float blue) {
+		untintedFogColor = new Vector3d(red, green, blue);
 	}
 
 	public float getFogDensity() {

@@ -1241,13 +1241,39 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 			if (biomeFogOpacity > 0.001f) {
 				com.mojang.blaze3d.pipeline.RenderTarget mainRT = Minecraft.getInstance().getMainRenderTarget();
+
+				// Apply minimum fog distance: if user requested a farther fog end than
+				// the biome's default, push it out while preserving the fog's thickness.
+				// Clamp thickness to a sane positive minimum so degenerate or inverted
+				// biome attributes (fogStart >= fogEnd) don't propagate into the shader.
+				float fogStart = biomeFogStart;
+				float fogEnd = biomeFogEnd;
+				int minDistance = IrisVideoSettings.wynncraftMistWoodsFogMinDistance;
+				if (minDistance > 0 && minDistance > fogEnd) {
+					float thickness = Math.max(1.0f, fogEnd - fogStart);
+					fogEnd = minDistance;
+					fogStart = fogEnd - thickness;
+				}
+
+				// Inverse power curve: slider 0 and 100 stay unchanged, but mid
+				// values are pulled up toward 1.0. Compensates for the perceived
+				// nonlinearity of fog compositing — small fogFactor reductions
+				// below full saturation have a large visual impact, so 80% slider
+				// should feel closer to ~90% effective density.
+				float fogDensitySlider = IrisVideoSettings.wynncraftMistWoodsFogDensity / 100.0f;
+				float fogDensity = 1.0f - (float) Math.pow(1.0f - fogDensitySlider, 1.5);
+				float warmthReductionStrength = IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction
+					? IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount / 100.0f
+					: 0.0f;
 				wynncraftBiomeFogRenderer.render(
 					mainRT.getDepthTexture().iris$getGlId(),
 					renderTargets.getDepthTextureNoTranslucents().iris$getGlId(),
 					(GlTexture) mainRT.getColorTexture(),
-					biomeFogStart,
-					biomeFogEnd,
-					biomeFogOpacity);
+					fogStart,
+					fogEnd,
+					biomeFogOpacity,
+					fogDensity,
+					warmthReductionStrength);
 			}
 		}
 
