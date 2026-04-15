@@ -844,7 +844,9 @@ public class EntityPatcher {
 		if (iris_wynncraft_translucency > 0) {
 		    // Deferred translucency: reduce alpha for packs that consume it via discard/dither.
 		    // This has limited visual effect in fully deferred packs without alpha blending.
-		    ALBEDO_VAR.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.013, 0.0, 0.95));
+		    // Formula mirrors Wynncraft RP include/translucency.glsl:
+		    //   color.a = mix(color.a, 0.0, level / 100.0) = color.a * (1.0 - level / 100.0)
+		    ALBEDO_VAR.a *= max(0.0, 1.0 - float(iris_wynncraft_translucency) / 100.0);
 		}
 		""";
 
@@ -1811,16 +1813,22 @@ public class EntityPatcher {
 	//   channels (rgba) — the blend equation (ONE, ONE_MINUS_SRC_ALPHA) expects rgb to
 	//   already be scaled by alpha.
 	private static void appendTranslucencyAlpha(ASTParser t, TranslationUnit tree, String fragOutput, boolean premultiplied) {
+		// Formula mirrors Wynncraft RP include/translucency.glsl exactly:
+		//   applyTranslucent(level/100.0) => color.a = mix(color.a, 0.0, level/100.0)
+		//                                 = color.a * (1.0 - level/100.0)
+		// max(0.0, ...) guards against out-of-range levels producing negative alpha.
+		// premultiplied=true: deferred-forward blend (ONE, ONE_MINUS_SRC_ALPHA)
+		//   expects rgb pre-scaled by alpha, so multiply the whole vec4.
 		if (premultiplied) {
 			tree.appendMainFunctionBody(t, """
 				if (iris_wynncraft_translucency > 0) {
-				    FRAG_OUTPUT *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.013, 0.0, 0.95));
+				    FRAG_OUTPUT *= max(0.0, 1.0 - float(iris_wynncraft_translucency) / 100.0);
 				}
 				""".replace("FRAG_OUTPUT", fragOutput));
 		} else {
 			tree.appendMainFunctionBody(t, """
 				if (iris_wynncraft_translucency > 0) {
-				    FRAG_OUTPUT.a *= (1.0 - clamp(float(iris_wynncraft_translucency) * 0.013, 0.0, 0.95));
+				    FRAG_OUTPUT.a *= max(0.0, 1.0 - float(iris_wynncraft_translucency) / 100.0);
 				}
 				""".replace("FRAG_OUTPUT", fragOutput));
 		}
