@@ -1294,6 +1294,10 @@ public class EntityPatcher {
 					if (!irisW_skyboxApplied) {
 					    float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
 					    float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
+					    float irisW_boostMax = max(max(FRAG_OUTPUT.r, FRAG_OUTPUT.g), FRAG_OUTPUT.b);
+					    if (irisW_boostMax * irisW_boostScale > 1.0) {
+					        irisW_boostScale = 1.0 / max(irisW_boostMax, 1e-5);
+					    }
 					    FRAG_OUTPUT.rgb *= irisW_boostScale;
 					}
 					""".replace("FRAG_OUTPUT", fo));
@@ -1357,6 +1361,8 @@ public class EntityPatcher {
 								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;" +
 								"{ float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
 								"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
+								"  float irisW_bM = max(max(" + glintAlbedoVar + ".r, " + glintAlbedoVar + ".g), " + glintAlbedoVar + ".b);" +
+								"  if (irisW_bM * irisW_bS > 1.0) { irisW_bS = 1.0 / max(irisW_bM, 1e-5); }" +
 								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }" +
 								"}"));
 					} else {
