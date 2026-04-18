@@ -1127,6 +1127,25 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		deferredRenderer.renderAll();
 
+		// Paint the Wynncraft procedural skybox into the color buffer BEFORE translucents
+		// run. This makes translucent VFX display entities (rifts, memory-mist volumes,
+		// etc.) blend over the painted skybox during the translucent pass, exactly like
+		// Wynncraft RP where the skybox entity is itself a translucent draw. Running this
+		// after beginTranslucents's earlier late post-process caused large VFX to be
+		// wiped out: translucents don't write depth, so their pixels stayed at clear
+		// depth and got overwritten as sky.
+		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
+			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
+			wynncraftSkyboxRenderer.renderSkyPaint(
+				main.getDepthTexture().iris$getGlId(),
+				(GlTexture) main.getColorTexture(),
+				computeWynncraftGameTime(),
+				skyboxFadeOpacity,
+				displayedSkyboxId,
+				dhDepthTex);
+		}
+
 		// note: we are careful not to touch the lightmap texture unit or overlay color texture unit here,
 		// so we don't need to do anything to restore them if needed.
 		//
@@ -1277,13 +1296,13 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 
-		// Render primary skybox as post-process (replaces sky pixels with procedural effect).
-		// Cutout/secondary skyboxes are handled in-shader by EntityPatcher GLSL injection.
+		// Apply atmospheric tint, darkening, and directional fog to terrain/entities.
+		// Sky pixels were painted at beginTranslucents — this pass leaves them alone so
+		// VFX that blended over the skybox during the translucent pass are preserved.
 		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
 			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
-			// Get DH depth texture if available (0 if DH not present)
 			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
-			wynncraftSkyboxRenderer.render(
+			wynncraftSkyboxRenderer.renderSceneEffects(
 				main.getDepthTexture().iris$getGlId(),
 				(GlTexture) main.getColorTexture(),
 				computeWynncraftGameTime(),

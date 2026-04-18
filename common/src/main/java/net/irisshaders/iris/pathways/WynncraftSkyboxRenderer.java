@@ -26,17 +26,23 @@ import java.util.OptionalInt;
 import static net.irisshaders.iris.pipeline.CompositeRenderer.COMPOSITE_PIPELINE;
 
 /**
- * Renders Wynncraft custom skybox effects as a post-process pass.
+ * Renders Wynncraft custom skybox effects as post-process passes.
  * <p>
  * The skybox variant ID is detected CPU-side by reading item texture pixels in
- * ItemStackStateLayerMixin (no GL version requirement). Uses two independent masks:
+ * ItemStackStateLayerMixin (no GL version requirement). Runs as two passes at
+ * different pipeline stages:
  * <ol>
- *   <li><b>Scene Tinting</b> — all pixels get atmospheric mood tint based on linear
- *       world-space distance (smoothstep 64-512 blocks). DH/Voxy safe.</li>
- *   <li><b>Sky Overlay</b> — only exact clear-depth pixels (depth >= 1.0) get procedural
- *       skybox replacement. Intentionally tight for DH terrain safety.</li>
+ *   <li><b>Sky Paint</b> (pre-translucent, {@link #renderSkyPaint}) — paints the
+ *       procedural skybox at sky-depth pixels BEFORE translucent rendering so
+ *       Wynncraft VFX display entities (rifts, fog, etc.) blend over the skybox
+ *       instead of being erased by a late overwrite. Mirrors Wynncraft RP's
+ *       architecture where skybox entities render in the translucent pass.</li>
+ *   <li><b>Scene Effects</b> (end of frame, {@link #renderSceneEffects}) — applies
+ *       atmospheric tint, distance fog, and darkening to terrain/entities. Leaves
+ *       sky pixels untouched since sky was already painted pre-translucent.</li>
  * </ol>
  * <p>
+ * Both passes share one program; the {@code Mode} uniform selects the branch.
  * Follows the {@link net.irisshaders.iris.pathways.colorspace.ColorSpaceFragmentConverter}
  * pattern: swap texture + framebuffer → draw fullscreen quad → copy back.
  */
@@ -72,6 +78,8 @@ public class WynncraftSkyboxRenderer {
 		uniform float LodFarPlane;
 		uniform int SkyboxId;
 		uniform bool HasDH;
+		// Mode: 0 = sky paint (pre-translucent), 1 = scene effects (end of frame)
+		uniform int Mode;
 
 		in vec2 uv;
 		out vec4 fragColor;
@@ -437,16 +445,15 @@ public class WynncraftSkyboxRenderer {
 		}
 
 		// === Main ===
-		// Three effects applied per pixel:
-		// 1. Brightness darkening: multiplicative darkening based on distance + variant.
-		// 2. Directional fog tinting: distant terrain/fog blends toward the actual skybox
-		//    color for that direction. This makes fog red near red sky, dark near dark sky,
-		//    and naturally shows lightning flashes illuminating fog.
-		// 3. Sky overlay: transition band near clear-depth replaces sky pixels with
-		//    procedural skybox and eliminates edge fringe.
+		// Two modes, selected by the Mode uniform:
+		//   Mode 0 (sky paint, pre-translucent): paint procedural skybox at sky-depth
+		//     pixels (and neighbor edges). Non-sky pixels passthrough. Translucent
+		//     VFX then blend over the painted skybox like in Wynncraft RP.
+		//   Mode 1 (scene effects, post-everything): apply atmospheric tint,
+		//     directional fog, and darkening to non-sky pixels. Sky pixels passthrough
+		//     since they've already been painted pre-translucent.
 
 		void main() {
-		    // Java-provided skybox ID (handles persistence and fade)
 		    int skyboxId = SkyboxId;
 		    if (skyboxId <= 0 || Opacity <= 0.001) {
 		        fragColor = texture(ColorTex, uv);
@@ -456,70 +463,38 @@ public class WynncraftSkyboxRenderer {
 		    float depth = texture(DepthTex, uv).r;
 		    vec4 existing = texture(ColorTex, uv);
 
-		    // Get per-variant ambient parameters
-		    vec3 ambientColor;
-		    float darkening, baseTint;
-		    getSkyboxAmbient(skyboxId, ambientColor, darkening, baseTint);
-
-		    // Reconstruct view-space position for distance + direction
-		    vec4 viewPos = InvProjMat * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-		    float linearDist = (abs(viewPos.w) > 1e-6) ? -viewPos.z / viewPos.w : 0.0;
-		    linearDist = max(linearDist, 0.0);
-
-		    // Reconstruct world direction (needed for directional fog + sky overlay)
-		    vec3 viewDir = (abs(viewPos.w) > 1e-6) ? viewPos.xyz / viewPos.w : vec3(0.0, 0.0, -1.0);
-		    vec3 worldDir = normalize((InvViewMat * vec4(viewDir, 0.0)).xyz);
-		    float skyTime = GameTime * 12000.0;
-
-		    // Distance fade: baseTint at player, full tint at 512+ blocks
-		    float distanceFade = smoothstep(64.0, LodFarPlane, linearDist);
-		    float tintStrength = mix(baseTint, 1.0, distanceFade) * Opacity * SceneDarkening;
-
-		    // Step 1: Luminance-aware darkening.
-		    // Measure pixel brightness BEFORE tinting. Already-dark pixels (nighttime,
-		    // dark-textured entities) get less additional darkening to prevent crushing.
-		    float luma = dot(existing.rgb, vec3(0.2126, 0.7152, 0.0722));
-		    float darkenScale = smoothstep(0.05, 0.25, luma);
-
-		    // Color shift: blend existing color toward ambient tone
-		    vec3 colorShifted = mix(existing.rgb, existing.rgb * ambientColor, tintStrength);
-		    // Brightness: darken proportionally to original luminance
-		    vec3 darkened = colorShifted * mix(1.0, darkening, tintStrength * darkenScale);
-
-		    // Step 2: Compute skybox color for this pixel's direction.
-		    vec4 skyColor = computeSkybox(skyboxId, skyTime, worldDir);
-
-		    // Step 3: Directional fog — blend distant pixels toward actual skybox color.
-		    // NOT luminance-gated: fog always transitions regardless of pixel brightness.
-		    float fogFade = smoothstep(32.0, LodFarPlane * 0.5, linearDist);
-		    float fogBlend = fogFade * tintStrength;
-		    vec3 tinted = mix(darkened, skyColor.rgb, fogBlend);
-
-		    // Step 4: Sky overlay + edge dilation.
-		    // Sky pixels (depth near 1.0) get full skybox replacement.
-		    // Edge pixels ADJACENT to sky pixels get blended toward skybox to prevent
-		    // bright fringe from the shader pack's sky showing through at block edges.
-		    // This works at ALL distances (nearby blocks too) because it checks neighbor
-		    // depths, not the current pixel's depth alone.
+		    // Sky classifier — vanilla MC clear depth. DH terrain lives in a separate
+		    // buffer, so when DH is active a pixel is only "sky" if both buffers agree.
 		    bool isSky = (depth > 0.999999);
-		    // DH terrain depth is in a separate buffer — check it too.
-		    // If DH rendered terrain at this pixel, don't treat it as sky.
 		    if (HasDH && isSky) {
 		        isSky = (texture(DhDepthTex, uv).r > 0.999999);
 		    }
 
-		    if (isSky) {
-		        // Sky pixel: replace with procedural skybox
-		        fragColor = vec4(mix(tinted, skyColor.rgb, skyColor.a * Opacity), 1.0);
-		    } else {
-		        // Check if any neighboring pixel is sky — if so, this is an edge pixel
-		        // where the shader pack's bright sky bleeds through. Blend toward skybox.
+		    // Reconstruct view-space position and world direction once — needed by both modes.
+		    vec4 viewPos = InvProjMat * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+		    float linearDist = (abs(viewPos.w) > 1e-6) ? -viewPos.z / viewPos.w : 0.0;
+		    linearDist = max(linearDist, 0.0);
+		    vec3 viewDir = (abs(viewPos.w) > 1e-6) ? viewPos.xyz / viewPos.w : vec3(0.0, 0.0, -1.0);
+		    vec3 worldDir = normalize((InvViewMat * vec4(viewDir, 0.0)).xyz);
+		    float skyTime = GameTime * 12000.0;
+
+		    if (Mode == 0) {
+		        // ======== SKY PAINT ========
+		        // Paint procedural skybox at sky-depth pixels. Runs before translucents
+		        // so Wynncraft VFX (rifts, fog, etc.) blend over the painted skybox.
+		        if (isSky) {
+		            vec4 skyColor = computeSkybox(skyboxId, skyTime, worldDir);
+		            fragColor = vec4(mix(existing.rgb, skyColor.rgb, skyColor.a * Opacity), 1.0);
+		            return;
+		        }
+
+		        // Edge dilation — hide shader-pack-sky bleed at block edges. A non-sky
+		        // pixel with any sky neighbor gets partial skybox blend.
 		        vec2 texelSize = 1.0 / vec2(textureSize(DepthTex, 0));
 		        float dL = texture(DepthTex, uv + vec2(-texelSize.x, 0)).r;
 		        float dR = texture(DepthTex, uv + vec2( texelSize.x, 0)).r;
 		        float dU = texture(DepthTex, uv + vec2(0,  texelSize.y)).r;
 		        float dD = texture(DepthTex, uv + vec2(0, -texelSize.y)).r;
-		        // When DH is present, a neighbor is only "sky" if BOTH depth buffers show sky
 		        if (HasDH) {
 		            float dhL = texture(DhDepthTex, uv + vec2(-texelSize.x, 0)).r;
 		            float dhR = texture(DhDepthTex, uv + vec2( texelSize.x, 0)).r;
@@ -530,16 +505,52 @@ public class WynncraftSkyboxRenderer {
 		        }
 		        float skyNeighbors = float(dL > 0.999999) + float(dR > 0.999999)
 		                           + float(dU > 0.999999) + float(dD > 0.999999);
-
 		        if (skyNeighbors > 0.5) {
-		            // Edge pixel: blend toward skybox based on how many neighbors are sky
+		            vec4 skyColor = computeSkybox(skyboxId, skyTime, worldDir);
 		            float edgeBlend = skyNeighbors / 4.0;
-		            fragColor = vec4(mix(tinted, skyColor.rgb, edgeBlend * Opacity), 1.0);
+		            fragColor = vec4(mix(existing.rgb, skyColor.rgb, edgeBlend * Opacity), 1.0);
 		        } else {
-		            // Interior terrain — darkened + fog tint only
-		            fragColor = vec4(tinted, 1.0);
+		            fragColor = existing;
 		        }
+		        return;
 		    }
+
+		    // ======== SCENE EFFECTS ========
+		    // Skip any pixel whose MAIN depth is at clear — that covers real sky (already
+		    // painted pre-translucent), translucent VFX over sky (must preserve blend), AND
+		    // DH LOD terrain (which only shows in the DH depth buffer, not main). The
+		    // stricter "isSky" check used by sky paint would classify DH terrain as
+		    // non-sky here and apply fog blend, which erases translucent VFX that happened
+		    // to be drawn in front of DH terrain — the symptom that shows up as the rift
+		    // being "eaten" at distance when DH is enabled.
+		    if (depth > 0.999999) {
+		        fragColor = existing;
+		        return;
+		    }
+
+		    vec3 ambientColor;
+		    float darkening, baseTint;
+		    getSkyboxAmbient(skyboxId, ambientColor, darkening, baseTint);
+
+		    // Distance fade: baseTint at player, full tint at LodFarPlane distance
+		    float distanceFade = smoothstep(64.0, LodFarPlane, linearDist);
+		    float tintStrength = mix(baseTint, 1.0, distanceFade) * Opacity * SceneDarkening;
+
+		    // Luminance-aware darkening: dark pixels get less additional darkening so
+		    // nighttime scenes aren't crushed to black.
+		    float luma = dot(existing.rgb, vec3(0.2126, 0.7152, 0.0722));
+		    float darkenScale = smoothstep(0.05, 0.25, luma);
+		    vec3 colorShifted = mix(existing.rgb, existing.rgb * ambientColor, tintStrength);
+		    vec3 darkened = colorShifted * mix(1.0, darkening, tintStrength * darkenScale);
+
+		    // Directional fog — distant terrain blends toward the skybox color for that
+		    // direction, making fog feel like it comes from the actual sky.
+		    vec4 skyColor = computeSkybox(skyboxId, skyTime, worldDir);
+		    float fogFade = smoothstep(32.0, LodFarPlane * 0.5, linearDist);
+		    float fogBlend = fogFade * tintStrength;
+		    vec3 tinted = mix(darkened, skyColor.rgb, fogBlend);
+
+		    fragColor = vec4(tinted, 1.0);
 		}
 		""";
 
@@ -557,6 +568,7 @@ public class WynncraftSkyboxRenderer {
 	private float gameTime;
 	private float opacity;
 	private int skyboxId;
+	private int mode; // 0 = sky paint, 1 = scene effects
 
 	public WynncraftSkyboxRenderer(int width, int height) {
 		rebuild(width, height);
@@ -608,6 +620,8 @@ public class WynncraftSkyboxRenderer {
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "SkyboxId", () -> this.skyboxId);
 		// DH depth integration — when DH is present, check its depth to avoid overlaying skybox on LOD terrain
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "HasDH", () -> this.hasDH ? 1 : 0);
+		// Mode: 0 = sky paint (pre-translucent), 1 = scene effects (end of frame)
+		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "Mode", () -> this.mode);
 
 		// Samplers
 		builder.addDynamicSampler(() -> depthTexId, GlSampler.NEAREST, "DepthTex");
@@ -628,13 +642,28 @@ public class WynncraftSkyboxRenderer {
 	}
 
 	/**
-	 * Renders the skybox post-process pass.
-	 * Reads the detection texture GPU-side, paints sky pixels, blends with existing color.
+	 * Paints the procedural skybox at sky-depth pixels. Runs at the end of
+	 * {@code beginTranslucents()} so Wynncraft VFX (rifts, dust, fog) blend
+	 * over the painted skybox during the translucent pass instead of being
+	 * wiped out by a late post-process overwrite.
 	 */
-	public void render(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
+	public void renderSkyPaint(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
+		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, 0, "Wynncraft Sky Paint");
+	}
+
+	/**
+	 * Applies atmospheric tint, directional fog, and darkening to terrain and
+	 * opaque entities. Runs at end of frame ({@code finalizeLevelRendering})
+	 * after translucents and composites. Sky-depth pixels pass through untouched
+	 * because they were painted by {@link #renderSkyPaint}.
+	 */
+	public void renderSceneEffects(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
+		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, 1, "Wynncraft Scene Effects");
+	}
+
+	private void renderPass(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int mode, String passName) {
 		if (opacity <= 0.001f || skyboxId <= 0) return;
 
-		// Set state for uniform suppliers
 		this.depthTexId = depthTexId;
 		this.dhDepthTexId = dhDepthTexId;
 		this.hasDH = (dhDepthTexId > 0);
@@ -642,13 +671,13 @@ public class WynncraftSkyboxRenderer {
 		this.gameTime = gameTime;
 		this.opacity = opacity;
 		this.skyboxId = skyboxId;
+		this.mode = mode;
 
-		// Draw fullscreen quad → swap framebuffer → copy back
 		GpuBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS).getBuffer(6);
 		VertexFormat.IndexType type = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS).type();
 
 		try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
-			() -> "Wynncraft Skybox",
+			() -> passName,
 			Minecraft.getInstance().getMainRenderTarget().getColorTextureView(),
 			OptionalInt.empty())) {
 
@@ -665,7 +694,6 @@ public class WynncraftSkyboxRenderer {
 		}
 		Program.unbind();
 
-		// Copy result back to main color texture
 		framebuffer.bindAsReadBuffer();
 		IrisRenderSystem.copyTexSubImage2D(colorTex.glId(), GL11C.GL_TEXTURE_2D,
 			0, 0, 0, 0, 0, width, height);
