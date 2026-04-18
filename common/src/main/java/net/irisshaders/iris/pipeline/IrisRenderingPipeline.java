@@ -142,6 +142,13 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final CompositeRenderer beginRenderer;
 	private final CompositeRenderer prepareRenderer;
 	private final CompositeRenderer deferredRenderer;
+	/**
+	 * Optional: when the active pack integrates with Voxy and declares aux
+	 * translucent colortex targets, this pass clears those targets at entity
+	 * pixels before deferred compositing, preventing Voxy LOD water from
+	 * bleeding through entities. Null if Voxy is absent or not applicable.
+	 */
+	private final net.irisshaders.iris.pathways.VoxyEntityDepthClearPass voxyEntityDepthClear;
 	private final CompositeRenderer compositeRenderer;
 	private final FinalPassRenderer finalPassRenderer;
 	private final CustomTextureManager customTextureManager;
@@ -560,6 +567,14 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		defaultFB = flippedAfterPrepare.contains(defaultTex) ? renderTargets.createFramebufferWritingToAlt(new int[] { defaultTex }) : renderTargets.createFramebufferWritingToMain(new int[] { defaultTex });
 		defaultFBAlt = flippedAfterTranslucent.contains(defaultTex) ? renderTargets.createFramebufferWritingToAlt(new int[] { defaultTex }) : renderTargets.createFramebufferWritingToMain(new int[] { defaultTex });
+
+		// Voxy LOD-water-through-entity occlusion fix. No-op if Voxy isn't
+		// loaded or the active pack has no aux-only translucent targets.
+		// The aux targets must be captured at the same flip state Voxy wrote
+		// them in, which is flippedAfterPrepare (Voxy injects during the
+		// terrain CUTOUT pass, before any flip to the translucent state).
+		this.voxyEntityDepthClear = net.irisshaders.iris.pathways.VoxyEntityDepthClearPass.tryCreate(
+			this, renderTargets, flippedAfterPrepare);
 	}
 
 	private ComputeProgram[] createShadowComputes(ComputeSource[] compute, ProgramSet programSet) {
@@ -1125,6 +1140,15 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// all non-translucent content, as required.
 		renderTargets.copyPreTranslucentDepth();
 
+		// If Voxy is integrated and the pack declares aux translucent targets,
+		// clear those targets at pixels where vanilla opaque geometry occludes
+		// the LOD water. Must run after copyPreTranslucentDepth (so depthtex1
+		// is fresh with entity depth) and before deferredRenderer.renderAll
+		// (so the composite sees the cleared buffers).
+		if (voxyEntityDepthClear != null) {
+			voxyEntityDepthClear.render();
+		}
+
 		deferredRenderer.renderAll();
 
 		// Paint the Wynncraft procedural skybox into the color buffer BEFORE translucents
@@ -1481,6 +1505,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		prepareRenderer.destroy();
 		compositeRenderer.destroy();
 		deferredRenderer.destroy();
+		if (voxyEntityDepthClear != null) {
+			voxyEntityDepthClear.destroy();
+		}
 		finalPassRenderer.destroy();
 		centerDepthSampler.destroy();
 		customTextureManager.destroy();
