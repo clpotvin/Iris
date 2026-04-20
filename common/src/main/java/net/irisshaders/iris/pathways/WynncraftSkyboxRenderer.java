@@ -480,11 +480,18 @@ public class WynncraftSkyboxRenderer {
 
 		    if (Mode == 0) {
 		        // ======== SKY PAINT ========
-		        // Paint procedural skybox at sky-depth pixels. Runs before translucents
-		        // so Wynncraft VFX (rifts, fog, etc.) blend over the painted skybox.
+		        // Runs AFTER composite passes (including volumetric clouds). Blends our
+		        // procedural with the post-composite sky+clouds instead of replacing.
+		        // Uses the existing luminance to preserve cloud brightness while applying
+		        // our procedural mood colors.
 		        if (isSky) {
 		            vec4 skyColor = computeSkybox(skyboxId, skyTime, worldDir);
-		            fragColor = vec4(mix(existing.rgb, skyColor.rgb, skyColor.a * Opacity), 1.0);
+		            float existLuma = dot(existing.rgb, vec3(0.2126, 0.7152, 0.0722));
+		            float skyLuma = max(dot(skyColor.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.01);
+		            // Scale our procedural to match existing brightness — clouds stay bright,
+		            // clear sky stays at procedural brightness.
+		            vec3 painted = skyColor.rgb * max(existLuma / skyLuma, 0.3);
+		            fragColor = vec4(mix(existing.rgb, painted, skyColor.a * Opacity), 1.0);
 		            return;
 		        }
 
@@ -648,7 +655,11 @@ public class WynncraftSkyboxRenderer {
 	 * wiped out by a late post-process overwrite.
 	 */
 	public void renderSkyPaint(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
-		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, 0, "Wynncraft Sky Paint");
+		renderPass(depthTexId, colorTex.iris$getGlId(), gameTime, opacity, skyboxId, dhDepthTexId, 0, "Wynncraft Sky Paint");
+	}
+
+	public void renderSkyPaint(int depthTexId, int colorTexId, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
+		renderPass(depthTexId, colorTexId, gameTime, opacity, skyboxId, dhDepthTexId, 0, "Wynncraft Sky Paint");
 	}
 
 	/**
@@ -658,16 +669,16 @@ public class WynncraftSkyboxRenderer {
 	 * because they were painted by {@link #renderSkyPaint}.
 	 */
 	public void renderSceneEffects(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
-		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, 1, "Wynncraft Scene Effects");
+		renderPass(depthTexId, colorTex.iris$getGlId(), gameTime, opacity, skyboxId, dhDepthTexId, 1, "Wynncraft Scene Effects");
 	}
 
-	private void renderPass(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int mode, String passName) {
+	private void renderPass(int depthTexId, int colorTexId, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int mode, String passName) {
 		if (opacity <= 0.001f || skyboxId <= 0) return;
 
 		this.depthTexId = depthTexId;
 		this.dhDepthTexId = dhDepthTexId;
 		this.hasDH = (dhDepthTexId > 0);
-		this.colorTexId = colorTex.iris$getGlId();
+		this.colorTexId = colorTexId;
 		this.gameTime = gameTime;
 		this.opacity = opacity;
 		this.skyboxId = skyboxId;
@@ -695,7 +706,7 @@ public class WynncraftSkyboxRenderer {
 		Program.unbind();
 
 		framebuffer.bindAsReadBuffer();
-		IrisRenderSystem.copyTexSubImage2D(colorTex.glId(), GL11C.GL_TEXTURE_2D,
+		IrisRenderSystem.copyTexSubImage2D(colorTexId, GL11C.GL_TEXTURE_2D,
 			0, 0, 0, 0, 0, width, height);
 	}
 

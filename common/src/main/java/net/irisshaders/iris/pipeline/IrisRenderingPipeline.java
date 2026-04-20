@@ -1158,17 +1158,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// after beginTranslucents's earlier late post-process caused large VFX to be
 		// wiped out: translucents don't write depth, so their pixels stayed at clear
 		// depth and got overwritten as sky.
-		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
-			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
-			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
-			wynncraftSkyboxRenderer.renderSkyPaint(
-				main.getDepthTexture().iris$getGlId(),
-				(GlTexture) main.getColorTexture(),
-				computeWynncraftGameTime(),
-				skyboxFadeOpacity,
-				displayedSkyboxId,
-				dhDepthTex);
-		}
+		// Sky paint moved to finalizeLevelRendering() — runs after composites so
+		// volumetric clouds are already in colortex0. The sky paint blends our
+		// procedural with the post-composite result, preserving cloud brightness.
 
 		// note: we are careful not to touch the lightmap texture unit or overlay color texture unit here,
 		// so we don't need to do anything to restore them if needed.
@@ -1187,6 +1179,29 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		isRenderingWorld = false;
 		removePhaseIfNeeded();
 		compositeRenderer.renderAll();
+
+		// Paint Wynncraft skybox AFTER composites (which include volumetric clouds)
+		// but BEFORE the final pass copies colortex0 → screen. Painting after clouds
+		// lets us blend our procedural with the cloud-composited sky instead of having
+		// clouds overwrite our sky paint or vice versa.
+		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
+			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
+			// Write to the colortex0 texture that the final pass will read from.
+			// Use the post-composite flip state (from compositeRenderer).
+			ImmutableSet<Integer> postCompositeFlips = compositeRenderer.getFlippedAtLeastOnceFinal();
+			net.irisshaders.iris.targets.RenderTarget col0 = renderTargets.getOrCreate(0);
+			int col0Tex = postCompositeFlips.contains(0)
+				? col0.getAltTexture() : col0.getMainTexture();
+			wynncraftSkyboxRenderer.renderSkyPaint(
+				main.getDepthTexture().iris$getGlId(),
+				col0Tex,
+				computeWynncraftGameTime(),
+				skyboxFadeOpacity,
+				displayedSkyboxId,
+				dhDepthTex);
+		}
+
 		finalPassRenderer.renderFinalPass();
 
 		// Wynncraft skybox state machine.
