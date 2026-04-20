@@ -170,8 +170,6 @@ public class EntityPatcher {
 		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
 		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
-		        irisW_skyDir.y = max(irisW_skyDir.y, 0.7);
-		        irisW_skyDir = normalize(irisW_skyDir);
 		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
 		        ALBEDO_VAR = irisW_skyColor;
 		        irisW_skyboxApplied = true;
