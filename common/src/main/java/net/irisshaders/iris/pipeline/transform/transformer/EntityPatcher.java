@@ -149,17 +149,29 @@ public class EntityPatcher {
 		    }
 		}""";
 
-	// Deferred path: detect skybox signal and replace albedo variable at anchor point.
+	// Deferred path: detect skybox signal from the ALBEDO VARIABLE (already sampled by the pack)
+	// instead of resampling via Sampler0. Packs like Photon use `gtexture` (not Sampler0) for
+	// entity textures — an injected Sampler0 may not be bound to the correct texture unit.
+	// At the overlay anchor, albedo = texture(packSampler, uv) * tint. For skybox entities the
+	// vertex color is neutralized to white, so albedo ≈ raw texture with signal intact.
 	// ALBEDO_VAR is replaced with the actual variable name at injection time.
 	private static final String IRISW_SKYBOX_APPLY_DEFERRED = """
 		{
-		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
+		    int irisW_sg = int(round(ALBEDO_VAR.g * 255.0));
+		    int irisW_sa = int(round(ALBEDO_VAR.a * 255.0));
+		    int irisW_skyId = 0;
+		    if (irisW_sg == 251 && irisW_sa == 254) {
+		        irisW_skyId = int(round(ALBEDO_VAR.b * 255.0));
+		        if (irisW_skyId < 1 || irisW_skyId > 7) irisW_skyId = 0;
+		    }
 		    if (irisW_skyId > 0) {
 		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
 		            discard;
 		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
 		        vec3 irisW_skyDir = normalize(iris_wynncraft_position);
+		        irisW_skyDir.y = max(irisW_skyDir.y, 0.7);
+		        irisW_skyDir = normalize(irisW_skyDir);
 		        vec4 irisW_skyColor = irisW_applySkybox(irisW_skyId, irisW_skyTime, irisW_skyDir);
 		        ALBEDO_VAR = irisW_skyColor;
 		        irisW_skyboxApplied = true;
@@ -167,6 +179,7 @@ public class EntityPatcher {
 		}""";
 
 	// Deferred fallback: discard skybox entities when no anchors found (prepended near top of main).
+	// Also uses albedo-based detection instead of Sampler0.
 	private static final String IRISW_SKYBOX_FALLBACK_DISCARD = """
 		{
 		    int irisW_skyFB = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
@@ -864,13 +877,12 @@ public class EntityPatcher {
 		}
 		""";
 
-	// Shadeless code for the DEFERRED path. Same logic as forward but targets the
-	// pack's albedo variable before GBuffer packing.
-	// ALBEDO_VAR is replaced with the albedo variable name at injection time.
+	// Shadeless code for the DEFERRED path. Uses the albedo variable (already sampled
+	// by the pack) instead of resampling via Sampler0 — avoids sampler binding issues
+	// on packs that use gtexture instead of Sampler0.
 	private static final String IRISW_SHADELESS_DEFERRED = """
 		if (!irisW_skyboxApplied) {
-		    vec4 irisW_shadelessTex = texture(Sampler0, iris_wynncraft_texcoord);
-		    if (abs(irisW_shadelessTex.a * 255.0 - 251.0) < 0.5) {
+		    if (abs(ALBEDO_VAR.a * 255.0 - 251.0) < 0.5) {
 		        ALBEDO_VAR.rgb /= max(iris_vertexColor.rgb, vec3(0.05));
 		    }
 		}
@@ -1246,8 +1258,6 @@ public class EntityPatcher {
 				"if (iris_wynncraft_nearfade <= 0.01) discard;",
 				"bool irisW_skyboxApplied = false;");
 
-			// Inject Sampler0 if not already declared (needed by glint effects to sample entity texture).
-			// Entity textures are always on texture unit 0; Sampler0 is the conventional name.
 			if (!root.identifierIndex.has("Sampler0")) {
 				tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform sampler2D Sampler0;");
 			}
@@ -1375,6 +1385,17 @@ public class EntityPatcher {
 				} else {
 					// No main body accessible — fallback to discard
 					tree.prependMainFunctionBody(t, IRISW_SKYBOX_FALLBACK_DISCARD);
+				}
+
+				// Deferred packs multiply albedo by scene lighting, crushing skybox
+				// procedural colors to black in dark areas. After the pack writes its
+				// gbuffer, overwrite the light channel to max for skybox pixels.
+				// layout(location=0).w holds packed light_levels in Photon-style packs;
+				// 1.0 = max block + sky light in pack_unorm_2x8 encoding.
+				String deferredGbufferOut = resolveLayoutLocation0Name(root);
+				if (deferredGbufferOut != null) {
+					tree.appendMainFunctionBody(t,
+						"if (irisW_skyboxApplied) " + deferredGbufferOut + ".w = 1.0;");
 				}
 			}
 
@@ -1736,6 +1757,42 @@ public class EntityPatcher {
 	}
 
 	private record FragOutput(String name, boolean premultiplied) {}
+
+	// Find the name of a layout(location=0) out vec4 variable (the primary gbuffer output
+	// on deferred packs). Returns null if not found. Used to overwrite light_levels for
+	// skybox pixels after the pack's gbuffer writes.
+	private static String resolveLayoutLocation0Name(Root root) {
+		for (DeclarationExternalDeclaration decl : root.nodeIndex.get(DeclarationExternalDeclaration.class)) {
+			if (!(decl.getDeclaration() instanceof TypeAndInitDeclaration typeDecl)) continue;
+			var fullySpecified = typeDecl.getType();
+			if (fullySpecified == null) continue;
+			if (!(fullySpecified.getTypeSpecifier() instanceof BuiltinNumericTypeSpecifier numericType)
+				|| numericType.type != Type.F32VEC4) continue;
+			var qualifier = fullySpecified.getTypeQualifier();
+			if (qualifier == null) continue;
+			boolean hasOut = false, hasLocation0 = false;
+			for (var part : qualifier.getParts()) {
+				if (part instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.StorageQualifier sq
+					&& sq.storageType == io.github.douira.glsl_transformer.ast.node.type.qualifier.StorageQualifier.StorageType.OUT)
+					hasOut = true;
+				if (part instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.LayoutQualifier layout) {
+					for (var lp : layout.getParts()) {
+						if (lp instanceof io.github.douira.glsl_transformer.ast.node.type.qualifier.NamedLayoutQualifierPart named
+							&& "location".equals(named.getName().getName())
+							&& named.getExpression() instanceof io.github.douira.glsl_transformer.ast.node.expression.LiteralExpression lit
+							&& lit.isInteger() && lit.getInteger() == 0)
+							hasLocation0 = true;
+					}
+				}
+			}
+			if (hasOut && hasLocation0) {
+				for (var member : typeDecl.getMembers()) {
+					return member.getName().getName();
+				}
+			}
+		}
+		return null;
+	}
 
 	// Resolve the fragment output variable name.
 	// EntityPatcher runs BEFORE CommonTransformer, so gl_FragData[0] hasn't been renamed

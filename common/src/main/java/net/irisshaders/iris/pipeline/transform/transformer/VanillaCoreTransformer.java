@@ -288,8 +288,6 @@ public class VanillaCoreTransformer {
 			}
 			EntityPatcher.patchEntityId(t, tree, root, parameters);
 		} else if (parameters.inputs.hasColor() && !parameters.inputs.isText() && parameters.inputs.hasNormal()) {
-			// No overlay but has Color + Normal — display entities may render through this path.
-			// Normal check excludes particles/weather (which have Color but no Normal).
 			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
 		}
 
