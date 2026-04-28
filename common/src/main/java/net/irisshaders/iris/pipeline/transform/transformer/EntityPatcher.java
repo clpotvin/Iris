@@ -776,9 +776,6 @@ public class EntityPatcher {
 		        if (iW_isTint) {
 		            float iW_tintRatio = iW_inLuma / iW_texLuma * iris_tintBrightness;
 		            iW_out.rgb *= clamp(iW_tintRatio, 0.0, 4.0);
-		            vec3 iW_litChroma = iW_inLuma > 0.001 ? iW_in.rgb / iW_inLuma : vec3(1.0);
-		            iW_litChroma /= max(dot(iW_litChroma, vec3(0.2126, 0.7152, 0.0722)), 0.001);
-		            iW_out.rgb *= mix(vec3(1.0), clamp(iW_litChroma, vec3(0.7), vec3(1.3)), 0.35);
 		        } else {
 		            float iW_ratio = iW_inLuma / iW_texLuma * iris_glintBrightness;
 		            iW_out.rgb *= min(iW_ratio, 1.0);
