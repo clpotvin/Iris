@@ -95,11 +95,15 @@ public final class CommonUniforms {
 			if (IrisVideoSettings.wynncraftNightVisionDisablesBoost && getNightVision() > 0.5f) {
 				return 1.0f;
 			}
-			// Flat 50% boost, scaled by fade opacity and scene darkening slider.
+			float entityBrightness = IrisVideoSettings.wynncraftEntityBrightness / 100.0f;
+			if (entityBrightness <= 0.0f) {
+				return 1.0f;
+			}
+			// Base 50% boost, scaled by entity brightness, fade opacity, and scene darkening.
 			// Compensates for our fog darkening making entities hard to see.
 			// (No day/night curve — Wynncraft overrides MC time per-area.)
 			float sceneDarken = IrisVideoSettings.wynncraftSceneDarkening / 100.0f;
-			return 1.0f + 0.5f * fadeOpacity * sceneDarken;
+			return 1.0f + 0.5f * entityBrightness * fadeOpacity * sceneDarken;
 		}, listener -> {});
 
 		// Wynncraft primary skybox ID — entities matching this ID are discarded (post-process renders them).

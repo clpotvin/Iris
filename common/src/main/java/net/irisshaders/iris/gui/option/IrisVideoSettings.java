@@ -17,6 +17,7 @@ public class IrisVideoSettings {
 	public static int glintBrightness = 110;
 	public static int tintBrightness = 75;
 	public static int wynncraftSceneDarkening = 100;
+	public static int wynncraftEntityBrightness = 100;
 	public static int wynncraftEntityEmissivity = 100;
 	public static boolean wynncraftNightVisionDisablesBoost = true;
 	public static boolean wynncraftMistWoodsFog = true;

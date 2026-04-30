@@ -115,6 +115,13 @@ public class EntityPatcher {
 		    return 0;
 		}""";
 
+	private static final String IRISW_EMISSIVE_SIGNAL_HELPER = """
+		bool irisW_isEmissiveSignal(vec4 color) {
+		    int ia = int(round(color.a * 255.0));
+		    int ig = int(round(color.g * 255.0));
+		    return ia == 254 && ig != 251;
+		}""";
+
 	// Forward path: detect skybox signal and apply procedural effect to FRAG_OUTPUT.
 	// Sets irisW_skyboxApplied flag to prevent subsequent glint/translucency/boost from running.
 	// FRAG_OUTPUT is replaced with the actual variable name at injection time.
@@ -1281,10 +1288,11 @@ public class EntityPatcher {
 			// Inject Wynncraft GLSL functions into fragment shader.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.
 			// Inject in reverse order since BEFORE_FUNCTIONS prepends:
-			//   HELPERS → SKYBOX_HELPERS → APPLY_SKYBOX → SIGNAL_HELPER → APPLY_GLINT
+			//   HELPERS → SKYBOX_HELPERS → APPLY_SKYBOX → SIGNAL_HELPER → EMISSIVE_HELPER → APPLY_GLINT
 			// Hardcoded frequency: 2.0 (was configurable via wyncraftGlintFreq slider, now removed)
 			String glintFunc = IRISW_APPLY_GLINT_FUNC.replace("IRIS_WYNNCRAFT_GLINT_FREQ", "2.00");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, glintFunc);
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_EMISSIVE_SIGNAL_HELPER);
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_SKYBOX_SIGNAL_HELPER);
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_APPLY_SKYBOX_FUNC);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_SKYBOX_HELPERS);
@@ -1315,13 +1323,16 @@ public class EntityPatcher {
 				tree.appendMainFunctionBody(t, "if (!irisW_skyboxApplied) " + fo + " *= iris_wynncraft_nearfade;");
 				tree.appendMainFunctionBody(t, """
 					if (!irisW_skyboxApplied) {
-					    float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
-					    float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
-					    float irisW_boostMax = max(max(FRAG_OUTPUT.r, FRAG_OUTPUT.g), FRAG_OUTPUT.b);
-					    if (irisW_boostMax * irisW_boostScale > 1.0) {
-					        irisW_boostScale = 1.0 / max(irisW_boostMax, 1e-5);
+					    bool irisW_emissiveEntity = irisW_isEmissiveSignal(texture(Sampler0, iris_wynncraft_texcoord));
+					    if (!irisW_emissiveEntity) {
+					        float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
+					        float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
+					        float irisW_boostMax = max(max(FRAG_OUTPUT.r, FRAG_OUTPUT.g), FRAG_OUTPUT.b);
+					        if (irisW_boostMax * irisW_boostScale > 1.0) {
+					            irisW_boostScale = 1.0 / max(irisW_boostMax, 1e-5);
+					        }
+					        FRAG_OUTPUT.rgb *= irisW_boostScale;
 					    }
-					    FRAG_OUTPUT.rgb *= irisW_boostScale;
 					}
 					""".replace("FRAG_OUTPUT", fo));
 			} else {
@@ -1382,11 +1393,13 @@ public class EntityPatcher {
 								"if (!irisW_skyboxApplied) {" +
 								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar) +
 								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;" +
-								"{ float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
+								"{ bool irisW_eE = irisW_isEmissiveSignal(" + glintAlbedoVar + ");" +
+								"  if (!irisW_eE) {" +
+								"  float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
 								"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
 								"  float irisW_bM = max(max(" + glintAlbedoVar + ".r, " + glintAlbedoVar + ".g), " + glintAlbedoVar + ".b);" +
 								"  if (irisW_bM * irisW_bS > 1.0) { irisW_bS = 1.0 / max(irisW_bM, 1e-5); }" +
-								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }" +
+								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }}" +
 								"}"));
 					} else {
 						// No anchors found — fallback: discard skybox entities (prepended near top).

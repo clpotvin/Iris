@@ -76,6 +76,8 @@
   "options.iris.tintBrightness.tooltip": "Controls the brightness of Wynncraft armor/weapon tints (color recolors). Adjust if tints appear too bright or too dim.",
   "options.iris.wynncraftSceneDarkening": "Scene Darkening",
   "options.iris.wynncraftSceneDarkening.tooltip": "Controls how much the scene fog and lighting is darkened when a Wynncraft dark skybox is active (Stormy, War, Red Lightning). At 100%, full darkening. At 0%, no darkening. Disabled during rain.",
+  "options.iris.wynncraftEntityBrightness": "Entity Brightness",
+  "options.iris.wynncraftEntityBrightness.tooltip": "Controls the brightness boost for non-emissive entities when a Wynncraft dark skybox is active. Emissive entities are excluded because Entity Emissivity controls them separately.",
   "options.iris.wynncraftEntityEmissivity": "Entity Emissivity",
   "options.iris.wynncraftEntityEmissivity.tooltip": "Controls the brightness of Wynncraft emissive entities (rift structures, decorations marked as emissive). At 100%, entities are fully bright. At 0%, normal shader pack lighting applies.",
   "options.iris.wynncraftDebugLogging": "Debug Logging",

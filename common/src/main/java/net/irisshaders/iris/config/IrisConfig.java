@@ -180,6 +180,7 @@ public class IrisConfig {
 			IrisVideoSettings.glintBrightness = Integer.parseInt(properties.getProperty("glintBrightness", "110"));
 			IrisVideoSettings.tintBrightness = Integer.parseInt(properties.getProperty("tintBrightness", "75"));
 			IrisVideoSettings.wynncraftSceneDarkening = Integer.parseInt(properties.getProperty("wynncraftSceneDarkening", "100"));
+			IrisVideoSettings.wynncraftEntityBrightness = Math.max(0, Math.min(200, Integer.parseInt(properties.getProperty("wynncraftEntityBrightness", "100"))));
 			IrisVideoSettings.wynncraftEntityEmissivity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftEntityEmissivity", "100"))));
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = !"false".equals(properties.getProperty("wynncraftNightVisionDisablesBoost", "true"));
 			IrisVideoSettings.wynncraftMistWoodsFog = !"false".equals(properties.getProperty("wynncraftMistWoodsFog", "true"));
@@ -194,6 +195,7 @@ public class IrisConfig {
 			IrisVideoSettings.glintBrightness = 110;
 			IrisVideoSettings.tintBrightness = 75;
 			IrisVideoSettings.wynncraftSceneDarkening = 100;
+			IrisVideoSettings.wynncraftEntityBrightness = 100;
 			IrisVideoSettings.wynncraftEntityEmissivity = 100;
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = true;
 			IrisVideoSettings.wynncraftMistWoodsFog = true;
@@ -229,6 +231,7 @@ public class IrisConfig {
 		properties.setProperty("tintBrightness", String.valueOf(IrisVideoSettings.tintBrightness));
 
 		properties.setProperty("wynncraftSceneDarkening", String.valueOf(IrisVideoSettings.wynncraftSceneDarkening));
+		properties.setProperty("wynncraftEntityBrightness", String.valueOf(IrisVideoSettings.wynncraftEntityBrightness));
 		properties.setProperty("wynncraftEntityEmissivity", String.valueOf(IrisVideoSettings.wynncraftEntityEmissivity));
 		properties.setProperty("wynncraftNightVisionDisablesBoost", String.valueOf(IrisVideoSettings.wynncraftNightVisionDisablesBoost));
 		properties.setProperty("wynncraftMistWoodsFog", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFog));
