@@ -812,6 +812,23 @@ public class EntityPatcher {
 		}
 		""";
 
+	private static final String IRISW_ITEM_TINT_FRAGMENT_CODE = """
+		if (!irisW_skyboxApplied && iris_wynncraft_glint == 0 && iris_wynncraft_translucency == 0 && currentRenderedItemId != 0) {
+		    vec3 irisW_tintColor = clamp(iris_vertexColor.rgb, vec3(0.0), vec3(1.0));
+		    vec3 irisW_tintDelta = abs(irisW_tintColor - vec3(1.0));
+		    float irisW_tintStrength = clamp(max(max(irisW_tintDelta.r, irisW_tintDelta.g), irisW_tintDelta.b) * 4.0, 0.0, 1.0);
+		    if (irisW_tintStrength > 0.001) {
+		        vec3 irisW_tintedBase = max(texture(Sampler0, iris_wynncraft_texcoord).rgb * irisW_tintColor, vec3(0.0));
+		        float irisW_baseLuma = dot(irisW_tintedBase, vec3(0.2126, 0.7152, 0.0722));
+		        float irisW_outLuma = dot(max(FRAG_OUTPUT.rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+		        if (irisW_baseLuma > 0.001 && irisW_outLuma > 0.001) {
+		            vec3 irisW_preservedTint = clamp((irisW_tintedBase / irisW_baseLuma) * irisW_outLuma, vec3(0.0), vec3(1.0));
+		            FRAG_OUTPUT.rgb = mix(FRAG_OUTPUT.rgb, irisW_preservedTint, irisW_tintStrength);
+		        }
+		    }
+		}
+		""";
+
 	// Glint fragment code for the DEFERRED path. ALBEDO_VAR is replaced with the
 	// pack's albedo variable name (e.g., base_color). Modifies .rgb only, wrapping
 	// in vec4 for the applyGlint call since it expects vec4 in/out.
@@ -1293,6 +1310,7 @@ public class EntityPatcher {
 				// texture, not vertex color, so iris_wynncraft_glint/translucency == 0).
 				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
+				tree.appendMainFunctionBody(t, IRISW_ITEM_TINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				// Nearfade and entity boost guarded — these would otherwise modify skybox output.
 				tree.appendMainFunctionBody(t, "if (!irisW_skyboxApplied) " + fo + " *= iris_wynncraft_nearfade;");
 				tree.appendMainFunctionBody(t, """
