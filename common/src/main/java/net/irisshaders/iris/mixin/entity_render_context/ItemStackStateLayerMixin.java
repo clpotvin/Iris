@@ -2,14 +2,17 @@ package net.irisshaders.iris.mixin.entity_render_context;
 
 import com.llamalad7.mixinextras.sugar.Share;
 import com.llamalad7.mixinextras.sugar.ref.LocalIntRef;
+import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
+import net.irisshaders.iris.mixin.texture.SpriteContentsAccessor;
 import net.irisshaders.iris.mixinterface.ItemContextState;
 import net.irisshaders.iris.shaderpack.materialmap.NamespacedId;
 import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
+import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
@@ -23,8 +26,15 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
+
 @Mixin(ItemStackRenderState.LayerRenderState.class)
 public class ItemStackStateLayerMixin {
+	@Unique
+	private static final Map<SpriteContents, Boolean> iris$emissiveSpriteCache = Collections.synchronizedMap(new WeakHashMap<>());
+
 	@Unique
 	private ItemStackRenderState parentState;
 
@@ -70,7 +80,7 @@ public class ItemStackStateLayerMixin {
 				if (sprite == null) continue;
 				var contents = sprite.contents();
 				if (contents == null) continue;
-				var image = ((net.irisshaders.iris.mixin.texture.SpriteContentsAccessor) contents).getOriginalImage();
+				var image = ((SpriteContentsAccessor) contents).getOriginalImage();
 				if (image == null) continue;
 				int w = contents.width();
 				int h = contents.height();
@@ -93,22 +103,8 @@ public class ItemStackStateLayerMixin {
 						skyboxPixelG = g;
 						skyboxPixelB = b;
 					}
-				} else if (!foundEmissive && g != 251) {
-					// Emissive signal: A=254 anywhere in the texture.
-					// Scan 9-point grid (center, 4 corners, 4 edge midpoints) because
-					// RP uses different pixel positions for texture properties.
-					int[][] samplePositions = {
-						{w/2, h/2}, {0, 0}, {w-1, 0}, {0, h-1}, {w-1, h-1},
-						{w/2, 0}, {w/2, h-1}, {0, h/2}, {w-1, h/2}
-					};
-					for (int[] pos : samplePositions) {
-						int sx = Math.max(0, Math.min(pos[0], w-1));
-						int sy = Math.max(0, Math.min(pos[1], h-1));
-						int sp = image.getPixel(sx, sy);
-						int sa = (sp >> 24) & 0xFF;
-						int sg = (sp >> 8) & 0xFF;
-						if (sa == 254 && sg != 251) { foundEmissive = true; break; }
-					}
+				} else if (!foundEmissive && iris$hasEmissiveSignal(contents, image)) {
+					foundEmissive = true;
 				}
 			}
 		} catch (Exception e) {
@@ -141,29 +137,7 @@ public class ItemStackStateLayerMixin {
 		if (foundEmissive) {
 			int emissivity = IrisVideoSettings.wynncraftEntityEmissivity;
 			if (emissivity <= 0) return packedLight;
-
-			// Scale emissive by (1 - level/100) when the entity also carries the Wynncraft
-			// translucency signal, so a half-translucent VFX gets half the emissive boost
-			// instead of either full fullbright (washes out translucent VFX) or zero
-			// emissive (cuts glow off entirely). Signal arrives as a tintLayers[] entry
-			// with ARGB pattern G=254, B=0, R in [1,254].
-			float translucencyScale = 1.0f;
-			if (tintLayers != null) {
-				int translucencyLevel = 0;
-				for (int tint : tintLayers) {
-					int r = (tint >> 16) & 0xFF;
-					int g = (tint >> 8) & 0xFF;
-					int b = tint & 0xFF;
-					if (g == 254 && b == 0 && r >= 1 && r <= 254 && r > translucencyLevel) {
-						translucencyLevel = r;
-					}
-				}
-				if (translucencyLevel > 0) {
-					translucencyScale = Math.max(0.0f, 1.0f - translucencyLevel / 100.0f);
-				}
-			}
-
-			float t = (emissivity / 100.0f) * translucencyScale;
+			float t = emissivity / 100.0f;
 			if (t >= 1.0f) return 0xF000F0; // LightTexture.FULL_BRIGHT
 			if (t <= 0.0f) return packedLight;
 
@@ -176,6 +150,38 @@ public class ItemStackStateLayerMixin {
 		}
 
 		return packedLight;
+	}
+
+	@Unique
+	private static boolean iris$hasEmissiveSignal(SpriteContents contents, NativeImage image) {
+		synchronized (iris$emissiveSpriteCache) {
+			Boolean cached = iris$emissiveSpriteCache.get(contents);
+			if (cached != null) return cached;
+		}
+
+		int width = image.getWidth();
+		int height = image.getHeight();
+		boolean found = false;
+		for (int y = 0; y < height && !found; y++) {
+			for (int x = 0; x < width; x++) {
+				if (iris$isEmissivePixel(image.getPixel(x, y))) {
+					found = true;
+					break;
+				}
+			}
+		}
+
+		synchronized (iris$emissiveSpriteCache) {
+			iris$emissiveSpriteCache.put(contents, found);
+		}
+		return found;
+	}
+
+	@Unique
+	private static boolean iris$isEmissivePixel(int argb) {
+		int a = (argb >> 24) & 0xFF;
+		int g = (argb >> 8) & 0xFF;
+		return a == 254 && g != 251;
 	}
 
 	@Inject(method = "submit", at = @At("HEAD"))
