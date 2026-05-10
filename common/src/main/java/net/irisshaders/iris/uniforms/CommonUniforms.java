@@ -78,6 +78,8 @@ public final class CommonUniforms {
 		uniforms.uniform1f("iris_glintBrightness", (FloatSupplier) () -> IrisVideoSettings.glintBrightness / 100.0f, listener -> {});
 		// Wynncraft tint brightness (user-configurable, 0-150%)
 		uniforms.uniform1f("iris_tintBrightness", (FloatSupplier) () -> IrisVideoSettings.tintBrightness / 100.0f, listener -> {});
+		// Wynncraft emissive entity strength (user-configurable, 0-100%).
+		uniforms.uniform1f("iris_wynncraftEntityEmissivity", (FloatSupplier) () -> IrisVideoSettings.wynncraftEntityEmissivity / 100.0f, listener -> {});
 		// Wynncraft entity brightness boost — compensates for dark skybox scene tinting.
 		// Active when a dark skybox is detected (3,4,5,7), regardless of time of day or rain.
 		// (Unlike fog darkening, the boost is BRIGHTNESS COMPENSATION — needed most at night.)
@@ -106,10 +108,9 @@ public final class CommonUniforms {
 			return 1.0f + 0.5f * entityBrightness * fadeOpacity * sceneDarken;
 		}, listener -> {});
 
-		// Wynncraft primary skybox ID — entities matching this ID are discarded (post-process renders them).
-		// 0 = no primary detected, all skybox entities render via GLSL projection (fallback).
+		// Wynncraft post-process skybox ID. 0 means skybox entities render via GLSL projection.
 		uniforms.uniform1i("iris_wynncraftPrimarySkyboxId",
-			() -> net.irisshaders.iris.pipeline.IrisRenderingPipeline.displayedSkyboxId,
+			net.irisshaders.iris.pipeline.IrisRenderingPipeline::getPostProcessSkyboxId,
 			StateUpdateNotifiers.fallbackEntityNotifier);
 
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,

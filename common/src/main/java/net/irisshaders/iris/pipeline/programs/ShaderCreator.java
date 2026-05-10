@@ -236,7 +236,8 @@ public class ShaderCreator {
 
 		// TODO: Is this check sound in newer versions?
 		boolean isLeash = vertexFormat == DefaultVertexFormat.POSITION_COLOR_LIGHTMAP;
-		String vertex = ShaderSynthesizer.vsh(true, inputs, fogMode, entityLighting, isLeash);
+		boolean isWynncraftVfxTranslucent = shaderKey == ShaderKey.WYNNCRAFT_VFX_TRANSLUCENT;
+		String vertex = ShaderSynthesizer.vsh(true, inputs, fogMode, entityLighting, isLeash, isWynncraftVfxTranslucent);
 		String fragment = ShaderSynthesizer.fsh(inputs, fogMode, alpha, intensityTex, isLeash);
 
 		ShaderPrinter.printProgram(name)
@@ -269,7 +270,7 @@ public class ShaderCreator {
 
 		// TODO: Is this check sound in newer versions?
 		boolean isLeash = vertexFormat == DefaultVertexFormat.POSITION_COLOR_LIGHTMAP;
-		String vertex = ShaderSynthesizer.vsh(true, inputs, fogMode, entityLighting, isLeash);
+		String vertex = ShaderSynthesizer.vsh(true, inputs, fogMode, entityLighting, isLeash, false);
 		String fragment = ShaderSynthesizer.fsh(inputs, fogMode, alpha, intensityTex, isLeash);
 
 		ShaderPrinter.printProgram(name)

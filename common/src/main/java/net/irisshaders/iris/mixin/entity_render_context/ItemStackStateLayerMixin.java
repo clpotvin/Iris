@@ -10,9 +10,13 @@ import net.irisshaders.iris.mixinterface.ItemContextState;
 import net.irisshaders.iris.shaderpack.materialmap.NamespacedId;
 import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.SpriteContents;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
@@ -45,7 +49,7 @@ public class ItemStackStateLayerMixin {
 	private java.util.List<net.minecraft.client.renderer.block.model.BakedQuad> quads;
 
 	@Shadow
-	int[] tintLayers;
+	private RenderType renderType;
 
 	@Inject(method = "<init>", at = @At("TAIL"))
 	private void iris$catchParent(ItemStackRenderState itemStackRenderState, CallbackInfo ci) {
@@ -114,7 +118,9 @@ public class ItemStackStateLayerMixin {
 
 		// Apply skybox detection (independent of emissivity)
 		if (skyboxId > 0) {
-			net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(skyboxId, skyboxDeltaY);
+			iris$useNoCullSkyboxRenderType();
+			int skyboxEntityId = ((ItemContextState) parentState).getDisplayItemRenderSeed();
+			net.irisshaders.iris.vertices.ImmediateState.noteSkyboxDetection(skyboxId, skyboxDeltaY, skyboxEntityId);
 			if (net.irisshaders.iris.gui.option.WynncraftDebugLog.shouldLog("skybox-detect-" + skyboxId)) {
 				float dx = 0, dy = 0, dz = 0;
 				double wx = 0, wy = 0, wz = 0;
@@ -182,6 +188,13 @@ public class ItemStackStateLayerMixin {
 		int a = (argb >> 24) & 0xFF;
 		int g = (argb >> 8) & 0xFF;
 		return a == 254 && g != 251;
+	}
+
+	@Unique
+	private void iris$useNoCullSkyboxRenderType() {
+		if (renderType != null && renderType.pipeline() == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL) {
+			renderType = RenderTypes.entityTranslucent(TextureAtlas.LOCATION_BLOCKS);
+		}
 	}
 
 	@Inject(method = "submit", at = @At("HEAD"))

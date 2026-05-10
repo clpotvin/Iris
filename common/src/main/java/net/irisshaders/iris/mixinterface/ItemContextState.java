@@ -2,11 +2,11 @@ package net.irisshaders.iris.mixinterface;
 
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 
 public interface ItemContextState {
-	void setDisplayItem(Item itemStack, Identifier location);
+	void setDisplayItem(Item itemStack, Identifier location, int renderSeed);
 
 	Item getDisplayItem();
 	Identifier getDisplayItemModel();
+	int getDisplayItemRenderSeed();
 }

@@ -105,7 +105,14 @@ public abstract class MixinShaderManager_Overrides {
 	}*/
 
 	private GlProgram override(IrisRenderingPipeline pipeline, RenderPipeline shaderProgram) {
-		ShaderKey shaderKey = IrisPipelines.getPipeline(pipeline, shaderProgram);
+		ShaderKey shaderKey;
+		if (ImmediateState.drawingDeferredWynncraftVfx
+			&& pipeline.shouldUseWynncraftFallbackVfxTranslucency()
+			&& shaderProgram == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL) {
+			shaderKey = ShaderKey.WYNNCRAFT_VFX_TRANSLUCENT;
+		} else {
+			shaderKey = IrisPipelines.getPipeline(pipeline, shaderProgram);
+		}
 
 		if (shaderKey == null) {
 			shaderKey = autoDetectAndCache(pipeline, shaderProgram);

@@ -1282,6 +1282,7 @@ public class EntityPatcher {
 			}
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_tintBrightness;");
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityEmissivity;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityBoost;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform int iris_wynncraftPrimarySkyboxId;");
 
@@ -1323,8 +1324,11 @@ public class EntityPatcher {
 				tree.appendMainFunctionBody(t, "if (!irisW_skyboxApplied) " + fo + " *= iris_wynncraft_nearfade;");
 				tree.appendMainFunctionBody(t, """
 					if (!irisW_skyboxApplied) {
-					    bool irisW_emissiveEntity = irisW_isEmissiveSignal(texture(Sampler0, iris_wynncraft_texcoord));
-					    if (!irisW_emissiveEntity) {
+					    vec4 irisW_emissiveSample = texture(Sampler0, iris_wynncraft_texcoord);
+					    bool irisW_emissiveEntity = irisW_isEmissiveSignal(irisW_emissiveSample);
+					    if (irisW_emissiveEntity) {
+					        FRAG_OUTPUT.rgb = mix(FRAG_OUTPUT.rgb, max(FRAG_OUTPUT.rgb, irisW_emissiveSample.rgb), iris_wynncraftEntityEmissivity);
+					    } else {
 					        float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
 					        float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
 					        float irisW_boostMax = max(max(FRAG_OUTPUT.r, FRAG_OUTPUT.g), FRAG_OUTPUT.b);
@@ -1394,7 +1398,10 @@ public class EntityPatcher {
 								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar) +
 								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;" +
 								"{ bool irisW_eE = irisW_isEmissiveSignal(" + glintAlbedoVar + ");" +
-								"  if (!irisW_eE) {" +
+								"  if (irisW_eE) {" +
+								"  vec3 irisW_eT = texture(Sampler0, iris_wynncraft_texcoord).rgb;" +
+								"  " + glintAlbedoVar + ".rgb = mix(" + glintAlbedoVar + ".rgb, max(" + glintAlbedoVar + ".rgb, irisW_eT), iris_wynncraftEntityEmissivity);" +
+								"  } else {" +
 								"  float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
 								"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
 								"  float irisW_bM = max(max(" + glintAlbedoVar + ".r, " + glintAlbedoVar + ".g), " + glintAlbedoVar + ".b);" +

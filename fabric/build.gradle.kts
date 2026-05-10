@@ -3,6 +3,7 @@ plugins {
     id("idea")
     id("fabric-loom") version ("1.14.4")
     id("com.modrinth.minotaur") version ("2.+")
+    id("net.darkhax.curseforgegradle") version ("1.1.28")
 }
 
 val MINECRAFT_VERSION: String by rootProject.extra
@@ -161,4 +162,17 @@ modrinth {
     dependencies {
         required.project("sodium")
     }
+}
+
+tasks.register<net.darkhax.curseforgegradle.TaskPublishCurseForge>("publishCurseForge") {
+    apiToken = System.getenv("CURSEFORGE_TOKEN")
+
+    val mainFile = upload(1522142, tasks.named("remapJar"))
+    mainFile.displayName = "WynnIris ${WYNNIRIS_VERSION} for ${MINECRAFT_VERSION}"
+    mainFile.releaseType = "release"
+    mainFile.changelog = providers.gradleProperty("changelog").orElse("").get()
+    mainFile.changelogType = "markdown"
+    mainFile.addGameVersion(MINECRAFT_VERSION)
+    mainFile.addModLoader("Fabric")
+    mainFile.addRequirement("sodium")
 }

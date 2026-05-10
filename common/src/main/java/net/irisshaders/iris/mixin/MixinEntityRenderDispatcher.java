@@ -9,8 +9,10 @@ import net.irisshaders.iris.pipeline.WorldRenderingPipeline;
 import net.irisshaders.iris.shaderpack.materialmap.NamespacedId;
 import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
+import net.irisshaders.iris.vertices.ImmediateState;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.core.BlockPos;
@@ -24,6 +26,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
 
@@ -44,6 +47,13 @@ public class MixinEntityRenderDispatcher {
 
 	@Unique
 	private static int cachedId;
+
+	@Inject(method = "shouldRender", at = @At("HEAD"), cancellable = true)
+	private <E extends Entity> void iris$forceRecentSkyboxEntity(E entity, Frustum frustum, double cameraX, double cameraY, double cameraZ, CallbackInfoReturnable<Boolean> cir) {
+		if (ImmediateState.shouldForceSkyboxEntityRender(entity)) {
+			cir.setReturnValue(true);
+		}
+	}
 
 	@WrapWithCondition(method = "submit", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/SubmitNodeCollector;submitShadow(Lcom/mojang/blaze3d/vertex/PoseStack;FLjava/util/List;)V"))
 	private static boolean iris$maybeSuppressEntityShadow(SubmitNodeCollector instance, PoseStack poseStack, float v, List<EntityRenderState.ShadowPiece> shadowPieces) {

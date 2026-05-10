@@ -7,7 +7,7 @@ import net.irisshaders.iris.gl.state.ShaderAttributeInputs;
 
 public class ShaderSynthesizer {
 	public static String vsh(boolean hasChunkOffset, ShaderAttributeInputs inputs, FogMode fogMode,
-							 boolean entityLighting, boolean isLeash) {
+							 boolean entityLighting, boolean isLeash, boolean wynncraftVfxTranslucent) {
 		StringBuilder shader = new StringBuilder();
 		StringBuilder main = new StringBuilder();
 
@@ -29,6 +29,8 @@ public class ShaderSynthesizer {
 			""");
 		shader.append("""
 			layout(std140) uniform Globals {
+			    ivec3 CameraBlockPos;
+			    vec3 CameraOffset;
 			    vec2 ScreenSize;
 			    float GlintAlpha;
 			    float GameTime;
@@ -124,6 +126,18 @@ public class ShaderSynthesizer {
 			main.append("    iris_vertexColor = Color * ColorModulator;\n");
 		} else {
 			main.append("    iris_vertexColor = ColorModulator;\n");
+		}
+
+		if (wynncraftVfxTranslucent && inputs.hasColor()) {
+			main.append("""
+			    int irisW_signalR = int(round(Color.r * 255.0));
+			    int irisW_signalG = int(round(Color.g * 255.0));
+			    int irisW_signalB = int(round(Color.b * 255.0));
+			    if (irisW_signalG == 254 && irisW_signalB == 0 && irisW_signalR >= 1 && irisW_signalR <= 254) {
+			        float irisW_targetA = max(0.105, 1.0 - float(irisW_signalR) / 100.0);
+			        iris_vertexColor = vec4(ColorModulator.rgb, ColorModulator.a * irisW_targetA);
+			    }
+			""");
 		}
 
 		// Overlay Color

@@ -16,11 +16,14 @@ public class ItemStackStateMixin implements ItemContextState {
 	private Item iris_displayStack;
 	@Unique
 	private Identifier iris_displayModelId;
+	@Unique
+	private int iris_displayRenderSeed;
 
 	@Override
-	public void setDisplayItem(Item itemStack, Identifier modelId) {
+	public void setDisplayItem(Item itemStack, Identifier modelId, int renderSeed) {
 		this.iris_displayStack = itemStack;
 		this.iris_displayModelId = modelId;
+		this.iris_displayRenderSeed = renderSeed;
 	}
 
 	@Override
@@ -31,9 +34,14 @@ public class ItemStackStateMixin implements ItemContextState {
 		return iris_displayModelId;
 	}
 
+	public int getDisplayItemRenderSeed() {
+		return iris_displayRenderSeed;
+	}
+
 	@Inject(method = "clear", at = @At("HEAD"))
 	private void clearDisplayStack(CallbackInfo ci) {
 		this.iris_displayStack = null;
 		this.iris_displayModelId = null;
+		this.iris_displayRenderSeed = 0;
 	}
 }
