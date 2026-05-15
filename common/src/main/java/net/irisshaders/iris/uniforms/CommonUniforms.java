@@ -108,9 +108,10 @@ public final class CommonUniforms {
 			return 1.0f + 0.5f * entityBrightness * fadeOpacity * sceneDarken;
 		}, listener -> {});
 
-		// Wynncraft post-process skybox ID. 0 means skybox entities render via GLSL projection.
+		// Wynncraft primary skybox ID — entities matching this ID are discarded (post-process renders them).
+		// 0 = no primary detected, all skybox entities render via GLSL projection (fallback).
 		uniforms.uniform1i("iris_wynncraftPrimarySkyboxId",
-			net.irisshaders.iris.pipeline.IrisRenderingPipeline::getPostProcessSkyboxId,
+			() -> net.irisshaders.iris.pipeline.IrisRenderingPipeline.displayedSkyboxId,
 			StateUpdateNotifiers.fallbackEntityNotifier);
 
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,

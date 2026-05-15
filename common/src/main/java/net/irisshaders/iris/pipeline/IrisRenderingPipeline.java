@@ -225,20 +225,12 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private int albedoTex;
 
 
-	// Skybox fog/sky state: tracks active skybox for fog color override and rendering.
+	// Skybox fog/sky state: tracks active skybox for fog color override + post-process primary.
+	// Public for iris_wynncraftPrimarySkyboxId uniform access from CommonUniforms.
 	public static int displayedSkyboxId = 0;
-	private static final boolean WYNNCRAFT_GLSL_SKYBOX_PROJECTION = true;
 	private long lastDetectionTimeMs = 0;
 	private long skyboxFadeInStartMs = 0;
 	public static float skyboxFadeOpacity = 0.0f;
-
-	public static int getPostProcessSkyboxId() {
-		return WYNNCRAFT_GLSL_SKYBOX_PROJECTION ? 0 : displayedSkyboxId;
-	}
-
-	private static boolean usesPostProcessSkyPaint() {
-		return !WYNNCRAFT_GLSL_SKYBOX_PROJECTION;
-	}
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		ShaderPrinter.resetPrintState();
@@ -1170,10 +1162,14 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		deferredRenderer.renderAll();
 
-		// Fallback sky paint path. In the GLSL projection path, the skybox display entity
-		// shades itself before deferred/cloud work runs, so this post-process paint must
-		// stay disabled or it will overwrite shader-pack sky content such as Photon clouds.
-		if (usesPostProcessSkyPaint() && wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
+		// Paint the Wynncraft procedural skybox into the color buffer BEFORE translucents
+		// run. This makes translucent VFX display entities (rifts, memory-mist volumes,
+		// etc.) blend over the painted skybox during the translucent pass, exactly like
+		// Wynncraft RP where the skybox entity is itself a translucent draw. Running this
+		// after beginTranslucents's earlier late post-process caused large VFX to be
+		// wiped out: translucents don't write depth, so their pixels stayed at clear
+		// depth and got overwritten as sky.
+		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
 			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
 			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
 			wynncraftSkyboxRenderer.renderSkyPaint(

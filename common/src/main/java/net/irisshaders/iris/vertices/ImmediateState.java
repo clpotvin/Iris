@@ -3,8 +3,6 @@ package net.irisshaders.iris.vertices;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import net.minecraft.client.renderer.rendertype.RenderType;
-import net.minecraft.world.entity.Display;
-import net.minecraft.world.entity.Entity;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -90,33 +88,11 @@ public class ImmediateState {
 	// Reset to 0 at frame start. When multiple skybox entities are detected,
 	// the one with delta_y closest to -601.6 wins (the "correct" beacon height).
 	private static final float SKYBOX_TARGET_DELTA_Y = -601.6f;
-	private static final long SKYBOX_ENTITY_FORCE_RENDER_MS = 8000L;
 	public static volatile int cpuDetectedSkyboxId = 0;
 	public static volatile float cpuDetectedSkyboxBestDeltaY = Float.MAX_VALUE;
-	private static volatile int skyboxEntityForceRenderId = 0;
-	private static volatile long skyboxEntityForceRenderTimeMs = 0L;
 
 	public static void noteSkyboxDetection(int id) {
 		noteSkyboxDetection(id, Float.MAX_VALUE);
-	}
-
-	public static void noteSkyboxDetection(int id, float deltaY, int entityId) {
-		noteSkyboxDetection(id, deltaY);
-		if (id >= 1 && id <= 7 && entityId > 0 && deltaY >= -700f && deltaY <= -550f) {
-			skyboxEntityForceRenderId = entityId;
-			skyboxEntityForceRenderTimeMs = System.currentTimeMillis();
-		}
-	}
-
-	public static boolean shouldForceSkyboxEntityRender(Entity entity) {
-		if (!(entity instanceof Display.ItemDisplay) || skyboxEntityForceRenderId <= 0) {
-			return false;
-		}
-		if (entity.getId() != skyboxEntityForceRenderId) {
-			return false;
-		}
-		long ageMs = System.currentTimeMillis() - skyboxEntityForceRenderTimeMs;
-		return ageMs >= 0 && ageMs <= SKYBOX_ENTITY_FORCE_RENDER_MS;
 	}
 
 	// Fallback: any skybox entity, used when no entity is in the preferred delta_y range.
