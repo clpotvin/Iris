@@ -183,6 +183,8 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftEntityBrightness = Math.max(0, Math.min(200, Integer.parseInt(properties.getProperty("wynncraftEntityBrightness", "100"))));
 			IrisVideoSettings.wynncraftEntityEmissivity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftEntityEmissivity", "100"))));
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = !"false".equals(properties.getProperty("wynncraftNightVisionDisablesBoost", "true"));
+			IrisVideoSettings.wynncraftTextBrightnessFloor = !"false".equals(properties.getProperty("wynncraftTextBrightnessFloor", "true"));
+			IrisVideoSettings.wynncraftTextBrightnessFloorLevel = Math.max(0, Math.min(15, Integer.parseInt(properties.getProperty("wynncraftTextBrightnessFloorLevel", "10"))));
 			IrisVideoSettings.wynncraftMistWoodsFog = !"false".equals(properties.getProperty("wynncraftMistWoodsFog", "true"));
 			IrisVideoSettings.wynncraftMistWoodsFogDensity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogDensity", "100"))));
 			IrisVideoSettings.wynncraftMistWoodsFogMinDistance = Math.max(0, Math.min(300, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogMinDistance", "0"))));
@@ -198,6 +200,8 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftEntityBrightness = 100;
 			IrisVideoSettings.wynncraftEntityEmissivity = 100;
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = true;
+			IrisVideoSettings.wynncraftTextBrightnessFloor = true;
+			IrisVideoSettings.wynncraftTextBrightnessFloorLevel = 10;
 			IrisVideoSettings.wynncraftMistWoodsFog = true;
 			IrisVideoSettings.wynncraftMistWoodsFogDensity = 100;
 			IrisVideoSettings.wynncraftMistWoodsFogMinDistance = 0;
@@ -234,6 +238,8 @@ public class IrisConfig {
 		properties.setProperty("wynncraftEntityBrightness", String.valueOf(IrisVideoSettings.wynncraftEntityBrightness));
 		properties.setProperty("wynncraftEntityEmissivity", String.valueOf(IrisVideoSettings.wynncraftEntityEmissivity));
 		properties.setProperty("wynncraftNightVisionDisablesBoost", String.valueOf(IrisVideoSettings.wynncraftNightVisionDisablesBoost));
+		properties.setProperty("wynncraftTextBrightnessFloor", String.valueOf(IrisVideoSettings.wynncraftTextBrightnessFloor));
+		properties.setProperty("wynncraftTextBrightnessFloorLevel", String.valueOf(IrisVideoSettings.wynncraftTextBrightnessFloorLevel));
 		properties.setProperty("wynncraftMistWoodsFog", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFog));
 		properties.setProperty("wynncraftMistWoodsFogDensity", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogDensity));
 		properties.setProperty("wynncraftMistWoodsFogMinDistance", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogMinDistance));

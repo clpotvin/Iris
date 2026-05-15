@@ -24,8 +24,8 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Intercepts text display entity rendering for two Wynncraft features:
- * 1. Brightness boost when a custom skybox is active
+ * Intercepts text display entity rendering for Wynncraft features:
+ * 1. Brightness adjustments for dark skyboxes and generally dark areas
  * 2. Transition screen effect detection (characters U+E000-U+E012 with
  *    font minecraft:screen/transition → suppress entity, trigger fullscreen effect)
  */
@@ -34,6 +34,14 @@ public class MixinTextDisplayRenderer {
 
 	@Unique
 	private static final Identifier TRANSITION_FONT = Identifier.fromNamespaceAndPath("minecraft", "screen/transition");
+	@Unique
+	private static final int TEXT_LIGHT_FOR_BRIGHT_COLORS = 12;
+	@Unique
+	private static final int TEXT_LIGHT_FOR_DARK_COLORS = 15;
+	@Unique
+	private static final float TEXT_DARK_LUMINANCE = 0.18f;
+	@Unique
+	private static final float TEXT_BRIGHT_LUMINANCE = 0.82f;
 
 	/**
 	 * Detect Wynncraft transition signal in text display entities.
@@ -140,11 +148,109 @@ public class MixinTextDisplayRenderer {
 		ordinal = 0,
 		argsOnly = true
 	)
-	private int iris$boostTextLight(int packedLight) {
-		if (IrisRenderingPipeline.skyboxFogColor != null) {
-			return 0xF000F0; // LightTexture.FULL_BRIGHT
+	private int iris$boostTextLight(int packedLight, TextDisplayEntityRenderState state) {
+		int block = (packedLight >> 4) & 0xF;
+		int sky = (packedLight >> 20) & 0xF;
+
+		if (IrisVideoSettings.wynncraftTextBrightnessFloor) {
+			int floor = iris$clampLight(IrisVideoSettings.wynncraftTextBrightnessFloorLevel);
+			block = Math.max(block, floor);
+			sky = Math.max(sky, floor);
 		}
-		return packedLight;
+
+		float boostStrength = iris$textDarkSkyboxBoostStrength();
+		if (boostStrength > 0.0f) {
+			float luminance = iris$estimateTextLuminance(state);
+			float darkTextAmount = 1.0f - iris$smoothstep(TEXT_DARK_LUMINANCE, TEXT_BRIGHT_LUMINANCE, luminance);
+			int targetLight = Math.round(TEXT_LIGHT_FOR_BRIGHT_COLORS +
+				(TEXT_LIGHT_FOR_DARK_COLORS - TEXT_LIGHT_FOR_BRIGHT_COLORS) * darkTextAmount);
+
+			block = iris$lerpLight(block, targetLight, boostStrength);
+			sky = iris$lerpLight(sky, targetLight, boostStrength);
+		}
+
+		if (block == ((packedLight >> 4) & 0xF) && sky == ((packedLight >> 20) & 0xF)) {
+			return packedLight;
+		}
+		return (packedLight & ~0x00F000F0) | (block << 4) | (sky << 20);
 	}
 
+	@Unique
+	private static float iris$textDarkSkyboxBoostStrength() {
+		if (IrisRenderingPipeline.skyboxFogColor == null) {
+			return 0.0f;
+		}
+		float entityBrightness = IrisVideoSettings.wynncraftEntityBrightness / 100.0f;
+		float sceneDarkening = IrisVideoSettings.wynncraftSceneDarkening / 100.0f;
+		return iris$clamp01(entityBrightness * sceneDarkening * IrisRenderingPipeline.skyboxFadeOpacity);
+	}
+
+	@Unique
+	private static float iris$estimateTextLuminance(TextDisplayEntityRenderState state) {
+		if (state == null || state.textRenderState == null || state.textRenderState.text() == null) {
+			return 1.0f;
+		}
+
+		float[] weightedLuminance = new float[] { 0.0f };
+		int[] totalWeight = new int[] { 0 };
+		state.textRenderState.text().visit((Style style, String content) -> {
+			int weight = content.codePointCount(0, content.length());
+			if (weight <= 0) {
+				return Optional.empty();
+			}
+
+			TextColor textColor = style.getColor();
+			float luminance = textColor != null ? iris$relativeLuminance(textColor.getValue()) : 1.0f;
+			weightedLuminance[0] += luminance * weight;
+			totalWeight[0] += weight;
+			return Optional.empty();
+		}, Style.EMPTY);
+
+		if (totalWeight[0] == 0) {
+			return 1.0f;
+		}
+		return iris$clamp01(weightedLuminance[0] / totalWeight[0]);
+	}
+
+	@Unique
+	private static float iris$relativeLuminance(int rgb) {
+		float r = iris$srgbToLinear(((rgb >> 16) & 0xFF) / 255.0f);
+		float g = iris$srgbToLinear(((rgb >> 8) & 0xFF) / 255.0f);
+		float b = iris$srgbToLinear((rgb & 0xFF) / 255.0f);
+		return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+	}
+
+	@Unique
+	private static float iris$srgbToLinear(float channel) {
+		if (channel <= 0.04045f) {
+			return channel / 12.92f;
+		}
+		return (float) Math.pow((channel + 0.055f) / 1.055f, 2.4f);
+	}
+
+	@Unique
+	private static int iris$lerpLight(int current, int target, float amount) {
+		int light = Math.round(current + (target - current) * iris$clamp01(amount));
+		return iris$clampLight(light);
+	}
+
+	@Unique
+	private static int iris$clampLight(int light) {
+		if (light < 0) return 0;
+		if (light > 15) return 15;
+		return light;
+	}
+
+	@Unique
+	private static float iris$smoothstep(float edge0, float edge1, float value) {
+		float t = iris$clamp01((value - edge0) / (edge1 - edge0));
+		return t * t * (3.0f - 2.0f * t);
+	}
+
+	@Unique
+	private static float iris$clamp01(float value) {
+		if (value < 0.0f) return 0.0f;
+		if (value > 1.0f) return 1.0f;
+		return value;
+	}
 }

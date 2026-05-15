@@ -20,6 +20,8 @@ public class IrisVideoSettings {
 	public static int wynncraftEntityBrightness = 100;
 	public static int wynncraftEntityEmissivity = 100;
 	public static boolean wynncraftNightVisionDisablesBoost = true;
+	public static boolean wynncraftTextBrightnessFloor = true;
+	public static int wynncraftTextBrightnessFloorLevel = 10;
 	public static boolean wynncraftMistWoodsFog = true;
 	public static int wynncraftMistWoodsFogDensity = 100;
 	public static int wynncraftMistWoodsFogMinDistance = 0;
