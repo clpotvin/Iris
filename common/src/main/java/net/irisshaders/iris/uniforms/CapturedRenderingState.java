@@ -23,6 +23,8 @@ public class CapturedRenderingState {
 
 	private int currentRenderedEntity = -1;
 	private int currentRenderedItem = -1;
+	private boolean currentRenderedItemInHand;
+	private boolean currentRenderedItemSkipsItemTint;
 	private int textureReloadCount = 0;
 
 	private float currentAlphaTest;
@@ -101,6 +103,17 @@ public class CapturedRenderingState {
 		return currentRenderedBlockEntity;
 	}
 
+	public int getCurrentRenderedBlockEntityWithRenderFlags() {
+		int blockEntity = currentRenderedBlockEntity;
+		if (currentRenderedItemSkipsItemTint) {
+			blockEntity |= 0x4000;
+		}
+		if (currentRenderedItemInHand) {
+			blockEntity |= 0x8000;
+		}
+		return blockEntity;
+	}
+
 	public void setCurrentEntity(int entity) {
 		this.currentRenderedEntity = entity;
 	}
@@ -115,6 +128,22 @@ public class CapturedRenderingState {
 
 	public void setCurrentRenderedItem(int item) {
 		this.currentRenderedItem = item;
+	}
+
+	public boolean isCurrentRenderedItemInHand() {
+		return currentRenderedItemInHand;
+	}
+
+	public void setCurrentRenderedItemInHand(boolean currentRenderedItemInHand) {
+		this.currentRenderedItemInHand = currentRenderedItemInHand;
+	}
+
+	public boolean currentRenderedItemSkipsItemTint() {
+		return currentRenderedItemSkipsItemTint;
+	}
+
+	public void setCurrentRenderedItemSkipsItemTint(boolean currentRenderedItemSkipsItemTint) {
+		this.currentRenderedItemSkipsItemTint = currentRenderedItemSkipsItemTint;
 	}
 
 	public float getCurrentAlphaTest() {

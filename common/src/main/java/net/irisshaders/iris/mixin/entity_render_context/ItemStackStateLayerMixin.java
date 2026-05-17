@@ -17,6 +17,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.SolidBucketItem;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -131,7 +132,7 @@ public class ItemStackStateLayerMixin {
 		}
 
 		// Apply emissive boost
-		if (foundEmissive) {
+		if (foundEmissive && iris$shouldApplyEntityEmissivity()) {
 			int emissivity = IrisVideoSettings.wynncraftEntityEmissivity;
 			if (emissivity <= 0) return packedLight;
 			float t = emissivity / 100.0f;
@@ -181,9 +182,25 @@ public class ItemStackStateLayerMixin {
 		return a == 254 && g != 251;
 	}
 
+	@Unique
+	private boolean iris$shouldApplyEntityEmissivity() {
+		return !iris$isHandDisplayContext();
+	}
+
+	@Unique
+	private boolean iris$isHandDisplayContext() {
+		ItemDisplayContext displayContext = ((ItemContextState) parentState).getDisplayContext();
+		return displayContext == ItemDisplayContext.FIRST_PERSON_LEFT_HAND
+			|| displayContext == ItemDisplayContext.FIRST_PERSON_RIGHT_HAND
+			|| displayContext == ItemDisplayContext.THIRD_PERSON_LEFT_HAND
+			|| displayContext == ItemDisplayContext.THIRD_PERSON_RIGHT_HAND;
+	}
+
 	@Inject(method = "submit", at = @At("HEAD"))
 	private void onRender(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int i, int j, int k, CallbackInfo ci, @Share("lastBState") LocalIntRef ref) {
 		ref.set(CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemInHand(iris$isHandDisplayContext());
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 		iris$setupId(((ItemContextState) parentState).getDisplayItem(), ((ItemContextState) parentState).getDisplayItemModel());
 	}
 
@@ -191,6 +208,8 @@ public class ItemStackStateLayerMixin {
 	private void onRenderEnd(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int i, int j, int k, CallbackInfo ci, @Share("lastBState") LocalIntRef ref) {
 		CapturedRenderingState.INSTANCE.setCurrentBlockEntity(ref.get());
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemInHand(false);
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 	}
 
 	@Unique
@@ -201,6 +220,7 @@ public class ItemStackStateLayerMixin {
 			if (WorldRenderingSettings.INSTANCE.getBlockStateIds() == null) return;
 
 			CapturedRenderingState.INSTANCE.setCurrentBlockEntity(1);
+			CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(blockItem.getBlock().defaultBlockState().getLightEmission() > 0);
 
 			CapturedRenderingState.INSTANCE.setCurrentRenderedItem(WorldRenderingSettings.INSTANCE.getBlockStateIds().getOrDefault(blockItem.getBlock().defaultBlockState(), 0));
 		} else {

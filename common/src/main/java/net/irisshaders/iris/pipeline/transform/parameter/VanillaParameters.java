@@ -6,9 +6,11 @@ import net.irisshaders.iris.gl.state.ShaderAttributeInputs;
 import net.irisshaders.iris.gl.texture.TextureType;
 import net.irisshaders.iris.helpers.Tri;
 import net.irisshaders.iris.pipeline.transform.Patch;
+import net.irisshaders.iris.shaderpack.loading.ProgramId;
 import net.irisshaders.iris.shaderpack.texture.TextureStage;
 
 public class VanillaParameters extends GeometryInfoParameters {
+	public final ProgramId programId;
 	public final AlphaTest alpha;
 	public final ShaderAttributeInputs inputs;
 	public final boolean hasChunkOffset;
@@ -19,9 +21,11 @@ public class VanillaParameters extends GeometryInfoParameters {
 	public VanillaParameters(
 		Patch patch,
 		Object2ObjectMap<Tri<String, TextureType, TextureStage>, String> textureMap,
+		ProgramId programId,
 		AlphaTest alpha, boolean isLines, boolean isClouds, boolean hasChunkOffset,
 		ShaderAttributeInputs inputs, boolean hasGeometry, boolean hasTesselation) {
 		super(patch, textureMap, hasGeometry, hasTesselation);
+		this.programId = programId;
 		this.alpha = alpha;
 		this.isLines = isLines;
 		this.isClouds = isClouds;
@@ -35,6 +39,10 @@ public class VanillaParameters extends GeometryInfoParameters {
 
 	public boolean isClouds() {
 		return isClouds;
+	}
+
+	public boolean isHandProgram() {
+		return programId == ProgramId.Hand || programId == ProgramId.HandWater;
 	}
 
 	@Override
@@ -51,6 +59,7 @@ public class VanillaParameters extends GeometryInfoParameters {
 	public int hashCode() {
 		final int prime = 31;
 		int result = super.hashCode();
+		result = prime * result + ((programId == null) ? 0 : programId.hashCode());
 		result = prime * result + ((alpha == null) ? 0 : alpha.hashCode());
 		result = prime * result + ((inputs == null) ? 0 : inputs.hashCode());
 		result = prime * result + (hasChunkOffset ? 1231 : 1237);
@@ -68,6 +77,8 @@ public class VanillaParameters extends GeometryInfoParameters {
 		if (getClass() != obj.getClass())
 			return false;
 		VanillaParameters other = (VanillaParameters) obj;
+		if (programId != other.programId)
+			return false;
 		if (alpha == null) {
 			if (other.alpha != null)
 				return false;

@@ -31,7 +31,7 @@ public class ModelToEntityVertexSerializer implements VertexSerializer {
 			for (int j = 0; j < 4; j++) {
 				MemoryIntrinsics.copyMemory(src, dst, 36);
 				MemoryUtil.memPutShort(dst + 36, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedEntity());
-				MemoryUtil.memPutShort(dst + 38, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
+				MemoryUtil.memPutShort(dst + 38, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntityWithRenderFlags());
 				MemoryUtil.memPutShort(dst + 40, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedItem());
 				MemoryUtil.memPutFloat(dst + 42, midU);
 				MemoryUtil.memPutFloat(dst + 46, midV);

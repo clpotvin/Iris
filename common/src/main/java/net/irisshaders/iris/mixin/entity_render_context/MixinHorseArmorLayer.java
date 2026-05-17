@@ -36,10 +36,13 @@ public abstract class MixinHorseArmorLayer<S extends LivingEntityRenderState, RM
 		Identifier location = BuiltInRegistries.ITEM.getKey((itemStack.getItem()));
 
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItem(WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new NamespacedId(location.getNamespace(), location.getPath())));
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 	}
 
 	@Inject(method = "submit(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;ILnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;FF)V", at = @At(value = "TAIL"))
 	private void changeId2(CallbackInfo ci) {
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemInHand(false);
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 	}
 }

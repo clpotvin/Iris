@@ -41,6 +41,7 @@ public abstract class MixinEquipmentLayerRenderer {
 
 
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItem(WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new NamespacedId(location.getNamespace(), location.getPath())));
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 	}
 
 	@Inject(method = V, at = @At(value = "FIELD", target = "Lnet/minecraft/client/renderer/entity/layers/EquipmentLayerRenderer;trimSpriteLookup:Ljava/util/function/Function;"))
@@ -59,5 +60,7 @@ public abstract class MixinEquipmentLayerRenderer {
 	@Inject(method = V, at = @At(value = "TAIL"))
 	private void changeId2(CallbackInfo ci) {
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemInHand(false);
+		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 	}
 }

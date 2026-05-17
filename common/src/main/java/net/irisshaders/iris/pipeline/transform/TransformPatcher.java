@@ -40,6 +40,7 @@ import net.irisshaders.iris.pipeline.transform.transformer.SodiumTransformer;
 import net.irisshaders.iris.pipeline.transform.transformer.TextureTransformer;
 import net.irisshaders.iris.pipeline.transform.transformer.VanillaCoreTransformer;
 import net.irisshaders.iris.pipeline.transform.transformer.VanillaTransformer;
+import net.irisshaders.iris.shaderpack.loading.ProgramId;
 import net.irisshaders.iris.shaderpack.texture.TextureStage;
 import org.antlr.v4.runtime.Token;
 import org.apache.logging.log4j.LogManager;
@@ -293,13 +294,13 @@ public class TransformPatcher {
 	}
 
 	public static Map<PatchShaderType, String> patchVanilla(
-		String name, String vertex, String geometry, String tessControl, String tessEval, String fragment,
+		String name, ProgramId programId, String vertex, String geometry, String tessControl, String tessEval, String fragment,
 		AlphaTest alpha, boolean isLines, boolean isClouds,
 		boolean hasChunkOffset,
 		ShaderAttributeInputs inputs,
 		Object2ObjectMap<Tri<String, TextureType, TextureStage>, String> textureMap) {
 		return transform(name, vertex, geometry, tessControl, tessEval, fragment,
-			new VanillaParameters(Patch.VANILLA, textureMap, alpha, isLines, isClouds, hasChunkOffset, inputs, geometry != null, tessControl != null || tessEval != null));
+			new VanillaParameters(Patch.VANILLA, textureMap, programId, alpha, isLines, isClouds, hasChunkOffset, inputs, geometry != null, tessControl != null || tessEval != null));
 	}
 
 

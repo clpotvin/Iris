@@ -141,7 +141,7 @@ public abstract class MixinBufferBuilder implements VertexConsumer, BlockSensiti
 			long offset = this.beginElement(IrisVertexFormats.ENTITY_ID_ELEMENT);
 			// ENTITY_ID_ELEMENT
 			MemoryUtil.memPutShort(offset, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedEntity());
-			MemoryUtil.memPutShort(offset + 2, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
+			MemoryUtil.memPutShort(offset + 2, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntityWithRenderFlags());
 			MemoryUtil.memPutShort(offset + 4, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedItem());
 		}
 	}

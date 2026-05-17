@@ -23,9 +23,9 @@ public abstract class MixinItemRenderer {
 	@Inject(method = "appendItemLayers", at = @At(value = "HEAD"))
 	private void changeId(ItemStackRenderState itemStackRenderState, ItemStack itemStack, ItemDisplayContext itemDisplayContext, Level level, ItemOwner itemOwner, int i, CallbackInfo ci) {
 		if (itemStack != null) {
-			((ItemContextState) itemStackRenderState).setDisplayItem(itemStack.getItem(), itemStack.get(DataComponents.ITEM_MODEL));
+			((ItemContextState) itemStackRenderState).setDisplayItem(itemStack.getItem(), itemStack.get(DataComponents.ITEM_MODEL), itemDisplayContext);
 		} else {
-			((ItemContextState) itemStackRenderState).setDisplayItem(null, null);
+			((ItemContextState) itemStackRenderState).setDisplayItem(null, null, itemDisplayContext);
 		}
 	}
 }

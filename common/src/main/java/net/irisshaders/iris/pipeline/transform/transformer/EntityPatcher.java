@@ -7,7 +7,9 @@ import io.github.douira.glsl_transformer.ast.node.abstract_node.ASTNode;
 import io.github.douira.glsl_transformer.ast.node.declaration.TypeAndInitDeclaration;
 import io.github.douira.glsl_transformer.ast.node.expression.Expression;
 import io.github.douira.glsl_transformer.ast.node.expression.ReferenceExpression;
+import io.github.douira.glsl_transformer.ast.node.expression.LiteralExpression;
 import io.github.douira.glsl_transformer.ast.node.expression.binary.AssignmentExpression;
+import io.github.douira.glsl_transformer.ast.node.expression.binary.ArrayAccessExpression;
 import io.github.douira.glsl_transformer.ast.node.expression.unary.FunctionCallExpression;
 import io.github.douira.glsl_transformer.ast.node.expression.unary.MemberAccessExpression;
 import io.github.douira.glsl_transformer.ast.node.external_declaration.DeclarationExternalDeclaration;
@@ -820,18 +822,31 @@ public class EntityPatcher {
 		""";
 
 	private static final String IRISW_ITEM_TINT_FRAGMENT_CODE = """
-		if (!irisW_skyboxApplied && iris_wynncraft_glint == 0 && iris_wynncraft_translucency == 0 && currentRenderedItemId != 0) {
-		    vec3 irisW_tintColor = clamp(iris_vertexColor.rgb, vec3(0.0), vec3(1.0));
+		if (!irisW_skyboxApplied && !irisW_skipItemTint && iris_wynncraft_glint == 0 && iris_wynncraft_translucency == 0 && currentRenderedItemId > 0) {
+		    vec3 irisW_tintColor = clamp(iris_vertexColor.rgb * iris_transforms.ColorModulator.rgb, vec3(0.0), vec3(1.0));
 		    vec3 irisW_tintDelta = abs(irisW_tintColor - vec3(1.0));
 		    float irisW_tintStrength = clamp(max(max(irisW_tintDelta.r, irisW_tintDelta.g), irisW_tintDelta.b) * 4.0, 0.0, 1.0);
 		    if (irisW_tintStrength > 0.001) {
-		        vec3 irisW_tintedBase = max(texture(Sampler0, iris_wynncraft_texcoord).rgb * irisW_tintColor, vec3(0.0));
-		        float irisW_baseLuma = dot(irisW_tintedBase, vec3(0.2126, 0.7152, 0.0722));
+		        float irisW_tintLuma = dot(irisW_tintColor, vec3(0.2126, 0.7152, 0.0722));
 		        float irisW_outLuma = dot(max(FRAG_OUTPUT.rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
-		        if (irisW_baseLuma > 0.001 && irisW_outLuma > 0.001) {
-		            vec3 irisW_preservedTint = clamp((irisW_tintedBase / irisW_baseLuma) * irisW_outLuma, vec3(0.0), vec3(1.0));
+		        if (irisW_outLuma > 0.001) {
+		            vec3 irisW_tintHue = irisW_tintLuma > 0.001 ? irisW_tintColor / irisW_tintLuma : vec3(0.0);
+		            vec3 irisW_preservedTint = clamp(irisW_tintHue * irisW_outLuma, vec3(0.0), vec3(1.0));
 		            FRAG_OUTPUT.rgb = mix(FRAG_OUTPUT.rgb, irisW_preservedTint, irisW_tintStrength);
 		        }
+		    }
+		}
+		""";
+
+	private static final String IRISW_BSL_TINT_VL_SUPPRESS_CODE = """
+		if (!irisW_skyboxApplied) {
+		    bool irisW_shaderTint = iris_wynncraft_glint >= 15 && iris_wynncraft_glint <= 24;
+		    vec3 irisW_tintColor = clamp(iris_vertexColor.rgb * iris_transforms.ColorModulator.rgb, vec3(0.0), vec3(1.0));
+		    vec3 irisW_tintDelta = abs(irisW_tintColor - vec3(1.0));
+		    float irisW_tintStrength = clamp(max(max(irisW_tintDelta.r, irisW_tintDelta.g), irisW_tintDelta.b) * 4.0, 0.0, 1.0);
+		    bool irisW_itemTint = !irisW_skipItemTint && iris_wynncraft_glint == 0 && iris_wynncraft_translucency == 0 && currentRenderedItemId > 0 && irisW_tintStrength > 0.001;
+		    if (irisW_shaderTint || irisW_itemTint) {
+		        iris_FragData1.rgb = vec3(0.0);
 		    }
 		}
 		""";
@@ -1275,6 +1290,9 @@ public class EntityPatcher {
 			tree.prependMainFunctionBody(t,
 				"float iris_vertexColorAlpha = iris_vertexColor.a;",
 				"if (iris_wynncraft_nearfade <= 0.01) discard;",
+				"int irisW_entityInfoFlags = iris_entityInfo.y / 16384;",
+				"bool irisW_skipItemTint = irisW_entityInfoFlags == 1 || irisW_entityInfoFlags == 3;",
+				"bool irisW_skipEntityLightTweaks = irisW_entityInfoFlags >= 2;",
 				"bool irisW_skyboxApplied = false;");
 
 			if (!root.identifierIndex.has("Sampler0")) {
@@ -1303,6 +1321,7 @@ public class EntityPatcher {
 			// Forward packs: append to end of main() targeting the fragment output.
 			// Deferred packs: inject mid-main targeting the albedo variable before GBuffer packing.
 			FragOutput fragOutput = resolveFragOutput(root);
+			boolean applyEntityLightTweaks = !parameters.isHandProgram();
 
 			if (fragOutput != null) {
 				// FORWARD PATH: append effects after main().
@@ -1320,25 +1339,31 @@ public class EntityPatcher {
 				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
 				tree.appendMainFunctionBody(t, IRISW_ITEM_TINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
-				// Nearfade and entity boost guarded — these would otherwise modify skybox output.
+				if (root.identifierIndex.has("vlAlbedo") && hasGlFragDataIndex(root, 1)) {
+					tree.appendMainFunctionBody(t, IRISW_BSL_TINT_VL_SUPPRESS_CODE);
+				}
+				// Nearfade and optional entity lighting tweaks guarded — these would otherwise modify skybox output.
 				tree.appendMainFunctionBody(t, "if (!irisW_skyboxApplied) " + fo + " *= iris_wynncraft_nearfade;");
-				tree.appendMainFunctionBody(t, """
-					if (!irisW_skyboxApplied) {
-					    vec4 irisW_emissiveSample = texture(Sampler0, iris_wynncraft_texcoord);
-					    bool irisW_emissiveEntity = irisW_isEmissiveSignal(irisW_emissiveSample);
-					    if (irisW_emissiveEntity) {
-					        FRAG_OUTPUT.rgb = mix(FRAG_OUTPUT.rgb, max(FRAG_OUTPUT.rgb, irisW_emissiveSample.rgb), iris_wynncraftEntityEmissivity);
-					    } else {
-					        float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
-					        float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
-					        float irisW_boostMax = max(max(FRAG_OUTPUT.r, FRAG_OUTPUT.g), FRAG_OUTPUT.b);
-					        if (irisW_boostMax * irisW_boostScale > 1.0) {
-					            irisW_boostScale = 1.0 / max(irisW_boostMax, 1e-5);
-					        }
-					        FRAG_OUTPUT.rgb *= irisW_boostScale;
-					    }
-					}
-					""".replace("FRAG_OUTPUT", fo));
+				if (applyEntityLightTweaks) {
+					tree.appendMainFunctionBody(t, """
+						if (!irisW_skyboxApplied && !irisW_skipEntityLightTweaks) {
+						    vec4 irisW_emissiveSample = texture(Sampler0, iris_wynncraft_texcoord);
+						    bool irisW_emissiveEntity = irisW_isEmissiveSignal(irisW_emissiveSample);
+						    bool irisW_shaderTint = iris_wynncraft_glint >= 15 && iris_wynncraft_glint <= 24;
+						    if (irisW_emissiveEntity && !irisW_shaderTint) {
+						        FRAG_OUTPUT.rgb = mix(FRAG_OUTPUT.rgb, max(FRAG_OUTPUT.rgb, irisW_emissiveSample.rgb), iris_wynncraftEntityEmissivity);
+						    } else {
+						        float irisW_boostLuma = dot(FRAG_OUTPUT.rgb, vec3(0.2126, 0.7152, 0.0722));
+						        float irisW_boostScale = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_boostLuma));
+						        float irisW_boostMax = max(max(FRAG_OUTPUT.r, FRAG_OUTPUT.g), FRAG_OUTPUT.b);
+						        if (irisW_boostMax * irisW_boostScale > 1.0) {
+						            irisW_boostScale = 1.0 / max(irisW_boostMax, 1e-5);
+						        }
+						        FRAG_OUTPUT.rgb *= irisW_boostScale;
+						    }
+						}
+						""".replace("FRAG_OUTPUT", fo));
+				}
 			} else {
 				// DEFERRED PATH: mid-main injection for packed GBuffer packs (e.g., Photon).
 				// irisW_skyboxApplied already declared at top of main via prependMainFunctionBody.
@@ -1363,7 +1388,7 @@ public class EntityPatcher {
 						mainBody.getStatements().addAll(discardAnchor.topLevelInsertBeforeIndex(), stmts);
 					}
 
-					// 2. Skybox + Glint + NearFade + Boost at anchor point
+					// 2. Skybox + Glint + NearFade + optional entity lighting tweaks at anchor point
 					String glintAlbedoVar = null;
 					int glintIdx = -1;
 
@@ -1379,7 +1404,7 @@ public class EntityPatcher {
 					}
 
 					if (glintAlbedoVar != null && glintIdx >= 0) {
-						// Insert skybox apply FIRST at the anchor, then shadeless, then glint/nearfade/boost
+						// Insert skybox apply FIRST at the anchor, then shadeless, then glint/nearfade/light tweaks
 						String skyboxDeferred = IRISW_SKYBOX_APPLY_DEFERRED.replace("ALBEDO_VAR", glintAlbedoVar);
 						Collection<? extends Statement> skyboxStmts = t.parseStatements(root, skyboxDeferred);
 						int skyboxStmtsCount = skyboxStmts.size();
@@ -1391,22 +1416,25 @@ public class EntityPatcher {
 						int shadelessStmtsCount = shadelessStmts.size();
 						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount, shadelessStmts);
 
-						// Glint + nearfade + boost — guarded by skybox flag
+						// Glint + nearfade + optional entity lighting tweaks — guarded by skybox flag
+						String entityLightTweaks = applyEntityLightTweaks ?
+								"if (!irisW_skipEntityLightTweaks) { bool irisW_eE = irisW_isEmissiveSignal(" + glintAlbedoVar + ");" +
+							"  bool irisW_sT = iris_wynncraft_glint >= 15 && iris_wynncraft_glint <= 24;" +
+							"  if (irisW_eE && !irisW_sT) {" +
+							"  vec3 irisW_eT = texture(Sampler0, iris_wynncraft_texcoord).rgb;" +
+							"  " + glintAlbedoVar + ".rgb = mix(" + glintAlbedoVar + ".rgb, max(" + glintAlbedoVar + ".rgb, irisW_eT), iris_wynncraftEntityEmissivity);" +
+							"  } else {" +
+							"  float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
+							"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
+							"  float irisW_bM = max(max(" + glintAlbedoVar + ".r, " + glintAlbedoVar + ".g), " + glintAlbedoVar + ".b);" +
+							"  if (irisW_bM * irisW_bS > 1.0) { irisW_bS = 1.0 / max(irisW_bM, 1e-5); }" +
+							"  " + glintAlbedoVar + ".rgb *= irisW_bS; } }" : "";
 						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount + shadelessStmtsCount,
 							t.parseStatements(root,
 								"if (!irisW_skyboxApplied) {" +
 								IRISW_DEFERRED_GLINT_CODE.replace("ALBEDO_VAR", glintAlbedoVar) +
 								glintAlbedoVar + ".rgb *= iris_wynncraft_nearfade;" +
-								"{ bool irisW_eE = irisW_isEmissiveSignal(" + glintAlbedoVar + ");" +
-								"  if (irisW_eE) {" +
-								"  vec3 irisW_eT = texture(Sampler0, iris_wynncraft_texcoord).rgb;" +
-								"  " + glintAlbedoVar + ".rgb = mix(" + glintAlbedoVar + ".rgb, max(" + glintAlbedoVar + ".rgb, irisW_eT), iris_wynncraftEntityEmissivity);" +
-								"  } else {" +
-								"  float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
-								"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
-								"  float irisW_bM = max(max(" + glintAlbedoVar + ".r, " + glintAlbedoVar + ".g), " + glintAlbedoVar + ".b);" +
-								"  if (irisW_bM * irisW_bS > 1.0) { irisW_bS = 1.0 / max(irisW_bM, 1e-5); }" +
-								"  " + glintAlbedoVar + ".rgb *= irisW_bS; }}" +
+								entityLightTweaks +
 								"}"));
 					} else {
 						// No anchors found — fallback: discard skybox entities (prepended near top).
@@ -1902,6 +1930,19 @@ public class EntityPatcher {
 		return null;
 	}
 
+	private static boolean hasGlFragDataIndex(Root root, int targetIndex) {
+		for (Identifier id : root.identifierIndex.get("gl_FragData")) {
+			ArrayAccessExpression accessExpression = id.getAncestor(ArrayAccessExpression.class);
+			if (accessExpression != null
+				&& accessExpression.getRight() instanceof LiteralExpression literalExpression
+				&& literalExpression.isInteger()
+				&& literalExpression.getInteger() == targetIndex) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// Append translucency alpha reduction to the fragment shader. Shared by both
 	// patchOverlayColor and patchTranslucencyOnly to keep the logic in sync.
 	// premultiplied=false (standard packs like BSL): only modify .a — the blend equation
@@ -2023,7 +2064,7 @@ public class EntityPatcher {
 				"iris_entityInfo[0].x");
 
 			root.replaceReferenceExpressions(t, "blockEntityId",
-				"iris_entityInfo[0].y");
+				irisw_decodeBlockEntityId("iris_entityInfo[0].y"));
 
 			root.replaceReferenceExpressions(t, "currentRenderedItemId",
 				"iris_entityInfo[0].z");
@@ -2032,7 +2073,7 @@ public class EntityPatcher {
 				"iris_entityInfo.x");
 
 			root.replaceReferenceExpressions(t, "blockEntityId",
-				"iris_entityInfo.y");
+				irisw_decodeBlockEntityId("iris_entityInfo.y"));
 
 			root.replaceReferenceExpressions(t, "currentRenderedItemId",
 				"iris_entityInfo.z");
@@ -2088,5 +2129,9 @@ public class EntityPatcher {
 				root.rename("iris_entityInfo", "iris_entityInfoTES");
 			}
 		}
+	}
+
+	private static String irisw_decodeBlockEntityId(String blockEntityIdExpression) {
+		return "(" + blockEntityIdExpression + " - (" + blockEntityIdExpression + " / 16384) * 16384)";
 	}
 }

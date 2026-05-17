@@ -61,7 +61,7 @@ public class GlyphExtVertexSerializer implements VertexSerializer {
 			MemoryIntrinsics.copyMemory(src, dst, 28);
 
 			MemoryUtil.memPutShort(dst + 32, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedEntity());
-			MemoryUtil.memPutShort(dst + 34, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
+			MemoryUtil.memPutShort(dst + 34, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntityWithRenderFlags());
 			MemoryUtil.memPutShort(dst + 36, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedItem());
 
 			if (i != 3) {

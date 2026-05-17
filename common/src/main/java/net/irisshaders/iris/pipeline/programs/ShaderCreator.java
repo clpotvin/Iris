@@ -72,6 +72,7 @@ public class ShaderCreator {
 
 		Map<PatchShaderType, String> transformed = TransformPatcher.patchVanilla(
 			name,
+			programId,
 			source.getVertexSource().orElseThrow(RuntimeException::new),
 			source.getGeometrySource().orElse(null),
 			source.getTessControlSource().orElse(null),
@@ -301,6 +302,7 @@ public class ShaderCreator {
 
 		Map<PatchShaderType, String> transformed = TransformPatcher.patchVanilla(
 			name,
+			programId,
 			source.getVertexSource().orElseThrow(RuntimeException::new),
 			source.getGeometrySource().orElse(null),
 			source.getTessControlSource().orElse(null),

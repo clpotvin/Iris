@@ -70,7 +70,7 @@ public class IrisTextVertexSinkImpl implements IrisTextVertexSink {
 		MemoryUtil.memPutInt(ptr + OFFSET_LIGHT, light);
 
 		MemoryUtil.memPutShort(ptr + 32, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedEntity());
-		MemoryUtil.memPutShort(ptr + 34, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity());
+		MemoryUtil.memPutShort(ptr + 34, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntityWithRenderFlags());
 		MemoryUtil.memPutShort(ptr + 36, (short) CapturedRenderingState.INSTANCE.getCurrentRenderedItem());
 
 		if (vertexCount == 4) {
