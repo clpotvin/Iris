@@ -108,7 +108,7 @@ public abstract class MixinShaderManager_Overrides {
 		ShaderKey shaderKey;
 		if (ImmediateState.drawingDeferredWynncraftVfx
 			&& pipeline.shouldUseWynncraftFallbackVfxTranslucency()
-			&& shaderProgram == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL) {
+			&& ImmediateState.isWynncraftVfxCandidatePipeline(shaderProgram)) {
 			shaderKey = ShaderKey.WYNNCRAFT_VFX_TRANSLUCENT;
 		} else {
 			shaderKey = IrisPipelines.getPipeline(pipeline, shaderProgram);

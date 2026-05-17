@@ -20,6 +20,8 @@ import net.irisshaders.iris.features.FeatureFlags;
 import net.irisshaders.iris.gl.GLDebug;
 import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.blending.AlphaTest;
+import net.irisshaders.iris.gl.blending.BlendMode;
+import net.irisshaders.iris.gl.blending.BlendModeFunction;
 import net.irisshaders.iris.gl.blending.BlendModeOverride;
 import net.irisshaders.iris.gl.buffer.ShaderStorageBufferHolder;
 import net.irisshaders.iris.gl.framebuffer.GlFramebuffer;
@@ -129,6 +131,15 @@ import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
 public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRenderingPipeline {
+	private static final int WYNNCRAFT_PHOTON_VFX_TRANSLUCENT_BUFFER = 13;
+	private static final int[] MAIN_COLOR_DRAW_BUFFER = new int[]{0};
+	private static final int[] WYNNCRAFT_PHOTON_VFX_DRAW_BUFFER = new int[]{WYNNCRAFT_PHOTON_VFX_TRANSLUCENT_BUFFER};
+	private static final BlendModeOverride WYNNCRAFT_PHOTON_VFX_BLEND = new BlendModeOverride(new BlendMode(
+		BlendModeFunction.ONE.getGlId(),
+		BlendModeFunction.ONE_MINUS_SRC_ALPHA.getGlId(),
+		BlendModeFunction.ONE.getGlId(),
+		BlendModeFunction.ONE_MINUS_SRC_ALPHA.getGlId()));
+
 	private final RenderTargets renderTargets;
 	private final ShaderMap shaderMap;
 	private final CustomUniforms customUniforms;
@@ -259,9 +270,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		this.occlusionCulling = programSet.getPackDirectives().shouldUseOcclusionCulling();
 		this.resolver = new ProgramFallbackResolver(programSet);
 		String packName = Iris.getCurrentPackName();
+		boolean hasEntitiesTrans = programSet.get(ProgramId.EntitiesTrans).isPresent();
 		this.wynncraftFallbackVfxTranslucency = packName != null
 			&& packName.toLowerCase(Locale.ROOT).contains("photon")
-			&& programSet.get(ProgramId.EntitiesTrans).isEmpty();
+			&& !hasEntitiesTrans;
 		this.pack = programSet.getPack();
 
 		RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
@@ -748,12 +760,19 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	}
 
 	private ShaderSupplier createFallbackShader(String name, ShaderKey key) throws IOException {
-		GlFramebuffer beforeTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterPrepare, new int[]{0});
-		GlFramebuffer afterTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterTranslucent, new int[]{0});
+		boolean wynncraftVfxFallbackKey = key == ShaderKey.WYNNCRAFT_VFX_TRANSLUCENT;
+		boolean photonVfxLayer = wynncraftVfxFallbackKey
+			&& wynncraftFallbackVfxTranslucency
+			&& renderTargets.getRenderTargetCount() > WYNNCRAFT_PHOTON_VFX_TRANSLUCENT_BUFFER;
+		int[] drawBuffers = photonVfxLayer ? WYNNCRAFT_PHOTON_VFX_DRAW_BUFFER : MAIN_COLOR_DRAW_BUFFER;
+		BlendModeOverride blendModeOverride = photonVfxLayer ? WYNNCRAFT_PHOTON_VFX_BLEND : null;
+		GlFramebuffer beforeTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterPrepare, drawBuffers);
+		GlFramebuffer afterTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterTranslucent, drawBuffers);
 
 		ShaderSupplier shader = ShaderCreator.createFallback(name, key, beforeTranslucent, afterTranslucent,
-			key.getAlphaTest(), key.getVertexFormat(), null, this, key.getFogMode(),
-			key == ShaderKey.GLINT, key.isText(), key.hasDiffuseLighting(), key.isIntensity(), key.shouldIgnoreLightmap());
+			key.getAlphaTest(), key.getVertexFormat(), blendModeOverride, this, key.getFogMode(),
+			key.hasDiffuseLighting(), key.isGlint(), key.isText(), key.isIntensity(), key.shouldIgnoreLightmap(),
+			photonVfxLayer);
 
 		return shader;
 	}
@@ -770,7 +789,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private ShaderSupplier createFallbackShadowShader(String name, ShaderKey key) throws IOException {
 		ShaderSupplier shader = ShaderCreator.createFallbackShadow(name, key, shadowTargetsSupplier,
 			key.getAlphaTest(), key.getVertexFormat(), BlendModeOverride.OFF, this, key.getFogMode(),
-			key == ShaderKey.GLINT, key.isText(), key.hasDiffuseLighting(), key.isIntensity(), key.shouldIgnoreLightmap());
+			key.hasDiffuseLighting(), key.isGlint(), key.isText(), key.isIntensity(), key.shouldIgnoreLightmap());
 
 		return shader;
 	}

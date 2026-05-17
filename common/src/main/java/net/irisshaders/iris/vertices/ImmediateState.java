@@ -1,11 +1,16 @@
 package net.irisshaders.iris.vertices;
 
+import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderType;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Some annoying global state needed for rendering.
@@ -27,19 +32,63 @@ public class ImmediateState {
 	// (vertex color G=254, B=0) past beginTranslucents(), so they render with the sky
 	// already composited. Non-signal meshes flush immediately as normal.
 
-	// When true, ITEM_ENTITY_TRANSLUCENT_CULL draw calls are checked for the signal.
+	// When true, translucent entity draw calls are checked for the signal.
 	public static boolean captureItemEntityBatches;
+	// Photon disables its entities_translucent pass for this MC version. Only that fallback
+	// mode uses the item-tint bridge below.
+	public static boolean capturePhotonTranslucentVfxPipelines;
 	// The BufferSource being tracked (to avoid affecting other buffer sources).
 	public static Object captureSource;
-	// The BufferBuilder currently assigned to ITEM_ENTITY_TRANSLUCENT_CULL.
-	// Set in MixinBufferSource.getBuffer, read in MixinBufferBuilder.fillExtendedData.
-	public static BufferBuilder trackedTranslucentBuilder;
-	// Latched true when any vertex in the current batch has the Wynncraft translucency signal.
-	// Reset after each endBatch draw decision.
-	public static boolean trackedBuilderHasWynnSignal;
+	// Builders whose current batch contains the Wynncraft translucency signal. Reset per flush.
+	public static final Set<BufferBuilder> buildersWithWynnSignal = Collections.newSetFromMap(new IdentityHashMap<>());
+	// BufferBuilder currently being flushed by BufferSource.endBatch.
+	public static BufferBuilder flushingBuilder;
 	// True only while replaying deferred Wynncraft VFX batches. Shader override code
 	// can use this to select a dedicated forward fallback shader for specific packs.
 	public static boolean drawingDeferredWynncraftVfx;
+	// Set only around ItemRenderer.renderItem when its tint array contains the Wynncraft
+	// translucency signal. This covers item display VFX paths where the final builder
+	// hook does not observe the color bytes before Photon fallback routing is needed.
+	public static RenderPipeline forcedWynncraftItemLayerPipeline;
+	public static boolean forcedWynncraftItemLayerSignal;
+	public static int forcedWynncraftItemLayerSignalDepth;
+
+	public static boolean isWynncraftTranslucencySignal(int r, int g, int b) {
+		return g == 254 && b == 0 && r >= 1 && r <= 254;
+	}
+
+	public static boolean isWynncraftTranslucencySignalArgb(int color) {
+		int r = (color >>> 16) & 0xFF;
+		int g = (color >>> 8) & 0xFF;
+		int b = color & 0xFF;
+		return isWynncraftTranslucencySignal(r, g, b);
+	}
+
+	public static void beginForcedWynncraftItemLayerSignal(RenderPipeline pipeline) {
+		forcedWynncraftItemLayerPipeline = pipeline;
+		forcedWynncraftItemLayerSignal = true;
+		forcedWynncraftItemLayerSignalDepth++;
+	}
+
+	public static void endForcedWynncraftItemLayerSignal() {
+		if (forcedWynncraftItemLayerSignalDepth > 0) {
+			forcedWynncraftItemLayerSignalDepth--;
+		}
+		if (forcedWynncraftItemLayerSignalDepth == 0) {
+			forcedWynncraftItemLayerPipeline = null;
+			forcedWynncraftItemLayerSignal = false;
+		}
+	}
+
+	public static boolean shouldForceCurrentItemLayerWynnSignal(RenderPipeline pipeline) {
+		return forcedWynncraftItemLayerSignalDepth > 0
+			&& forcedWynncraftItemLayerSignal
+			&& forcedWynncraftItemLayerPipeline == pipeline;
+	}
+
+	public static boolean isWynncraftVfxCandidatePipeline(RenderPipeline pipeline) {
+		return pipeline == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL;
+	}
 
 	// Queue of deferred mesh draws (signal-containing batches held until beginTranslucents).
 	public record DeferredDraw(RenderType renderType, MeshData meshData) {}
@@ -70,10 +119,14 @@ public class ImmediateState {
 	// Reset all capture state.
 	public static void resetCapture() {
 		captureItemEntityBatches = false;
+		capturePhotonTranslucentVfxPipelines = false;
 		captureSource = null;
-		trackedTranslucentBuilder = null;
-		trackedBuilderHasWynnSignal = false;
+		buildersWithWynnSignal.clear();
+		flushingBuilder = null;
 		drawingDeferredWynncraftVfx = false;
+		forcedWynncraftItemLayerPipeline = null;
+		forcedWynncraftItemLayerSignal = false;
+		forcedWynncraftItemLayerSignalDepth = 0;
 	}
 
 	// ====================================================================================

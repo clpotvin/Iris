@@ -86,6 +86,7 @@
     "entity_render_context.MixinFlameFeatureRenderer",
     "entity_render_context.MixinGlyphRenderType",
     "entity_render_context.MixinItemRenderer",
+    "entity_render_context.MixinItemRenderer_VfxTranslucency",
     "entity_render_context.MixinModelSubmit",
     "entity_render_context.MixinTextFeatureRenderer",
     "entity_render_context.MixinTextSubmit",

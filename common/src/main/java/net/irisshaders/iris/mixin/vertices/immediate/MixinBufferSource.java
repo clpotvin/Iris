@@ -9,7 +9,6 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -35,19 +34,28 @@ public class MixinBufferSource {
 		return builder;
 	}
 
-	// Track ITEM_ENTITY_TRANSLUCENT_CULL buffer builders for Wynncraft signal detection.
-	// When getBuffer returns a builder for this render type, store a reference so
-	// MixinBufferBuilder.fillExtendedData can check vertex colors only for this builder.
+	// Mark the item VFX builder while ItemRenderer is rendering a tint-signaled layer.
 	@Inject(method = "getBuffer",
 		at = @At("RETURN"))
 	private void iris$trackTranslucentBuilder(RenderType renderType, CallbackInfoReturnable<VertexConsumer> cir) {
 		if (ImmediateState.captureItemEntityBatches
 			&& ((Object) this) == ImmediateState.captureSource
-			&& renderType.pipeline() == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL) {
+			&& ImmediateState.isWynncraftVfxCandidatePipeline(renderType.pipeline())
+			&& ImmediateState.shouldForceCurrentItemLayerWynnSignal(renderType.pipeline())) {
 			VertexConsumer consumer = cir.getReturnValue();
 			if (consumer instanceof BufferBuilder builder) {
-				ImmediateState.trackedTranslucentBuilder = builder;
+				ImmediateState.buildersWithWynnSignal.add(builder);
 			}
+		}
+	}
+
+	@Inject(method = "endBatch(Lnet/minecraft/client/renderer/rendertype/RenderType;Lcom/mojang/blaze3d/vertex/BufferBuilder;)V",
+		at = @At("HEAD"))
+	private void iris$beginFlushBuffer(RenderType renderType, BufferBuilder bufferBuilder, CallbackInfo ci) {
+		if (ImmediateState.captureItemEntityBatches
+			&& ((Object) this) == ImmediateState.captureSource
+			&& ImmediateState.isWynncraftVfxCandidatePipeline(renderType.pipeline())) {
+			ImmediateState.flushingBuilder = bufferBuilder;
 		}
 	}
 
@@ -65,13 +73,24 @@ public class MixinBufferSource {
 			target = "Lnet/minecraft/client/renderer/rendertype/RenderType;draw(Lcom/mojang/blaze3d/vertex/MeshData;)V",
 			shift = At.Shift.AFTER))
 	private void iris$afterFlushBuffer(RenderType renderType, BufferBuilder bufferBuilder, CallbackInfo ci) {
+		if (ImmediateState.flushingBuilder == bufferBuilder) {
+			ImmediateState.flushingBuilder = null;
+		}
 		if (iris$notRenderingLevel()) {
 			ImmediateState.renderWithExtendedVertexFormat = true;
 		}
 	}
 
+	@Inject(method = "endBatch(Lnet/minecraft/client/renderer/rendertype/RenderType;Lcom/mojang/blaze3d/vertex/BufferBuilder;)V",
+		at = @At("RETURN"))
+	private void iris$endFlushBuffer(RenderType renderType, BufferBuilder bufferBuilder, CallbackInfo ci) {
+		if (ImmediateState.flushingBuilder == bufferBuilder) {
+			ImmediateState.flushingBuilder = null;
+		}
+	}
+
 	// Wynncraft translucent entity deferral: intercept RenderType.draw(MeshData) calls
-	// for ITEM_ENTITY_TRANSLUCENT_CULL batches that contain the Wynncraft translucency signal.
+	// for candidate entity batches that contain the Wynncraft translucency signal.
 	// Signal-containing batches are queued and drawn later (after beginTranslucents) so they
 	// render with the sky already composited, fixing the black halo issue.
 	// Non-signal batches draw immediately, avoiding the translucency bleed on normal display entities.
@@ -81,22 +100,22 @@ public class MixinBufferSource {
 	private void iris$conditionallyDeferDraw(RenderType renderType, MeshData meshData, Operation<Void> original) {
 		if (ImmediateState.captureItemEntityBatches
 			&& ((Object) this) == ImmediateState.captureSource
-			&& renderType.pipeline() == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL
-			&& ImmediateState.trackedBuilderHasWynnSignal) {
+			&& ImmediateState.isWynncraftVfxCandidatePipeline(renderType.pipeline())
+			&& ImmediateState.buildersWithWynnSignal.contains(ImmediateState.flushingBuilder)) {
 			// Defer: enqueue for drawing after beginTranslucents
 			ImmediateState.deferredDraws.add(new ImmediateState.DeferredDraw(renderType, meshData));
-			// Reset signal flag only after processing a tracked batch
-			ImmediateState.trackedBuilderHasWynnSignal = false;
+			// Reset signal flag only after processing this tracked batch
+			ImmediateState.buildersWithWynnSignal.remove(ImmediateState.flushingBuilder);
 		} else {
 			// Draw immediately as normal
 			original.call(renderType, meshData);
-			// Only reset signal flag for tracked ITEM_ENTITY_TRANSLUCENT_CULL batches
+			// Only reset signal flag for tracked candidate entity batches
 			// from the tracked source. Other render types or other BufferSources must
 			// NOT clear the latch — the signal may have been detected but the tracked
 			// batch hasn't flushed yet.
-			if (renderType.pipeline() == RenderPipelines.ITEM_ENTITY_TRANSLUCENT_CULL
+			if (ImmediateState.isWynncraftVfxCandidatePipeline(renderType.pipeline())
 				&& ((Object) this) == ImmediateState.captureSource) {
-				ImmediateState.trackedBuilderHasWynnSignal = false;
+				ImmediateState.buildersWithWynnSignal.remove(ImmediateState.flushingBuilder);
 			}
 		}
 	}

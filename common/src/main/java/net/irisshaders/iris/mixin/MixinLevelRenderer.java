@@ -23,6 +23,7 @@ import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.layer.IsOutlineRenderStateShard;
 import net.irisshaders.iris.layer.OuterWrappedRenderType;
 import net.irisshaders.iris.pathways.HandRenderer;
+import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
 import net.irisshaders.iris.pipeline.WorldRenderingPhase;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.pipeline.WorldRenderingPipeline;
@@ -42,6 +43,7 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LevelTargetBundle;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.RenderBuffers;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
@@ -266,23 +268,27 @@ public class MixinLevelRenderer {
 	}
 
 	// Wynncraft translucent entity deferral (per-mesh, signal-gated).
-	// Start capturing ITEM_ENTITY_TRANSLUCENT_CULL draw calls at the beginning of the render pass.
+	// Start capturing translucent entity draw calls at the beginning of the render pass.
 	// Only meshes with the Wynncraft translucency signal (vertex color G=254, B=0) are deferred.
 	// Non-signal meshes draw immediately. This fixes both the VFX black halo (by deferring VFX
 	// past beginTranslucents) and the display entity translucency bleed (by not deferring non-VFX).
 	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At("HEAD"))
 	private void iris$beginCaptureTranslucentEntities(CallbackInfo ci) {
 		ImmediateState.captureItemEntityBatches = true;
+		ImmediateState.capturePhotonTranslucentVfxPipelines = pipeline instanceof IrisRenderingPipeline irisPipeline
+			&& irisPipeline.shouldUseWynncraftFallbackVfxTranslucency();
 		ImmediateState.captureSource = this.renderBuffers.bufferSource();
 	}
 
 	// TODO this needs to be more consistent.
-	@Inject(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;endBatch()V", ordinal = 1))
-	private void iris$beginTranslucents(CallbackInfo ci,  @Local(ordinal = 0, argsOnly = true) Matrix4f modelMatrix) {
+	@WrapOperation(method = { "method_62214", NeoLambdas.NEO_RENDER_MAIN_PASS }, require = 1, at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;endBatch()V", ordinal = 1))
+	private void iris$beginTranslucents(MultiBufferSource.BufferSource bufferSource, Operation<Void> original, @Local(ordinal = 0, argsOnly = true) Matrix4f modelMatrix) {
 		pipeline.beginHand();
 		HandRenderer.INSTANCE.renderSolid(modelMatrix, Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(true), Minecraft.getInstance().gameRenderer.getMainCamera(), Minecraft.getInstance().gameRenderer, pipeline);
 		Profiler.get().popPush("iris_pre_translucent");
 		pipeline.beginTranslucents();
+		// Let vanilla flush translucent batches while the signal-gated deferral hook is still active.
+		original.call(bufferSource);
 		// Flush deferred signal-containing meshes now that sky is composited.
 		ImmediateState.flushDeferredDraws();
 		// Stop capturing — subsequent draws proceed normally.

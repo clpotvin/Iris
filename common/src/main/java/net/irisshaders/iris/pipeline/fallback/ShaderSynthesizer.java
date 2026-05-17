@@ -370,7 +370,7 @@ public class ShaderSynthesizer {
 		return shader.toString();
 	}
 
-	public static String fsh(ShaderAttributeInputs inputs, FogMode fogMode, AlphaTest alphaTest, boolean intensityTex, boolean isLeash) {
+	public static String fsh(ShaderAttributeInputs inputs, FogMode fogMode, AlphaTest alphaTest, boolean intensityTex, boolean isLeash, boolean premultiplyAlpha) {
 		StringBuilder shader = new StringBuilder();
 		StringBuilder main = new StringBuilder();
 
@@ -466,6 +466,10 @@ public class ShaderSynthesizer {
 		// Wynncraft movement blink: hide fragment when blink flag is set
 		if (inputs.isText() && inputs.hasTex()) {
 			main.append("    if (irisW_moveBlink > 0) color.a = 0.0;\n");
+		}
+
+		if (premultiplyAlpha) {
+			main.append("    color.rgb *= color.a;\n");
 		}
 
 		main.append("    fragColor = color;\n");
