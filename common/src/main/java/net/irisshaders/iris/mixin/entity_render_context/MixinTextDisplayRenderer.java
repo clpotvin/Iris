@@ -165,8 +165,8 @@ public class MixinTextDisplayRenderer {
 			int targetLight = Math.round(TEXT_LIGHT_FOR_BRIGHT_COLORS +
 				(TEXT_LIGHT_FOR_DARK_COLORS - TEXT_LIGHT_FOR_BRIGHT_COLORS) * darkTextAmount);
 
-			block = iris$lerpLight(block, targetLight, boostStrength);
-			sky = iris$lerpLight(sky, targetLight, boostStrength);
+			block = iris$lerpLightUpOnly(block, targetLight, boostStrength);
+			sky = iris$lerpLightUpOnly(sky, targetLight, boostStrength);
 		}
 
 		if (block == ((packedLight >> 4) & 0xF) && sky == ((packedLight >> 20) & 0xF)) {
@@ -232,6 +232,14 @@ public class MixinTextDisplayRenderer {
 	private static int iris$lerpLight(int current, int target, float amount) {
 		int light = Math.round(current + (target - current) * iris$clamp01(amount));
 		return iris$clampLight(light);
+	}
+
+	@Unique
+	private static int iris$lerpLightUpOnly(int current, int target, float amount) {
+		if (target <= current) {
+			return current;
+		}
+		return iris$lerpLight(current, target, amount);
 	}
 
 	@Unique

@@ -97,7 +97,7 @@ public class IrisConfig implements ConfigEntryPoint {
 		// Text group: display text readability controls
 		var textGroup = builder.createOptionGroup()
 			.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_text_brightness_floor"))
-				.setDefaultValue(true)
+				.setDefaultValue(false)
 				.setBinding(value -> IrisVideoSettings.wynncraftTextBrightnessFloor = value, () -> IrisVideoSettings.wynncraftTextBrightnessFloor)
 				.setName(Component.translatable("options.iris.wynncraftTextBrightnessFloor"))
 				.setTooltip(Component.translatable("options.iris.wynncraftTextBrightnessFloor.tooltip"))

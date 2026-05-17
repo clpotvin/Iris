@@ -183,7 +183,7 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftEntityBrightness = Math.max(0, Math.min(200, Integer.parseInt(properties.getProperty("wynncraftEntityBrightness", "100"))));
 			IrisVideoSettings.wynncraftEntityEmissivity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftEntityEmissivity", "100"))));
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = !"false".equals(properties.getProperty("wynncraftNightVisionDisablesBoost", "true"));
-			IrisVideoSettings.wynncraftTextBrightnessFloor = !"false".equals(properties.getProperty("wynncraftTextBrightnessFloor", "true"));
+			IrisVideoSettings.wynncraftTextBrightnessFloor = "true".equals(properties.getProperty("wynncraftTextBrightnessFloor", "false"));
 			IrisVideoSettings.wynncraftTextBrightnessFloorLevel = Math.max(0, Math.min(15, Integer.parseInt(properties.getProperty("wynncraftTextBrightnessFloorLevel", "10"))));
 			IrisVideoSettings.wynncraftMistWoodsFog = !"false".equals(properties.getProperty("wynncraftMistWoodsFog", "true"));
 			IrisVideoSettings.wynncraftMistWoodsFogDensity = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogDensity", "100"))));
@@ -200,7 +200,7 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftEntityBrightness = 100;
 			IrisVideoSettings.wynncraftEntityEmissivity = 100;
 			IrisVideoSettings.wynncraftNightVisionDisablesBoost = true;
-			IrisVideoSettings.wynncraftTextBrightnessFloor = true;
+			IrisVideoSettings.wynncraftTextBrightnessFloor = false;
 			IrisVideoSettings.wynncraftTextBrightnessFloorLevel = 10;
 			IrisVideoSettings.wynncraftMistWoodsFog = true;
 			IrisVideoSettings.wynncraftMistWoodsFogDensity = 100;
