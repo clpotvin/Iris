@@ -3,6 +3,7 @@ package net.irisshaders.iris.pathways;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.irisshaders.iris.BuildConfig;
+import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.mixin.EntityRenderDispatcherAccessor;
@@ -76,7 +77,7 @@ public final class WynncraftMountArmorOverlay {
 
 	public static void submitPlayerHeadOverlays(PlayerSkinRenderCache.RenderInfo renderInfo, net.minecraft.world.item.ItemDisplayContext displayContext,
 												PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, SkullModelBase modelBase) {
-		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL || !IrisVideoSettings.wynncraftMountArmorOverlay || modelBase == null || iris$isExcludedDisplayContext(displayContext)) {
+		if (!iris$shouldSubmitOverlays() || modelBase == null || iris$isExcludedDisplayContext(displayContext)) {
 			return;
 		}
 
@@ -110,8 +111,7 @@ public final class WynncraftMountArmorOverlay {
 
 	public static void submitItemLayerOverlays(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, int packedOverlay,
 											   List<BakedQuad> quads, net.minecraft.world.item.ItemDisplayContext displayContext) {
-		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL || !IrisVideoSettings.wynncraftMountArmorOverlay || quads == null || quads.isEmpty()
-			|| iris$isExcludedDisplayContext(displayContext)) {
+		if (!iris$shouldSubmitOverlays() || quads == null || quads.isEmpty() || iris$isExcludedDisplayContext(displayContext)) {
 			return;
 		}
 
@@ -149,6 +149,10 @@ public final class WynncraftMountArmorOverlay {
 		return displayContext == net.minecraft.world.item.ItemDisplayContext.GUI
 			|| displayContext == net.minecraft.world.item.ItemDisplayContext.FIRST_PERSON_LEFT_HAND
 			|| displayContext == net.minecraft.world.item.ItemDisplayContext.FIRST_PERSON_RIGHT_HAND;
+	}
+
+	private static boolean iris$shouldSubmitOverlays() {
+		return BuildConfig.WYNNIRIS_EXPERIMENTAL && IrisVideoSettings.wynncraftMountArmorOverlay && Iris.isPackInUseQuick();
 	}
 
 	private static boolean iris$isLikelyMountState(LocalPlayer player) {
@@ -386,6 +390,7 @@ public final class WynncraftMountArmorOverlay {
 			return;
 		}
 
+		iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_BODY, TARGET_BODY, 0, 16);
 		iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_LEG, TARGET_RIGHT_LEG, 0, 16);
 		iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_LEG_FOR_LEFT_LIMB, TARGET_LEFT_LEG, -16, 0);
 	}
