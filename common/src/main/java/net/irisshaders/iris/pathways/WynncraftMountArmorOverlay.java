@@ -86,6 +86,14 @@ public final class WynncraftMountArmorOverlay {
 		if (minecraft.level == null || player == null || !iris$isLikelyMountState(player)) {
 			return;
 		}
+		if (iris$isForeignPlayerHead(renderInfo, player)) {
+			if (WynncraftDebugLog.shouldLog("mount-armor-overlay-head-skip")) {
+				WynncraftDebugLog.info("mount-armor-overlay-head-skip",
+					"[WynnIris MountArmor] skipping non-local player head profile={} local={}",
+					renderInfo.gameProfile(), player.getUUID());
+			}
+			return;
+		}
 
 		OverlayTextures textures = iris$getOrCreateTextures(minecraft, player);
 		if (textures == null || textures.isEmpty()) {
@@ -149,6 +157,13 @@ public final class WynncraftMountArmorOverlay {
 		return displayContext == net.minecraft.world.item.ItemDisplayContext.GUI
 			|| displayContext == net.minecraft.world.item.ItemDisplayContext.FIRST_PERSON_LEFT_HAND
 			|| displayContext == net.minecraft.world.item.ItemDisplayContext.FIRST_PERSON_RIGHT_HAND;
+	}
+
+	private static boolean iris$isForeignPlayerHead(PlayerSkinRenderCache.RenderInfo renderInfo, LocalPlayer player) {
+		if (renderInfo == null || renderInfo.gameProfile() == null || renderInfo.gameProfile().id() == null) {
+			return false;
+		}
+		return !renderInfo.gameProfile().id().equals(player.getUUID());
 	}
 
 	private static boolean iris$shouldSubmitOverlays() {
