@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.PlayerSkinRenderCache;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.blockentity.SkullBlockRenderer;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.resources.model.EquipmentAssetManager;
@@ -36,6 +37,7 @@ import org.joml.Vector3f;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,11 +111,11 @@ public final class WynncraftMountArmorOverlay {
 
 		if (textures.outerId != null) {
 			SkullBlockRenderer.submitSkull(null, 180.0F, 0.0F, poseStack, submitNodeCollector, packedLight, modelBase,
-				RenderTypes.entityTranslucent(textures.outerId), OUTER_SIGNAL_COLOR, null);
+				textures.outerRenderType, OUTER_SIGNAL_COLOR, null);
 		}
 		if (textures.leggingsId != null) {
 			SkullBlockRenderer.submitSkull(null, 180.0F, 0.0F, poseStack, submitNodeCollector, packedLight, modelBase,
-				RenderTypes.entityTranslucent(textures.leggingsId), LEGGINGS_SIGNAL_COLOR, null);
+				textures.leggingsRenderType, LEGGINGS_SIGNAL_COLOR, null);
 		}
 	}
 
@@ -123,14 +125,14 @@ public final class WynncraftMountArmorOverlay {
 			return;
 		}
 
-		int fakeQuadCount = iris$countFakePlayerQuads(poseStack, quads);
-		if (fakeQuadCount == 0) {
-			return;
-		}
-
 		Minecraft minecraft = Minecraft.getInstance();
 		LocalPlayer player = minecraft.player;
 		if (minecraft.level == null || player == null || !iris$isLikelyMountState(player)) {
+			return;
+		}
+
+		List<BakedQuad> fakeQuads = iris$collectFakePlayerQuads(poseStack, quads);
+		if (fakeQuads.isEmpty()) {
 			return;
 		}
 
@@ -142,14 +144,14 @@ public final class WynncraftMountArmorOverlay {
 		if (WynncraftDebugLog.shouldLog("mount-armor-overlay-item-submit")) {
 			WynncraftDebugLog.info("mount-armor-overlay-item-submit",
 				"[WynnIris MountArmor] submitting item-layer overlays context={} fakeQuads={}/{} outer={} leggings={}",
-				displayContext, fakeQuadCount, quads.size(), textures.outerId, textures.leggingsId);
+				displayContext, fakeQuads.size(), quads.size(), textures.outerId, textures.leggingsId);
 		}
 
 		if (textures.outerId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, quads, textures.outerId, OUTER_SIGNAL_GREEN);
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerRenderType, OUTER_SIGNAL_GREEN);
 		}
 		if (textures.leggingsId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, quads, textures.leggingsId, LEGGINGS_SIGNAL_GREEN);
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType, LEGGINGS_SIGNAL_GREEN);
 		}
 	}
 
@@ -174,16 +176,19 @@ public final class WynncraftMountArmorOverlay {
 		return player.getVehicle() != null || player.isSpectator() || player.isInvisible();
 	}
 
-	private static int iris$countFakePlayerQuads(PoseStack poseStack, List<BakedQuad> quads) {
+	private static List<BakedQuad> iris$collectFakePlayerQuads(PoseStack poseStack, List<BakedQuad> quads) {
 		Matrix4f pose = poseStack.last().pose();
 		Vector3f transformed = new Vector3f();
-		int count = 0;
+		List<BakedQuad> fakeQuads = null;
 		for (BakedQuad quad : quads) {
 			if (iris$isFakePlayerQuad(pose, quad, transformed)) {
-				count++;
+				if (fakeQuads == null) {
+					fakeQuads = new ArrayList<>();
+				}
+				fakeQuads.add(quad);
 			}
 		}
-		return count;
+		return fakeQuads == null ? List.of() : fakeQuads;
 	}
 
 	private static boolean iris$isFakePlayerQuad(Matrix4f pose, BakedQuad quad, Vector3f transformed) {
@@ -197,14 +202,10 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static void iris$submitQuadOverlay(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, int packedOverlay,
-											   List<BakedQuad> quads, Identifier texture, float signalGreen) {
-		submitNodeCollector.submitCustomGeometry(poseStack, RenderTypes.entityTranslucent(texture), (pose, vertexConsumer) -> {
-			Matrix4f matrix = pose.pose();
-			Vector3f transformed = new Vector3f();
+											   List<BakedQuad> quads, RenderType renderType, float signalGreen) {
+		submitNodeCollector.submitCustomGeometry(poseStack, renderType, (pose, vertexConsumer) -> {
 			for (BakedQuad quad : quads) {
-				if (iris$isFakePlayerQuad(matrix, quad, transformed)) {
-					vertexConsumer.putBulkData(pose, quad, 0.0F, signalGreen, 0.0F, 1.0F, packedLight, packedOverlay);
-				}
+				vertexConsumer.putBulkData(pose, quad, 0.0F, signalGreen, 0.0F, 1.0F, packedLight, packedOverlay);
 			}
 		});
 	}
@@ -305,6 +306,8 @@ public final class WynncraftMountArmorOverlay {
 
 			Identifier outerId = hasOuter ? iris$registerTexture(minecraft, "outer", outer) : null;
 			Identifier leggingsId = hasLeggings ? iris$registerTexture(minecraft, "leggings", leggings) : null;
+			RenderType outerRenderType = outerId == null ? null : RenderTypes.entityTranslucent(outerId);
+			RenderType leggingsRenderType = leggingsId == null ? null : RenderTypes.entityTranslucent(leggingsId);
 
 			if (WynncraftDebugLog.shouldLog("mount-armor-overlay-cache")) {
 				WynncraftDebugLog.info("mount-armor-overlay-cache",
@@ -312,7 +315,7 @@ public final class WynncraftMountArmorOverlay {
 					modelType, outerId, leggingsId, iris$itemName(head), iris$itemName(chest), iris$itemName(legs), iris$itemName(feet));
 			}
 
-			return new OverlayTextures(outerId, leggingsId);
+			return new OverlayTextures(outerId, leggingsId, outerRenderType, leggingsRenderType);
 		} finally {
 			if (!hasOuter) {
 				outer.close();
@@ -619,7 +622,7 @@ public final class WynncraftMountArmorOverlay {
 		}
 	}
 
-	private record OverlayTextures(Identifier outerId, Identifier leggingsId) {
+	private record OverlayTextures(Identifier outerId, Identifier leggingsId, RenderType outerRenderType, RenderType leggingsRenderType) {
 		boolean isEmpty() {
 			return outerId == null && leggingsId == null;
 		}
