@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.mixin.texture.SpriteContentsAccessor;
 import net.irisshaders.iris.mixinterface.ItemContextState;
+import net.irisshaders.iris.pathways.WynncraftMountArmorOverlay;
 import net.irisshaders.iris.shaderpack.materialmap.NamespacedId;
 import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
@@ -202,6 +203,18 @@ public class ItemStackStateLayerMixin {
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItemInHand(iris$isHandDisplayContext());
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
 		iris$setupId(((ItemContextState) parentState).getDisplayItem(), ((ItemContextState) parentState).getDisplayItemModel());
+	}
+
+	@Inject(method = "submit", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;popPose()V"))
+	private void iris$submitWynncraftMountArmorOverlays(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, int packedOverlay, int color, CallbackInfo ci) {
+		WynncraftMountArmorOverlay.submitItemLayerOverlays(
+			poseStack,
+			submitNodeCollector,
+			packedLight,
+			packedOverlay,
+			quads,
+			((ItemContextState) parentState).getDisplayContext()
+		);
 	}
 
 	@Inject(method = "submit", at = @At("TAIL"))

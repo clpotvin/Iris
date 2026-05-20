@@ -94,6 +94,12 @@ public class EntityPatcher {
 	private static final String IRISW_TRANSLUCENCY_DETECT =
 		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
 
+	// WynnIris mount armor overlay signal: vertex Color with R=0, B=0, and G=252/255
+	// for the outer armor pass or G=250/255 for the leggings pass.
+	private static final String IRISW_ARMOR_OVERLAY_DETECT =
+		"int iris_wynn_armorOverlayMode = (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 252) ? 1"
+			+ " : (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 250) ? 2 : 0;";
+
 	// ====================================================================================
 	// WYNNCRAFT SKYBOX RENDERING (GLSL injection mirroring vanilla RP)
 	// ====================================================================================
@@ -1049,6 +1055,18 @@ public class EntityPatcher {
 		"const int IRISW_BODY = 1;",
 	};
 
+	private static final String IRISW_FAKE_PLAYER_FACE_NORMAL_FUNC = """
+		vec3 irisw_fakePlayerFaceNormal() {
+		    int face = (gl_VertexID % 24) / 4;
+		    if (face == 0) return vec3(0.0, 1.0, 0.0);
+		    if (face == 1) return vec3(0.0, -1.0, 0.0);
+		    if (face == 2) return vec3(-1.0, 0.0, 0.0);
+		    if (face == 3) return vec3(0.0, 0.0, -1.0);
+		    if (face == 4) return vec3(1.0, 0.0, 0.0);
+		    return vec3(0.0, 0.0, 1.0);
+		}
+		""";
+
 	// Player emote function — decodes metadata from Y-position, remaps UV, computes nearFade.
 	// Ported from Wynncraft RP player.glsl applyPlayer().
 	private static final String IRISW_APPLY_PLAYER_FUNC = """
@@ -1132,6 +1150,7 @@ public class EntityPatcher {
 				"out vec4 iris_vertexColor;",
 				"flat out int iris_wynncraft_glint;",
 				"flat out int iris_wynncraft_translucency;",
+				"flat out int iris_wynncraft_armor_overlay;",
 				"out vec2 iris_wynncraft_texcoord;",
 				"out vec2 iris_wynncraft_midtex;",
 				"out vec3 iris_wynncraft_position;",
@@ -1151,17 +1170,20 @@ public class EntityPatcher {
 				"entityColor = vec4(overlayColor.rgb, 1.0 - overlayColor.a);",
 				IRISW_SIGNAL_DETECT,
 				IRISW_TRANSLUCENCY_DETECT,
+				IRISW_ARMOR_OVERLAY_DETECT,
 				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : 0;",
 				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;",
+				"iris_wynncraft_armor_overlay = iris_wynn_armorOverlayMode;",
 				"irisw_pos = iris_Position;",
 				"iris_wynncraft_position = iris_Position;",
 				"irisw_uv0 = iris_UV0;",
 				"float irisw_nf = 1.0;",
 				"irisw_applyPlayer(irisw_pos, irisw_uv0, irisw_nf);",
+				"if (iris_wynncraft_armor_overlay != 0 && irisw_nf > 0.01) irisw_pos += irisw_fakePlayerFaceNormal() * (iris_wynncraft_armor_overlay == 2 ? 0.35 : 0.55);",
 				"iris_wynncraft_nearfade = irisw_nf;",
 				"iris_wynncraft_texcoord = irisw_uv0;",
 				hasMidTexCoord ? "iris_wynncraft_midtex = mc_midTexCoord.xy;" : "iris_wynncraft_midtex = vec2(0.0);",
-				"iris_vertexColor = (iris_wynn_isSignal || iris_wynn_isTranslucent) ? vec4(1.0) : iris_Color;",
+				"iris_vertexColor = (iris_wynn_isSignal || iris_wynn_isTranslucent || iris_wynn_armorOverlayMode != 0) ? vec4(1.0) : iris_Color;",
 				// Workaround for a shader pack bug:
 				// https://github.com/IrisShaders/Iris/issues/1549
 				// Some shader packs incorrectly ignore the alpha value, and assume that rgb
@@ -1171,7 +1193,7 @@ public class EntityPatcher {
 			// Inject player emote function and data into vertex shader.
 			// Data goes to BEFORE_DECLARATIONS (struct, constants, arrays).
 			// Function goes to BEFORE_FUNCTIONS (needs data declared above it).
-			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_APPLY_PLAYER_FUNC);
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_FAKE_PLAYER_FACE_NORMAL_FUNC, IRISW_APPLY_PLAYER_FUNC);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS, IRISW_PLAYER_DATA);
 		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_CONTROL) {
 			// replace read references to grab the color from the first vertex.
@@ -1187,6 +1209,8 @@ public class EntityPatcher {
 				"flat out int iris_wynncraft_glintTCS[];",
 				"flat in int iris_wynncraft_translucency[];",
 				"flat out int iris_wynncraft_translucencyTCS[];",
+				"flat in int iris_wynncraft_armor_overlay[];",
+				"flat out int iris_wynncraft_armor_overlayTCS[];",
 				"in vec2 iris_wynncraft_texcoord[];",
 				"out vec2 iris_wynncraft_texcoordTCS[];",
 				"in vec2 iris_wynncraft_midtex[];",
@@ -1200,6 +1224,7 @@ public class EntityPatcher {
 				"iris_vertexColorTCS[gl_InvocationID] = iris_vertexColor[gl_InvocationID];",
 				"iris_wynncraft_glintTCS[gl_InvocationID] = iris_wynncraft_glint[gl_InvocationID];",
 				"iris_wynncraft_translucencyTCS[gl_InvocationID] = iris_wynncraft_translucency[gl_InvocationID];",
+				"iris_wynncraft_armor_overlayTCS[gl_InvocationID] = iris_wynncraft_armor_overlay[gl_InvocationID];",
 				"iris_wynncraft_texcoordTCS[gl_InvocationID] = iris_wynncraft_texcoord[gl_InvocationID];",
 				"iris_wynncraft_midtexTCS[gl_InvocationID] = iris_wynncraft_midtex[gl_InvocationID];",
 				"iris_wynncraft_positionTCS[gl_InvocationID] = iris_wynncraft_position[gl_InvocationID];",
@@ -1218,6 +1243,8 @@ public class EntityPatcher {
 				"flat out int iris_wynncraft_glintTES;",
 				"flat in int iris_wynncraft_translucencyTCS[];",
 				"flat out int iris_wynncraft_translucencyTES;",
+				"flat in int iris_wynncraft_armor_overlayTCS[];",
+				"flat out int iris_wynncraft_armor_overlayTES;",
 				"in vec2 iris_wynncraft_texcoordTCS[];",
 				"out vec2 iris_wynncraft_texcoordTES;",
 				"in vec2 iris_wynncraft_midtexTCS[];",
@@ -1231,6 +1258,7 @@ public class EntityPatcher {
 				"iris_vertexColorTES = iris_vertexColorTCS[0];",
 				"iris_wynncraft_glintTES = iris_wynncraft_glintTCS[0];",
 				"iris_wynncraft_translucencyTES = iris_wynncraft_translucencyTCS[0];",
+				"iris_wynncraft_armor_overlayTES = iris_wynncraft_armor_overlayTCS[0];",
 				"iris_wynncraft_texcoordTES = iris_wynncraft_texcoordTCS[0];",
 				"iris_wynncraft_midtexTES = iris_wynncraft_midtexTCS[0];",
 				"iris_wynncraft_positionTES = iris_wynncraft_positionTCS[0];",
@@ -1249,6 +1277,8 @@ public class EntityPatcher {
 				"flat out int iris_wynncraft_glintGS;",
 				"flat in int iris_wynncraft_translucency[];",
 				"flat out int iris_wynncraft_translucencyGS;",
+				"flat in int iris_wynncraft_armor_overlay[];",
+				"flat out int iris_wynncraft_armor_overlayGS;",
 				"in vec2 iris_wynncraft_texcoord[];",
 				"out vec2 iris_wynncraft_texcoordGS;",
 				"in vec2 iris_wynncraft_midtex[];",
@@ -1262,6 +1292,7 @@ public class EntityPatcher {
 				"iris_vertexColorGS = iris_vertexColor[0];",
 				"iris_wynncraft_glintGS = iris_wynncraft_glint[0];",
 				"iris_wynncraft_translucencyGS = iris_wynncraft_translucency[0];",
+				"iris_wynncraft_armor_overlayGS = iris_wynncraft_armor_overlay[0];",
 				"iris_wynncraft_texcoordGS = iris_wynncraft_texcoord[0];",
 				"iris_wynncraft_midtexGS = iris_wynncraft_midtex[0];",
 				"iris_wynncraft_positionGS = iris_wynncraft_position[0];",
@@ -1272,16 +1303,23 @@ public class EntityPatcher {
 				root.rename("entityColor", "entityColorTES");
 				root.rename("iris_wynncraft_glint", "iris_wynncraft_glintTES");
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
+				root.rename("iris_wynncraft_armor_overlay", "iris_wynncraft_armor_overlayTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
 				root.rename("iris_wynncraft_position", "iris_wynncraft_positionTES");
 				root.rename("iris_wynncraft_nearfade", "iris_wynncraft_nearfadeTES");
 			}
 		} else if (parameters.type.glShaderType == ShaderType.FRAGMENT) {
+			boolean hadSampler0BeforeWynnIrisInjection = root.identifierIndex.has("Sampler0");
+			iris$logShaderPatchDebug("entity-fragment-start",
+				"[WynnIris EntityPatch] fragment start program={} hasSampler0Before={} hasGeo={} hasTes={} hand={}",
+				parameters.type, hadSampler0BeforeWynnIrisInjection, parameters.hasGeometry, parameters.hasTesselation, parameters.isHandProgram());
+
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
 				"in vec4 entityColor;", "in vec4 iris_vertexColor;",
 				"flat in int iris_wynncraft_glint;",
 				"flat in int iris_wynncraft_translucency;",
+				"flat in int iris_wynncraft_armor_overlay;",
 				"in vec2 iris_wynncraft_texcoord;",
 				"in vec2 iris_wynncraft_midtex;",
 				"in vec3 iris_wynncraft_position;",
@@ -1290,12 +1328,15 @@ public class EntityPatcher {
 			tree.prependMainFunctionBody(t,
 				"float iris_vertexColorAlpha = iris_vertexColor.a;",
 				"if (iris_wynncraft_nearfade <= 0.01) discard;",
+				"if (iris_wynncraft_armor_overlay != 0 && texture(Sampler0, iris_wynncraft_texcoord).a <= 0.01) discard;",
 				"int irisW_entityInfoFlags = iris_entityInfo.y / 16384;",
 				"bool irisW_skipItemTint = irisW_entityInfoFlags == 1 || irisW_entityInfoFlags == 3;",
 				"bool irisW_skipEntityLightTweaks = irisW_entityInfoFlags >= 2;",
 				"bool irisW_skyboxApplied = false;");
 
-			if (!root.identifierIndex.has("Sampler0")) {
+			if (!hadSampler0BeforeWynnIrisInjection) {
+				iris$logShaderPatchDebug("entity-fragment-sampler0",
+					"[WynnIris EntityPatch] injecting missing Sampler0 declaration for program={}", parameters.type);
 				tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform sampler2D Sampler0;");
 			}
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_glintBrightness;");
@@ -1324,6 +1365,9 @@ public class EntityPatcher {
 			boolean applyEntityLightTweaks = !parameters.isHandProgram();
 
 			if (fragOutput != null) {
+				iris$logShaderPatchDebug("entity-fragment-forward",
+					"[WynnIris EntityPatch] forward path program={} output={} premul={} applyLightTweaks={}",
+					parameters.type, fragOutput.name(), fragOutput.premultiplied(), applyEntityLightTweaks);
 				// FORWARD PATH: append effects after main().
 				// Skybox apply runs first — replaces fragment color for skybox entities.
 				// Guard flag prevents subsequent effects from mutating skybox output.
@@ -1376,6 +1420,12 @@ public class EntityPatcher {
 					OverlayAnchor overlayAnchor = findOverlayAnchorInMain(root, tree);
 					AlphaDiscardAnchor discardAnchor = findAlphaDiscardAnchorInMain(root, tree,
 						overlayAnchor != null ? overlayAnchor.albedoVar() : null);
+					iris$logShaderPatchDebug("entity-fragment-deferred",
+						"[WynnIris EntityPatch] deferred path program={} overlayAnchor={} discardAnchor={} applyLightTweaks={}",
+						parameters.type,
+						overlayAnchor == null ? "none" : overlayAnchor.albedoVar(),
+						discardAnchor == null ? "none" : discardAnchor.albedoVar(),
+						applyEntityLightTweaks);
 
 					// 1. Translucency at alpha-discard anchor (BEFORE discard)
 					int translucencyStmtsInserted = 0;
@@ -1466,6 +1516,7 @@ public class EntityPatcher {
 				root.rename("iris_vertexColor", "iris_vertexColorGS");
 				root.rename("iris_wynncraft_glint", "iris_wynncraft_glintGS");
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyGS");
+				root.rename("iris_wynncraft_armor_overlay", "iris_wynncraft_armor_overlayGS");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordGS");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexGS");
 				root.rename("iris_wynncraft_position", "iris_wynncraft_positionGS");
@@ -1475,6 +1526,7 @@ public class EntityPatcher {
 				root.rename("iris_vertexColor", "iris_vertexColorTES");
 				root.rename("iris_wynncraft_glint", "iris_wynncraft_glintTES");
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
+				root.rename("iris_wynncraft_armor_overlay", "iris_wynncraft_armor_overlayTES");
 				root.rename("iris_wynncraft_texcoord", "iris_wynncraft_texcoordTES");
 				root.rename("iris_wynncraft_midtex", "iris_wynncraft_midtexTES");
 				root.rename("iris_wynncraft_position", "iris_wynncraft_positionTES");
@@ -2129,6 +2181,10 @@ public class EntityPatcher {
 				root.rename("iris_entityInfo", "iris_entityInfoTES");
 			}
 		}
+	}
+
+	private static void iris$logShaderPatchDebug(String key, String message, Object... args) {
+		net.irisshaders.iris.gui.option.WynncraftDebugLog.info(key, message, args);
 	}
 
 	private static String irisw_decodeBlockEntityId(String blockEntityIdExpression) {

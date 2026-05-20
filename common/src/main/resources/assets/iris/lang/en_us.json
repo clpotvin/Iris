@@ -100,6 +100,8 @@
   "options.iris.wynncraftMistWoodsFogSunTintReduction.tooltip": "Reduces the orange/red tint the fog gets when looking toward the sun at sunrise/sunset. Inverts vanilla's directional tint math for a precise result. Use the slider to control the strength.",
   "options.iris.wynncraftMistWoodsFogSunTintAmount": "Sun Tint Reduction",
   "options.iris.wynncraftMistWoodsFogSunTintAmount.tooltip": "How strongly to remove the vanilla sun tint from the Mist Woods fog. At 100% the fog uses the biome's pure base color regardless of view direction. Only active when Reduce Sun Tint is enabled.",
+  "options.iris.wynncraftMountArmorOverlay": "Mount Armor Overlay",
+  "options.iris.wynncraftMountArmorOverlay.tooltip": "Attempts to render your equipped armor on Wynncraft's mounted fake-player model. Experimental; disable if armor appears on unrelated player heads.",
   "options.iris.wynncraftDebugLogging.tooltip": "Enables verbose debug logging for WynnIris features (transitions, glint effects, skybox detection). Logs to latest.log. Turn off for normal play.",
   "label.iris.true": "On",
   "label.iris.false": "Off"

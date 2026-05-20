@@ -27,6 +27,7 @@ public class IrisVideoSettings {
 	public static int wynncraftMistWoodsFogMinDistance = 0;
 	public static boolean wynncraftMistWoodsFogSunTintReduction = false;
 	public static int wynncraftMistWoodsFogSunTintAmount = 50;
+	public static boolean wynncraftMountArmorOverlay = true;
 	public static boolean wynncraftDebugLogging = false;
 	public static final OptionInstance<Integer> RENDER_DISTANCE = new ShadowDistanceOption<>("options.iris.shadowDistance",
 		mc -> {
