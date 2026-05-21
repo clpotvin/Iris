@@ -32,8 +32,10 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.PlayerModelType;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomModelData;
 import net.minecraft.world.item.component.DyedItemColor;
 import net.minecraft.world.item.equipment.EquipmentAsset;
+import net.minecraft.world.item.equipment.EquipmentAssets;
 import net.minecraft.world.item.equipment.Equippable;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -70,6 +72,12 @@ public final class WynncraftMountArmorOverlay {
 	private static final float HEAD_ARMOR_SCALE = 10.0F / 8.5F;
 	private static final float OUTER_SIGNAL_GREEN = 252.0F / 255.0F;
 	private static final float LEGGINGS_SIGNAL_GREEN = 250.0F / 255.0F;
+	private static final String[] WYNNCRAFT_ARMOR_ASSETS = {
+		"hidden", "leather", "tan", "chainmail", "copper", "iron", "gold", "diamond",
+		"titanium", "netherite", "pale_leather", "pale_chainmail", "pale_copper", "pale_iron",
+		"pale_gold", "pale_diamond", "pale_titanium", "pale_netherite", "shaman", "infernal",
+		"phantom", "quartz", "wings"
+	};
 
 	private WynncraftMountArmorOverlay() {
 	}
@@ -120,13 +128,17 @@ public final class WynncraftMountArmorOverlay {
 		if (WynncraftDebugLog.shouldLog("mount-armor-overlay-submit")) {
 			String profile = renderInfo == null || renderInfo.gameProfile() == null ? "none" : renderInfo.gameProfile().toString();
 			WynncraftDebugLog.info("mount-armor-overlay-submit",
-				"[WynnIris MountArmor] submitting overlays profile={} context={} outer={} leggings={}",
-				profile, displayContext, textures.outerId, textures.leggingsId);
+				"[WynnIris MountArmor] submitting overlays profile={} context={} outerHead={} outerBody={} leggings={}",
+				profile, displayContext, textures.outerHeadId, textures.outerBodyId, textures.leggingsId);
 		}
 
-		if (textures.outerId != null) {
+		if (textures.outerHeadId != null) {
 			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerRenderType, OUTER_SIGNAL_COLOR);
+				textures.outerHeadRenderType, OUTER_SIGNAL_COLOR);
+		}
+		if (textures.outerBodyId != null) {
+			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.outerBodyRenderType, OUTER_SIGNAL_COLOR);
 		}
 		if (textures.leggingsId != null) {
 			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
@@ -158,12 +170,12 @@ public final class WynncraftMountArmorOverlay {
 
 		if (WynncraftDebugLog.shouldLog("mount-armor-overlay-item-submit")) {
 			WynncraftDebugLog.info("mount-armor-overlay-item-submit",
-				"[WynnIris MountArmor] submitting item-layer overlays context={} fakeQuads={}/{} outer={} leggings={}",
-				displayContext, fakeQuads.size(), quads.size(), textures.outerId, textures.leggingsId);
+				"[WynnIris MountArmor] submitting item-layer overlays context={} fakeQuads={}/{} outerBody={} leggings={}",
+				displayContext, fakeQuads.size(), quads.size(), textures.outerBodyId, textures.leggingsId);
 		}
 
-		if (textures.outerId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerRenderType, ArmorLayer.OUTER);
+		if (textures.outerBodyId != null) {
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBodyRenderType, ArmorLayer.OUTER);
 		}
 		if (textures.leggingsId != null) {
 			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType, ArmorLayer.LEGGINGS);
@@ -365,34 +377,42 @@ public final class WynncraftMountArmorOverlay {
 
 	private static OverlayTextures iris$buildTextures(Minecraft minecraft, PlayerModelType modelType, ItemStack head, ItemStack chest,
 													  ItemStack legs, ItemStack feet) {
-		NativeImage outer = new NativeImage(64, 64, true);
+		NativeImage outerHead = new NativeImage(64, 64, true);
+		NativeImage outerBody = new NativeImage(64, 64, true);
 		NativeImage leggings = new NativeImage(64, 64, true);
-		outer.fillRect(0, 0, 64, 64, 0);
+		outerHead.fillRect(0, 0, 64, 64, 0);
+		outerBody.fillRect(0, 0, 64, 64, 0);
 		leggings.fillRect(0, 0, 64, 64, 0);
 
-		boolean hasOuter = false;
+		boolean hasOuterHead = false;
+		boolean hasOuterBody = false;
 		boolean hasLeggings = false;
 		try {
-			hasOuter |= iris$compositeArmorPiece(minecraft, outer, head, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER, modelType);
-			hasOuter |= iris$compositeArmorPiece(minecraft, outer, chest, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER, modelType);
-			hasOuter |= iris$compositeArmorPiece(minecraft, outer, feet, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER, modelType);
+			hasOuterHead |= iris$compositeArmorPiece(minecraft, outerHead, head, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_HEAD, modelType);
+			hasOuterBody |= iris$compositeArmorPiece(minecraft, outerBody, chest, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_CHEST, modelType);
+			hasOuterBody |= iris$compositeArmorPiece(minecraft, outerBody, feet, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_FEET, modelType);
 			hasLeggings |= iris$compositeArmorPiece(minecraft, leggings, legs, EquipmentClientInfo.LayerType.HUMANOID_LEGGINGS, CopyTarget.LEGGINGS, modelType);
 
-			Identifier outerId = hasOuter ? iris$registerTexture(minecraft, "outer", outer) : null;
+			Identifier outerHeadId = hasOuterHead ? iris$registerTexture(minecraft, "outer_head", outerHead) : null;
+			Identifier outerBodyId = hasOuterBody ? iris$registerTexture(minecraft, "outer_body", outerBody) : null;
 			Identifier leggingsId = hasLeggings ? iris$registerTexture(minecraft, "leggings", leggings) : null;
-			RenderType outerRenderType = outerId == null ? null : RenderTypes.entityTranslucent(outerId);
+			RenderType outerHeadRenderType = outerHeadId == null ? null : RenderTypes.entityTranslucent(outerHeadId);
+			RenderType outerBodyRenderType = outerBodyId == null ? null : RenderTypes.entityTranslucent(outerBodyId);
 			RenderType leggingsRenderType = leggingsId == null ? null : RenderTypes.entityTranslucent(leggingsId);
 
 			if (WynncraftDebugLog.shouldLog("mount-armor-overlay-cache")) {
 				WynncraftDebugLog.info("mount-armor-overlay-cache",
-					"[WynnIris MountArmor] built overlay textures model={} outer={} leggings={} slots=[{},{},{},{}]",
-					modelType, outerId, leggingsId, iris$itemName(head), iris$itemName(chest), iris$itemName(legs), iris$itemName(feet));
+					"[WynnIris MountArmor] built overlay textures model={} outerHead={} outerBody={} leggings={} slots=[{},{},{},{}]",
+					modelType, outerHeadId, outerBodyId, leggingsId, iris$itemName(head), iris$itemName(chest), iris$itemName(legs), iris$itemName(feet));
 			}
 
-			return new OverlayTextures(outerId, leggingsId, outerRenderType, leggingsRenderType);
+			return new OverlayTextures(outerHeadId, outerBodyId, leggingsId, outerHeadRenderType, outerBodyRenderType, leggingsRenderType);
 		} finally {
-			if (!hasOuter) {
-				outer.close();
+			if (!hasOuterHead) {
+				outerHead.close();
+			}
+			if (!hasOuterBody) {
+				outerBody.close();
 			}
 			if (!hasLeggings) {
 				leggings.close();
@@ -407,7 +427,9 @@ public final class WynncraftMountArmorOverlay {
 		}
 
 		Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
-		Optional<ResourceKey<EquipmentAsset>> assetId = equippable == null ? Optional.empty() : equippable.assetId();
+		Optional<ResourceKey<EquipmentAsset>> fallbackAssetId = equippable == null ? Optional.empty() : equippable.assetId();
+		Optional<ResourceKey<EquipmentAsset>> customAssetId = iris$getWynncraftCustomArmorAsset(stack);
+		Optional<ResourceKey<EquipmentAsset>> assetId = customAssetId.or(() -> fallbackAssetId);
 		if (assetId.isEmpty()) {
 			iris$logMissingEquipment(stack, "no-equippable-asset");
 			return false;
@@ -416,9 +438,22 @@ public final class WynncraftMountArmorOverlay {
 		EquipmentAssetManager assets = ((EntityRenderDispatcherAccessor) minecraft.getEntityRenderDispatcher()).iris$getEquipmentAssets();
 		EquipmentClientInfo clientInfo = assets.get(assetId.get());
 		List<EquipmentClientInfo.Layer> layers = clientInfo.getLayers(layerType);
+		if (layers.isEmpty() && fallbackAssetId.isPresent() && !fallbackAssetId.equals(assetId)) {
+			assetId = fallbackAssetId;
+			clientInfo = assets.get(assetId.get());
+			layers = clientInfo.getLayers(layerType);
+		}
 		if (layers.isEmpty()) {
 			iris$logMissingEquipment(stack, "no-layers-" + layerType.getSerializedName());
 			return false;
+		}
+
+		if (WynncraftDebugLog.shouldLog("mount-armor-overlay-asset-choice-" + layerType.getSerializedName() + "-" + iris$itemName(stack))) {
+			WynncraftDebugLog.info("mount-armor-overlay-asset-choice-" + layerType.getSerializedName() + "-" + iris$itemName(stack),
+				"[WynnIris MountArmor] stack={} layerType={} itemModel={} customModelData={} customAsset={} fallbackAsset={} chosenAsset={} textureLayers={}",
+				iris$itemName(stack), layerType.getSerializedName(), stack.get(DataComponents.ITEM_MODEL),
+				iris$customModelDataSummary(stack), customAssetId.map(ResourceKey::identifier).orElse(null),
+				fallbackAssetId.map(ResourceKey::identifier).orElse(null), assetId.get().identifier(), layers.size());
 		}
 
 		int dyeColor = DyedItemColor.getOrDefault(stack, 0);
@@ -448,6 +483,80 @@ public final class WynncraftMountArmorOverlay {
 		return changed;
 	}
 
+	private static Optional<ResourceKey<EquipmentAsset>> iris$getWynncraftCustomArmorAsset(ItemStack stack) {
+		Optional<ResourceKey<EquipmentAsset>> itemModelAsset = iris$getWynncraftArmorAsset(stack.get(DataComponents.ITEM_MODEL));
+		if (itemModelAsset.isPresent()) {
+			return itemModelAsset;
+		}
+
+		CustomModelData customModelData = stack.get(DataComponents.CUSTOM_MODEL_DATA);
+		if (customModelData == null) {
+			return Optional.empty();
+		}
+
+		String stringModelData = customModelData.getString(0);
+		Optional<ResourceKey<EquipmentAsset>> stringAsset = iris$getWynncraftArmorAsset(stringModelData);
+		if (stringAsset.isPresent()) {
+			return stringAsset;
+		}
+
+		Float modelData = customModelData.getFloat(0);
+		if (modelData == null || modelData < 1.0F) {
+			return Optional.empty();
+		}
+
+		int assetIndex = (int) Math.floor(modelData);
+		if (assetIndex < 1 || assetIndex > WYNNCRAFT_ARMOR_ASSETS.length) {
+			return Optional.empty();
+		}
+
+		return Optional.of(EquipmentAssets.createId(WYNNCRAFT_ARMOR_ASSETS[assetIndex - 1]));
+	}
+
+	private static Optional<ResourceKey<EquipmentAsset>> iris$getWynncraftArmorAsset(Identifier modelId) {
+		if (modelId == null || !modelId.getPath().startsWith("item/wynn/armor/")) {
+			return Optional.empty();
+		}
+		return iris$getWynncraftArmorAsset(modelId.getPath());
+	}
+
+	private static Optional<ResourceKey<EquipmentAsset>> iris$getWynncraftArmorAsset(String modelPath) {
+		if (modelPath == null || modelPath.isBlank()) {
+			return Optional.empty();
+		}
+
+		String assetName = modelPath;
+		int slash = assetName.lastIndexOf('/');
+		if (slash >= 0) {
+			assetName = assetName.substring(slash + 1);
+		}
+
+		for (String suffix : new String[] { "_helmet", "_chestplate", "_leggings", "_boots" }) {
+			if (assetName.endsWith(suffix)) {
+				assetName = assetName.substring(0, assetName.length() - suffix.length());
+				break;
+			}
+		}
+
+		for (String knownAsset : WYNNCRAFT_ARMOR_ASSETS) {
+			if (knownAsset.equals(assetName)) {
+				return Optional.of(EquipmentAssets.createId(knownAsset));
+			}
+		}
+		return Optional.empty();
+	}
+
+	private static String iris$customModelDataSummary(ItemStack stack) {
+		CustomModelData customModelData = stack.get(DataComponents.CUSTOM_MODEL_DATA);
+		if (customModelData == null) {
+			return "none";
+		}
+		return "floats=" + customModelData.floats()
+			+ ", strings=" + customModelData.strings()
+			+ ", flags=" + customModelData.flags()
+			+ ", colors=" + customModelData.colors();
+	}
+
 	private static int iris$getColorForLayer(EquipmentClientInfo.Layer layer, int dyeColor) {
 		if (layer.dyeable().isPresent()) {
 			int undyed = layer.dyeable().get().colorWhenUndyed().orElse(0);
@@ -471,12 +580,20 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static void iris$copyArmorTexture(NativeImage source, NativeImage target, int layerColor, CopyTarget copyTarget, PlayerModelType modelType) {
-		if (copyTarget == CopyTarget.OUTER) {
+		if (copyTarget == CopyTarget.OUTER_HEAD) {
 			iris$copyFacesOffset(source, target, layerColor, SOURCE_HEAD, TARGET_HEAD, 32, 0);
+			return;
+		}
+
+		if (copyTarget == CopyTarget.OUTER_CHEST) {
 			iris$copyFacesOffset(source, target, layerColor, SOURCE_BODY, TARGET_BODY, 0, 16);
 			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_ARM, modelType == PlayerModelType.SLIM ? TARGET_RIGHT_ARM_ALEX : TARGET_RIGHT_ARM_STEVE, 0, 16);
 			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_ARM_FOR_LEFT_LIMB,
 				modelType == PlayerModelType.SLIM ? TARGET_LEFT_ARM_ALEX : TARGET_LEFT_ARM_STEVE, 16, 0, LEFT_ARM_MIRROR_X);
+			return;
+		}
+
+		if (copyTarget == CopyTarget.OUTER_FEET) {
 			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_LEG, TARGET_RIGHT_LEG, 0, 16);
 			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_LEG_FOR_LEFT_LIMB, TARGET_LEFT_LEG, -16, 0);
 			return;
@@ -570,8 +687,11 @@ public final class WynncraftMountArmorOverlay {
 
 	private static void iris$clearCache(Minecraft minecraft) {
 		for (OverlayTextures textures : CACHE.values()) {
-			if (textures.outerId != null) {
-				minecraft.getTextureManager().release(textures.outerId);
+			if (textures.outerHeadId != null) {
+				minecraft.getTextureManager().release(textures.outerHeadId);
+			}
+			if (textures.outerBodyId != null) {
+				minecraft.getTextureManager().release(textures.outerBodyId);
 			}
 			if (textures.leggingsId != null) {
 				minecraft.getTextureManager().release(textures.leggingsId);
@@ -659,7 +779,9 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private enum CopyTarget {
-		OUTER,
+		OUTER_HEAD,
+		OUTER_CHEST,
+		OUTER_FEET,
 		LEGGINGS
 	}
 
@@ -707,9 +829,10 @@ public final class WynncraftMountArmorOverlay {
 		}
 	}
 
-	private record OverlayTextures(Identifier outerId, Identifier leggingsId, RenderType outerRenderType, RenderType leggingsRenderType) {
+	private record OverlayTextures(Identifier outerHeadId, Identifier outerBodyId, Identifier leggingsId,
+								   RenderType outerHeadRenderType, RenderType outerBodyRenderType, RenderType leggingsRenderType) {
 		boolean isEmpty() {
-			return outerId == null && leggingsId == null;
+			return outerHeadId == null && outerBodyId == null && leggingsId == null;
 		}
 	}
 }
