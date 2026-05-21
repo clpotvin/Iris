@@ -1055,18 +1055,6 @@ public class EntityPatcher {
 		"const int IRISW_BODY = 1;",
 	};
 
-	private static final String IRISW_FAKE_PLAYER_FACE_NORMAL_FUNC = """
-		vec3 irisw_fakePlayerFaceNormal() {
-		    int face = (gl_VertexID % 24) / 4;
-		    if (face == 0) return vec3(0.0, 1.0, 0.0);
-		    if (face == 1) return vec3(0.0, -1.0, 0.0);
-		    if (face == 2) return vec3(-1.0, 0.0, 0.0);
-		    if (face == 3) return vec3(0.0, 0.0, -1.0);
-		    if (face == 4) return vec3(1.0, 0.0, 0.0);
-		    return vec3(0.0, 0.0, 1.0);
-		}
-		""";
-
 	// Player emote function — decodes metadata from Y-position, remaps UV, computes nearFade.
 	// Ported from Wynncraft RP player.glsl applyPlayer().
 	private static final String IRISW_APPLY_PLAYER_FUNC = """
@@ -1179,7 +1167,6 @@ public class EntityPatcher {
 				"irisw_uv0 = iris_UV0;",
 				"float irisw_nf = 1.0;",
 				"irisw_applyPlayer(irisw_pos, irisw_uv0, irisw_nf);",
-				"if (iris_wynncraft_armor_overlay != 0 && irisw_nf > 0.01) irisw_pos += irisw_fakePlayerFaceNormal() * (iris_wynncraft_armor_overlay == 2 ? 0.35 : 0.55);",
 				"iris_wynncraft_nearfade = irisw_nf;",
 				"iris_wynncraft_texcoord = irisw_uv0;",
 				hasMidTexCoord ? "iris_wynncraft_midtex = mc_midTexCoord.xy;" : "iris_wynncraft_midtex = vec2(0.0);",
@@ -1193,7 +1180,7 @@ public class EntityPatcher {
 			// Inject player emote function and data into vertex shader.
 			// Data goes to BEFORE_DECLARATIONS (struct, constants, arrays).
 			// Function goes to BEFORE_FUNCTIONS (needs data declared above it).
-			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_FAKE_PLAYER_FACE_NORMAL_FUNC, IRISW_APPLY_PLAYER_FUNC);
+			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_FUNCTIONS, IRISW_APPLY_PLAYER_FUNC);
 			tree.parseAndInjectNodes(t, ASTInjectionPoint.BEFORE_DECLARATIONS, IRISW_PLAYER_DATA);
 		} else if (parameters.type.glShaderType == ShaderType.TESSELATION_CONTROL) {
 			// replace read references to grab the color from the first vertex.

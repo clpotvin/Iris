@@ -2,6 +2,7 @@ package net.irisshaders.iris.pathways;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.irisshaders.iris.BuildConfig;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
@@ -9,15 +10,17 @@ import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.mixin.EntityRenderDispatcherAccessor;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.model.geom.builders.UVPair;
 import net.minecraft.client.model.object.skull.SkullModelBase;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.PlayerSkinRenderCache;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.renderer.blockentity.SkullBlockRenderer;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.EquipmentAssetManager;
 import net.minecraft.client.resources.model.EquipmentClientInfo;
 import net.minecraft.core.component.DataComponents;
@@ -34,6 +37,7 @@ import net.minecraft.world.item.equipment.EquipmentAsset;
 import net.minecraft.world.item.equipment.Equippable;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
+import org.joml.Vector3fc;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -53,6 +57,17 @@ public final class WynncraftMountArmorOverlay {
 	private static long textureSequence;
 	private static ArmorSnapshot lastKnownArmor;
 	private static final float FAKE_PLAYER_Y_THRESHOLD = 1024.0F;
+	private static final int FAKE_PLAYER_Y_POSITION_RADIX = 512;
+	private static final int FAKE_PLAYER_STEVE_ALEX_RADIX = 2;
+	private static final int FAKE_PLAYER_LIMB_FADE_RADIX = 3;
+	private static final int FAKE_PLAYER_LIMB_INDEX_RADIX = 6;
+	private static final int FAKE_PLAYER_LEFT_LEG = 4;
+	private static final int FAKE_PLAYER_RIGHT_LEG = 5;
+	private static final float SKIN_OVERLAY_TO_OUTER_ARMOR_EXPAND = 0.75F;
+	private static final float SKIN_OVERLAY_TO_OUTER_LEG_ARMOR_EXPAND = 0.65F;
+	private static final float SKIN_OVERLAY_TO_LEGGINGS_ARMOR_EXPAND = 0.25F;
+	private static final float SKIN_OVERLAY_TO_LEGGINGS_LEG_ARMOR_EXPAND = 0.15F;
+	private static final float HEAD_ARMOR_SCALE = 10.0F / 8.5F;
 	private static final float OUTER_SIGNAL_GREEN = 252.0F / 255.0F;
 	private static final float LEGGINGS_SIGNAL_GREEN = 250.0F / 255.0F;
 
@@ -110,12 +125,12 @@ public final class WynncraftMountArmorOverlay {
 		}
 
 		if (textures.outerId != null) {
-			SkullBlockRenderer.submitSkull(null, 180.0F, 0.0F, poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerRenderType, OUTER_SIGNAL_COLOR, null);
+			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.outerRenderType, OUTER_SIGNAL_COLOR);
 		}
 		if (textures.leggingsId != null) {
-			SkullBlockRenderer.submitSkull(null, 180.0F, 0.0F, poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.leggingsRenderType, LEGGINGS_SIGNAL_COLOR, null);
+			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.leggingsRenderType, LEGGINGS_SIGNAL_COLOR);
 		}
 	}
 
@@ -148,10 +163,10 @@ public final class WynncraftMountArmorOverlay {
 		}
 
 		if (textures.outerId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerRenderType, OUTER_SIGNAL_GREEN);
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerRenderType, ArmorLayer.OUTER);
 		}
 		if (textures.leggingsId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType, LEGGINGS_SIGNAL_GREEN);
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType, ArmorLayer.LEGGINGS);
 		}
 	}
 
@@ -202,12 +217,71 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static void iris$submitQuadOverlay(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, int packedOverlay,
-											   List<BakedQuad> quads, RenderType renderType, float signalGreen) {
+											   List<BakedQuad> quads, RenderType renderType, ArmorLayer armorLayer) {
 		submitNodeCollector.submitCustomGeometry(poseStack, renderType, (pose, vertexConsumer) -> {
+			int submitted = 0;
 			for (BakedQuad quad : quads) {
-				vertexConsumer.putBulkData(pose, quad, 0.0F, signalGreen, 0.0F, 1.0F, packedLight, packedOverlay);
+				int limbIndex = iris$decodeLimbIndex(pose, quad);
+				iris$emitExpandedQuad(pose, vertexConsumer, quad, armorLayer, limbIndex, packedLight, packedOverlay);
+				submitted++;
+			}
+
+			if (WynncraftDebugLog.shouldLog("mount-armor-overlay-third-geometry")) {
+				WynncraftDebugLog.info("mount-armor-overlay-third-geometry",
+					"[WynnIris MountArmor] submitted third-layer armor={} quads={}/{}",
+					armorLayer, submitted, quads.size());
 			}
 		});
+	}
+
+	private static void iris$submitExpandedSkull(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight,
+												 SkullModelBase modelBase, RenderType renderType, int color) {
+		poseStack.pushPose();
+		poseStack.translate(0.5F, 0.0F, 0.5F);
+		poseStack.scale(-HEAD_ARMOR_SCALE, -HEAD_ARMOR_SCALE, HEAD_ARMOR_SCALE);
+
+		SkullModelBase.State state = new SkullModelBase.State();
+		state.yRot = 180.0F;
+		state.animationPos = 0.0F;
+		submitNodeCollector.submitModel(modelBase, state, poseStack, renderType, packedLight,
+			OverlayTexture.NO_OVERLAY, color, null);
+		poseStack.popPose();
+	}
+
+	private static int iris$decodeLimbIndex(PoseStack.Pose pose, BakedQuad quad) {
+		Vector3f transformed = pose.pose().transformPosition(quad.position(0), new Vector3f());
+		if (transformed.y < 2.0F * FAKE_PLAYER_Y_POSITION_RADIX) {
+			return -1;
+		}
+
+		int metadata = (int) transformed.y - 2 * FAKE_PLAYER_Y_POSITION_RADIX;
+		return (metadata / FAKE_PLAYER_Y_POSITION_RADIX / FAKE_PLAYER_STEVE_ALEX_RADIX / FAKE_PLAYER_LIMB_FADE_RADIX) % FAKE_PLAYER_LIMB_INDEX_RADIX;
+	}
+
+	private static void iris$emitExpandedQuad(PoseStack.Pose pose, VertexConsumer vertexConsumer, BakedQuad quad,
+											  ArmorLayer armorLayer, int limbIndex, int packedLight, int packedOverlay) {
+		Matrix4f matrix = pose.pose();
+		Vector3fc normal = quad.direction().getUnitVec3f();
+		Vector3f transformed = new Vector3f();
+		int color = armorLayer.signalColor();
+		int light = LightTexture.lightCoordsWithEmission(packedLight, quad.lightEmission());
+		float expand = armorLayer.expandFor(limbIndex);
+
+		for (int vertex = 0; vertex < BakedQuad.VERTEX_COUNT; vertex++) {
+			Vector3fc position = quad.position(vertex);
+			matrix.transformPosition(
+				position.x() + normal.x() * expand,
+				position.y() + normal.y() * expand,
+				position.z() + normal.z() * expand,
+				transformed);
+			long packedUv = quad.packedUV(vertex);
+			vertexConsumer.addVertex(transformed.x(), transformed.y(), transformed.z())
+				.setColor(color)
+				.setUv(UVPair.unpackU(packedUv), UVPair.unpackV(packedUv))
+				.setOverlay(packedOverlay)
+				.setLight(light)
+				.setNormal(pose, normal.x(), normal.y(), normal.z());
+		}
 	}
 
 	private static OverlayTextures iris$getOrCreateTextures(Minecraft minecraft, LocalPlayer player) {
@@ -398,40 +472,28 @@ public final class WynncraftMountArmorOverlay {
 
 	private static void iris$copyArmorTexture(NativeImage source, NativeImage target, int layerColor, CopyTarget copyTarget, PlayerModelType modelType) {
 		if (copyTarget == CopyTarget.OUTER) {
-			iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_HEAD, TARGET_HEAD, 32, 0);
-			iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_BODY, TARGET_BODY, 0, 16);
-			iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_ARM, modelType == PlayerModelType.SLIM ? TARGET_RIGHT_ARM_ALEX : TARGET_RIGHT_ARM_STEVE, 0, 16);
-			iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_ARM_FOR_LEFT_LIMB,
+			iris$copyFacesOffset(source, target, layerColor, SOURCE_HEAD, TARGET_HEAD, 32, 0);
+			iris$copyFacesOffset(source, target, layerColor, SOURCE_BODY, TARGET_BODY, 0, 16);
+			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_ARM, modelType == PlayerModelType.SLIM ? TARGET_RIGHT_ARM_ALEX : TARGET_RIGHT_ARM_STEVE, 0, 16);
+			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_ARM_FOR_LEFT_LIMB,
 				modelType == PlayerModelType.SLIM ? TARGET_LEFT_ARM_ALEX : TARGET_LEFT_ARM_STEVE, 16, 0, LEFT_ARM_MIRROR_X);
-			iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_LEG, TARGET_RIGHT_LEG, 0, 16);
-			iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_LEG_FOR_LEFT_LIMB, TARGET_LEFT_LEG, -16, 0);
+			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_LEG, TARGET_RIGHT_LEG, 0, 16);
+			iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_LEG_FOR_LEFT_LIMB, TARGET_LEFT_LEG, -16, 0);
 			return;
 		}
 
-		iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_BODY, TARGET_BODY, 0, 16);
-		iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_LEG, TARGET_RIGHT_LEG, 0, 16);
-		iris$copyFacesWithOverlay(source, target, layerColor, SOURCE_RIGHT_LEG_FOR_LEFT_LIMB, TARGET_LEFT_LEG, -16, 0);
+		iris$copyFacesOffset(source, target, layerColor, SOURCE_BODY, TARGET_BODY, 0, 16);
+		iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_LEG, TARGET_RIGHT_LEG, 0, 16);
+		iris$copyFacesOffset(source, target, layerColor, SOURCE_RIGHT_LEG_FOR_LEFT_LIMB, TARGET_LEFT_LEG, -16, 0);
 	}
 
-	private static void iris$copyFaces(NativeImage source, NativeImage target, int layerColor, FaceRect[] sourceFaces, FaceRect[] targetFaces) {
-		iris$copyFaces(source, target, layerColor, sourceFaces, targetFaces, NO_FACE_MIRROR_X);
+	private static void iris$copyFacesOffset(NativeImage source, NativeImage target, int layerColor, FaceRect[] sourceFaces, FaceRect[] targetFaces,
+											 int overlayX, int overlayY) {
+		iris$copyFacesOffset(source, target, layerColor, sourceFaces, targetFaces, overlayX, overlayY, NO_FACE_MIRROR_X);
 	}
 
-	private static void iris$copyFaces(NativeImage source, NativeImage target, int layerColor, FaceRect[] sourceFaces, FaceRect[] targetFaces,
-									   boolean[] mirrorX) {
-		for (int i = 0; i < sourceFaces.length; i++) {
-			iris$copyScaledRect(source, target, sourceFaces[i], targetFaces[i], layerColor, mirrorX[i]);
-		}
-	}
-
-	private static void iris$copyFacesWithOverlay(NativeImage source, NativeImage target, int layerColor, FaceRect[] sourceFaces, FaceRect[] targetFaces,
-												  int overlayX, int overlayY) {
-		iris$copyFacesWithOverlay(source, target, layerColor, sourceFaces, targetFaces, overlayX, overlayY, NO_FACE_MIRROR_X);
-	}
-
-	private static void iris$copyFacesWithOverlay(NativeImage source, NativeImage target, int layerColor, FaceRect[] sourceFaces, FaceRect[] targetFaces,
-												  int overlayX, int overlayY, boolean[] mirrorX) {
-		iris$copyFaces(source, target, layerColor, sourceFaces, targetFaces, mirrorX);
+	private static void iris$copyFacesOffset(NativeImage source, NativeImage target, int layerColor, FaceRect[] sourceFaces, FaceRect[] targetFaces,
+											 int overlayX, int overlayY, boolean[] mirrorX) {
 		for (int i = 0; i < sourceFaces.length; i++) {
 			iris$copyScaledRect(source, target, sourceFaces[i], targetFaces[i].offset(overlayX, overlayY), layerColor, mirrorX[i]);
 		}
@@ -599,6 +661,29 @@ public final class WynncraftMountArmorOverlay {
 	private enum CopyTarget {
 		OUTER,
 		LEGGINGS
+	}
+
+	private enum ArmorLayer {
+		OUTER(OUTER_SIGNAL_COLOR, SKIN_OVERLAY_TO_OUTER_ARMOR_EXPAND, SKIN_OVERLAY_TO_OUTER_LEG_ARMOR_EXPAND),
+		LEGGINGS(LEGGINGS_SIGNAL_COLOR, SKIN_OVERLAY_TO_LEGGINGS_ARMOR_EXPAND, SKIN_OVERLAY_TO_LEGGINGS_LEG_ARMOR_EXPAND);
+
+		private final int signalColor;
+		private final float bodyExpand;
+		private final float legExpand;
+
+		ArmorLayer(int signalColor, float bodyExpand, float legExpand) {
+			this.signalColor = signalColor;
+			this.bodyExpand = bodyExpand;
+			this.legExpand = legExpand;
+		}
+
+		private int signalColor() {
+			return signalColor;
+		}
+
+		private float expandFor(int limbIndex) {
+			return limbIndex == FAKE_PLAYER_LEFT_LEG || limbIndex == FAKE_PLAYER_RIGHT_LEG ? legExpand : bodyExpand;
+		}
 	}
 
 	private record ArmorKey(int reloadCount, PlayerModelType modelType, int head, int chest, int legs, int feet) {
