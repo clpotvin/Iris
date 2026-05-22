@@ -51,8 +51,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public final class WynncraftMountArmorOverlay {
-	public static final int OUTER_SIGNAL_COLOR = 0xFF00FC00;
-	public static final int LEGGINGS_SIGNAL_COLOR = 0xFF00FA00;
+	public static final int OUTER_SIGNAL_COLOR = 0xFFFCFFFF;
+	public static final int LEGGINGS_SIGNAL_COLOR = 0xFFFAFFFF;
 
 	private static final Map<ArmorKey, OverlayTextures> CACHE = new HashMap<>();
 	private static int seenTextureReloadCount = -1;
@@ -505,7 +505,7 @@ public final class WynncraftMountArmorOverlay {
 				fallbackAssetId.map(ResourceKey::identifier).orElse(null), assetId.get().identifier(), layers.size());
 		}
 
-		int dyeColor = DyedItemColor.getOrDefault(stack, 0);
+		int dyeColor = customAssetId.isPresent() ? 0 : DyedItemColor.getOrDefault(stack, 0);
 		boolean changed = false;
 		for (EquipmentClientInfo.Layer layer : layers) {
 			int layerColor = iris$getColorForLayer(layer, dyeColor);

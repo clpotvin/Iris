@@ -94,11 +94,14 @@ public class EntityPatcher {
 	private static final String IRISW_TRANSLUCENCY_DETECT =
 		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
 
-	// WynnIris mount armor overlay signal: vertex Color with R=0, B=0, and G=252/255
-	// for the outer armor pass or G=250/255 for the leggings pass.
+	// WynnIris mount armor overlay signal. Current vertices use near-white colors with
+	// R=252/250 and G=B=255, so missed neutralization falls back to nearly white instead
+	// of bright green. The legacy green G=252/250 form is still recognized for safety.
 	private static final String IRISW_ARMOR_OVERLAY_DETECT =
-		"int iris_wynn_armorOverlayMode = (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 252) ? 1"
-			+ " : (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 250) ? 2 : 0;";
+		"int iris_wynn_armorOverlayMode = ((iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 252)"
+			+ " || (int(round(iris_Color.r * 255.0)) == 252 && int(round(iris_Color.g * 255.0)) == 255 && int(round(iris_Color.b * 255.0)) == 255)) ? 1"
+			+ " : ((iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 250)"
+			+ " || (int(round(iris_Color.r * 255.0)) == 250 && int(round(iris_Color.g * 255.0)) == 255 && int(round(iris_Color.b * 255.0)) == 255)) ? 2 : 0;";
 
 	// ====================================================================================
 	// WYNNCRAFT SKYBOX RENDERING (GLSL injection mirroring vanilla RP)
