@@ -141,30 +141,31 @@ public final class WynncraftMountArmorOverlay {
 			String profile = renderInfo == null || renderInfo.gameProfile() == null ? "none" : renderInfo.gameProfile().toString();
 			WynncraftDebugLog.info("mount-armor-overlay-submit",
 				"[WynnIris MountArmor] submitting overlays profile={} context={} outerHead={} outerBody={} outerBoots={} leggings={}",
-				profile, displayContext, textures.outerHeadId, textures.outerBodyId, textures.outerBootsId, textures.leggingsId);
+				profile, displayContext, iris$layerId(textures.outerHead), iris$layerId(textures.outerBody),
+				iris$layerId(textures.outerBoots), iris$layerId(textures.leggings));
 		}
 
-		if (textures.outerHeadId != null) {
-			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerHeadRenderType, textures.outerHeadColor, HEAD_ARMOR_SCALE);
+		if (textures.outerHead != null) {
+			iris$submitExpandedSkullLayer(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.outerHead, HEAD_ARMOR_SCALE);
 			iris$submitExpandedSkullGlint(poseStack, submitNodeCollector, packedLight, modelBase,
 				textures.outerHeadGlint, HEAD_ARMOR_SCALE);
 		}
-		if (textures.outerBodyId != null) {
-			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerBodyRenderType, textures.outerBodyColor, HEAD_ARMOR_SCALE);
+		if (textures.outerBody != null) {
+			iris$submitExpandedSkullLayer(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.outerBody, HEAD_ARMOR_SCALE);
 			iris$submitExpandedSkullGlint(poseStack, submitNodeCollector, packedLight, modelBase,
 				textures.outerBodyGlint, HEAD_ARMOR_SCALE);
 		}
-		if (textures.outerBootsId != null) {
-			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerBootsRenderType, textures.outerBootsColor, BOOTS_ARMOR_SCALE);
+		if (textures.outerBoots != null) {
+			iris$submitExpandedSkullLayer(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.outerBoots, BOOTS_ARMOR_SCALE);
 			iris$submitExpandedSkullGlint(poseStack, submitNodeCollector, packedLight, modelBase,
 				textures.outerBootsGlint, BOOTS_ARMOR_SCALE);
 		}
-		if (textures.leggingsId != null) {
-			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.leggingsRenderType, textures.leggingsColor, HEAD_ARMOR_SCALE);
+		if (textures.leggings != null) {
+			iris$submitExpandedSkullLayer(poseStack, submitNodeCollector, packedLight, modelBase,
+				textures.leggings, HEAD_ARMOR_SCALE);
 			iris$submitExpandedSkullGlint(poseStack, submitNodeCollector, packedLight, modelBase,
 				textures.leggingsGlint, HEAD_ARMOR_SCALE);
 		}
@@ -195,24 +196,25 @@ public final class WynncraftMountArmorOverlay {
 		if (WynncraftDebugLog.shouldLog("mount-armor-overlay-item-submit")) {
 			WynncraftDebugLog.info("mount-armor-overlay-item-submit",
 				"[WynnIris MountArmor] submitting item-layer overlays context={} fakeQuads={}/{} outerBody={} outerBoots={} leggings={}",
-				displayContext, fakeQuads.size(), quads.size(), textures.outerBodyId, textures.outerBootsId, textures.leggingsId);
+				displayContext, fakeQuads.size(), quads.size(), iris$layerId(textures.outerBody),
+				iris$layerId(textures.outerBoots), iris$layerId(textures.leggings));
 		}
 
-		if (textures.outerBodyId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBodyRenderType,
-				ArmorLayer.OUTER, textures.outerBodyColor, player.getSkin().model());
+		if (textures.outerBody != null) {
+			iris$submitQuadOverlayLayer(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads,
+				textures.outerBody, ArmorLayer.OUTER, player.getSkin().model());
 			iris$submitQuadGlintOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads,
 				textures.outerBodyGlint, ArmorLayer.OUTER, player.getSkin().model());
 		}
-		if (textures.outerBootsId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBootsRenderType,
-				ArmorLayer.BOOTS, textures.outerBootsColor, player.getSkin().model());
+		if (textures.outerBoots != null) {
+			iris$submitQuadOverlayLayer(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads,
+				textures.outerBoots, ArmorLayer.BOOTS, player.getSkin().model());
 			iris$submitQuadGlintOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads,
 				textures.outerBootsGlint, ArmorLayer.BOOTS, player.getSkin().model());
 		}
-		if (textures.leggingsId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType,
-				ArmorLayer.LEGGINGS, textures.leggingsColor, player.getSkin().model());
+		if (textures.leggings != null) {
+			iris$submitQuadOverlayLayer(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads,
+				textures.leggings, ArmorLayer.LEGGINGS, player.getSkin().model());
 			iris$submitQuadGlintOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads,
 				textures.leggingsGlint, ArmorLayer.LEGGINGS, player.getSkin().model());
 		}
@@ -295,6 +297,18 @@ public final class WynncraftMountArmorOverlay {
 			armorLayer, WHITE_COLOR, modelType);
 	}
 
+	private static void iris$submitQuadOverlayLayer(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight,
+													int packedOverlay, List<BakedQuad> quads, ArmorTextureLayer layer,
+													ArmorLayer armorLayer, PlayerModelType modelType) {
+		if (layer == null) {
+			return;
+		}
+
+		iris$updateArmorTextureLayer(layer);
+		iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, quads, layer.renderType,
+			armorLayer, layer.color, modelType);
+	}
+
 	private static void iris$submitExpandedSkull(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight,
 												 SkullModelBase modelBase, RenderType renderType, int color, float scale) {
 		poseStack.pushPose();
@@ -307,6 +321,16 @@ public final class WynncraftMountArmorOverlay {
 		submitNodeCollector.submitModel(modelBase, state, poseStack, renderType, packedLight,
 			OverlayTexture.NO_OVERLAY, color, null);
 		poseStack.popPose();
+	}
+
+	private static void iris$submitExpandedSkullLayer(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight,
+													  SkullModelBase modelBase, ArmorTextureLayer layer, float scale) {
+		if (layer == null) {
+			return;
+		}
+
+		iris$updateArmorTextureLayer(layer);
+		iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase, layer.renderType, layer.color, scale);
 	}
 
 	private static void iris$submitExpandedSkullGlint(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight,
@@ -501,18 +525,10 @@ public final class WynncraftMountArmorOverlay {
 				iris$applyStaticTintEffect(leggings, legsEffectId);
 			}
 
-			Identifier outerHeadId = hasOuterHead ? iris$registerTexture(minecraft, "outer_head", outerHead) : null;
-			Identifier outerBodyId = hasOuterBody ? iris$registerTexture(minecraft, "outer_body", outerBody) : null;
-			Identifier outerBootsId = hasOuterBoots ? iris$registerTexture(minecraft, "outer_boots", outerBoots) : null;
-			Identifier leggingsId = hasLeggings ? iris$registerTexture(minecraft, "leggings", leggings) : null;
-			RenderType outerHeadRenderType = outerHeadId == null ? null : RenderTypes.entityTranslucent(outerHeadId);
-			RenderType outerBodyRenderType = outerBodyId == null ? null : RenderTypes.entityTranslucent(outerBodyId);
-			RenderType outerBootsRenderType = outerBootsId == null ? null : RenderTypes.entityTranslucent(outerBootsId);
-			RenderType leggingsRenderType = leggingsId == null ? null : RenderTypes.entityTranslucent(leggingsId);
-			int outerHeadColor = iris$overlaySignalColor(head, OUTER_OVERLAY_ALPHA);
-			int outerBodyColor = iris$overlaySignalColor(chest, OUTER_OVERLAY_ALPHA);
-			int outerBootsColor = iris$overlaySignalColor(feet, OUTER_OVERLAY_ALPHA);
-			int leggingsColor = iris$overlaySignalColor(legs, LEGGINGS_OVERLAY_ALPHA);
+			ArmorTextureLayer outerHeadLayer = hasOuterHead ? iris$registerArmorTexture(minecraft, "outer_head", outerHead, headEffectId, OUTER_OVERLAY_ALPHA) : null;
+			ArmorTextureLayer outerBodyLayer = hasOuterBody ? iris$registerArmorTexture(minecraft, "outer_body", outerBody, chestEffectId, OUTER_OVERLAY_ALPHA) : null;
+			ArmorTextureLayer outerBootsLayer = hasOuterBoots ? iris$registerArmorTexture(minecraft, "outer_boots", outerBoots, feetEffectId, OUTER_OVERLAY_ALPHA) : null;
+			ArmorTextureLayer leggingsLayer = hasLeggings ? iris$registerArmorTexture(minecraft, "leggings", leggings, legsEffectId, LEGGINGS_OVERLAY_ALPHA) : null;
 			DynamicGlintLayer outerHeadGlint = hasOuterHead ? iris$registerGlintTexture(minecraft, "outer_head", outerHead, headEffectId) : null;
 			DynamicGlintLayer outerBodyGlint = hasOuterBody ? iris$registerGlintTexture(minecraft, "outer_body", outerBody, chestEffectId) : null;
 			DynamicGlintLayer outerBootsGlint = hasOuterBoots ? iris$registerGlintTexture(minecraft, "outer_boots", outerBoots, feetEffectId) : null;
@@ -520,20 +536,20 @@ public final class WynncraftMountArmorOverlay {
 
 			if (WynncraftDebugLog.shouldLog("mount-armor-overlay-cache")) {
 				WynncraftDebugLog.info("mount-armor-overlay-cache",
-					"[WynnIris MountArmor] built overlay textures model={} outerHead={} outerBody={} outerBoots={} leggings={} effects=[{},{},{},{}] baked=[{},{},{},{}] glint=[{},{},{},{}] colors=[{},{},{},{}] slots=[{},{},{},{}]",
-					modelType, outerHeadId, outerBodyId, outerBootsId, leggingsId,
+					"[WynnIris MountArmor] built overlay textures model={} outerHead={} outerBody={} outerBoots={} leggings={} effects=[{},{},{},{}] baked=[{},{},{},{}] dynamicBase=[{},{},{},{}] glint=[{},{},{},{}] colors=[{},{},{},{}] slots=[{},{},{},{}]",
+					modelType, iris$layerId(outerHeadLayer), iris$layerId(outerBodyLayer), iris$layerId(outerBootsLayer), iris$layerId(leggingsLayer),
 					headEffectId, chestEffectId, feetEffectId, legsEffectId,
 					iris$isStaticTintEffect(headEffectId), iris$isStaticTintEffect(chestEffectId),
 					iris$isStaticTintEffect(feetEffectId), iris$isStaticTintEffect(legsEffectId),
+					outerHeadLayer != null && outerHeadLayer.source != null, outerBodyLayer != null && outerBodyLayer.source != null,
+					outerBootsLayer != null && outerBootsLayer.source != null, leggingsLayer != null && leggingsLayer.source != null,
 					outerHeadGlint != null, outerBodyGlint != null, outerBootsGlint != null, leggingsGlint != null,
-					String.format("0x%08X", outerHeadColor), String.format("0x%08X", outerBodyColor),
-					String.format("0x%08X", outerBootsColor), String.format("0x%08X", leggingsColor),
+					iris$layerColor(outerHeadLayer), iris$layerColor(outerBodyLayer),
+					iris$layerColor(outerBootsLayer), iris$layerColor(leggingsLayer),
 					iris$itemName(head), iris$itemName(chest), iris$itemName(legs), iris$itemName(feet));
 			}
 
-			return new OverlayTextures(outerHeadId, outerBodyId, outerBootsId, leggingsId,
-				outerHeadRenderType, outerBodyRenderType, outerBootsRenderType, leggingsRenderType,
-				outerHeadColor, outerBodyColor, outerBootsColor, leggingsColor,
+			return new OverlayTextures(outerHeadLayer, outerBodyLayer, outerBootsLayer, leggingsLayer,
 				outerHeadGlint, outerBodyGlint, outerBootsGlint, leggingsGlint);
 		} finally {
 			if (!hasOuterHead) {
@@ -677,7 +693,7 @@ public final class WynncraftMountArmorOverlay {
 		return Optional.empty();
 	}
 
-	private static int iris$overlaySignalColor(ItemStack stack, int overlayAlpha) {
+	private static int iris$overlaySignalColor(int overlayAlpha) {
 		return ((overlayAlpha & 0xFF) << 24) | DEFAULT_OVERLAY_RGB;
 	}
 
@@ -768,9 +784,22 @@ public final class WynncraftMountArmorOverlay {
 		return effectId >= 15 && effectId <= 24;
 	}
 
+	private static boolean iris$isDynamicBaseEffect(int effectId) {
+		return effectId == 2 || effectId == 3 || effectId == 4 || effectId == 6
+			|| effectId == 7 || effectId == 8 || effectId == 10 || effectId == 13;
+	}
+
 	private static boolean iris$hasAnimatedGlintEffect(int effectId) {
-		return effectId >= 1 && effectId <= 31 && !iris$isStaticTintEffect(effectId)
-			&& effectId != 2 && effectId != 7 && effectId != 8;
+		return effectId >= 1 && effectId <= 31 && !iris$isStaticTintEffect(effectId) && !iris$isDynamicBaseEffect(effectId);
+	}
+
+	private static ArmorTextureLayer iris$registerArmorTexture(Minecraft minecraft, String layer, NativeImage image, int effectId, int overlayAlpha) {
+		NativeImage sourceCopy = iris$isDynamicBaseEffect(effectId) ? iris$copyImage(image) : null;
+		Identifier id = Identifier.fromNamespaceAndPath("iris", "dynamic/wynn_mount_armor/" + layer + "_" + textureSequence++);
+		DynamicTexture texture = new DynamicTexture(() -> "wynn_mount_armor_" + layer, image);
+		minecraft.getTextureManager().register(id, texture);
+		texture.upload();
+		return new ArmorTextureLayer(id, RenderTypes.entityTranslucent(id), image, texture, sourceCopy, effectId, iris$overlaySignalColor(overlayAlpha));
 	}
 
 	private static DynamicGlintLayer iris$registerGlintTexture(Minecraft minecraft, String layer, NativeImage source, int effectId) {
@@ -798,6 +827,21 @@ public final class WynncraftMountArmorOverlay {
 		return copy;
 	}
 
+	private static void iris$updateArmorTextureLayer(ArmorTextureLayer layer) {
+		if (layer.source == null) {
+			return;
+		}
+
+		int frame = SystemTimeUniforms.COUNTER.getAsInt();
+		if (layer.lastFrame == frame) {
+			return;
+		}
+
+		layer.lastFrame = frame;
+		iris$renderBaseEffectTexture(layer.source, layer.image, layer.effectId, iris$effectTime());
+		layer.texture.upload();
+	}
+
 	private static void iris$updateGlintLayer(DynamicGlintLayer layer) {
 		int frame = SystemTimeUniforms.COUNTER.getAsInt();
 		if (layer.lastFrame == frame) {
@@ -817,6 +861,39 @@ public final class WynncraftMountArmorOverlay {
 			return (ticks + partial) / 80.0F;
 		}
 		return SystemTimeUniforms.TIMER.getFrameTimeCounter() * 3.75F;
+	}
+
+	private static void iris$renderBaseEffectTexture(NativeImage source, NativeImage target, int effectId, float time) {
+		int width = source.getWidth();
+		int height = source.getHeight();
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				int sourcePixel = source.getPixel(x, y);
+				int alpha = (sourcePixel >>> 24) & 0xFF;
+				target.setPixel(x, y, alpha == 0 ? 0 : iris$baseEffectPixel(source, effectId, x, y, width, height, sourcePixel, time));
+			}
+		}
+	}
+
+	private static int iris$baseEffectPixel(NativeImage source, int effectId, int x, int y, int width, int height, int sourcePixel, float time) {
+		float uvX = ((float) x + 0.5F) / width;
+		float uvY = ((float) y + 0.5F) / height;
+		float eX = uvX - 1.0F;
+		float eY = uvY - 1.0F;
+		float rX = (eX - 0.5F) * 0.25F + 8.0F;
+		float rY = (eY - 0.5F) * 0.25F + 8.0F;
+
+		return switch (effectId) {
+			case 2 -> iris$withAlpha(sourcePixel, iris$toByte(((sourcePixel >>> 24) & 0xFF) / 255.0F * 0.5F));
+			case 3 -> iris$rainbowBasePixel(sourcePixel, rX, rY, time);
+			case 4 -> iris$glitchBasePixel(source, sourcePixel, x, y, time);
+			case 6 -> iris$aberrationBasePixel(source, sourcePixel, x, y, time);
+			case 7 -> iris$grayscalePixel(sourcePixel);
+			case 8 -> iris$invertPixel(sourcePixel);
+			case 10 -> iris$auroraBasePixel(sourcePixel, rX, rY, time);
+			case 13 -> iris$distortBasePixel(source, sourcePixel, x, y, eX, eY, time);
+			default -> sourcePixel;
+		};
 	}
 
 	private static void iris$renderGlintTexture(NativeImage source, NativeImage target, int effectId, float time) {
@@ -849,6 +926,62 @@ public final class WynncraftMountArmorOverlay {
 			case 14 -> iris$chromeOverlayPixel(u, v, sourceAlpha, time);
 			default -> iris$shinyOverlayPixel(u, v, sourceAlpha, luma, time, iris$shinyEffectRgb(effectId));
 		};
+	}
+
+	private static int iris$rainbowBasePixel(int sourcePixel, float rX, float rY, float time) {
+		int grayscale = iris$grayscalePixel(sourcePixel);
+		int rainbow = iris$hsvToRgb(iris$fract(0.05F * (rX + rY) - time), 0.7F, 1.0F);
+		return iris$multiplyRgb(grayscale, rainbow);
+	}
+
+	private static int iris$glitchBasePixel(NativeImage source, int sourcePixel, int x, int y, float time) {
+		float pulse = (float) Math.floor(time * 10.0F);
+		if (iris$random(pulse) >= 0.5F) {
+			return sourcePixel;
+		}
+
+		int band = Math.max(0, y / 4);
+		int dx = Math.round((iris$random(band * 17.0F + pulse) - 0.5F) * 6.0F);
+		int dy = Math.round((iris$random(band * 31.0F + pulse + 13.0F) - 0.5F) * 2.0F);
+		int shifted = iris$sampleClamped(source, x + dx, y + dy);
+		int a = (sourcePixel >>> 24) & 0xFF;
+		int r = ((shifted >>> 16) & 0xFF) / 4;
+		int g = Math.max((shifted >>> 8) & 0xFF, Math.min(255, ((sourcePixel >>> 8) & 0xFF) + 70));
+		int b = (shifted & 0xFF) / 4;
+		return (a << 24) | (r << 16) | (g << 8) | b;
+	}
+
+	private static int iris$aberrationBasePixel(NativeImage source, int sourcePixel, int x, int y, float time) {
+		int red = iris$sampleClamped(source, x + Math.round((float) Math.sin(time * 500.0F) * 2.0F), y);
+		int green = iris$sampleClamped(source, x + Math.round((float) Math.cos(time * 500.0F) * 2.0F), y);
+		int a = (sourcePixel >>> 24) & 0xFF;
+		return (a << 24) | (red & 0x00FF0000) | (green & 0x0000FF00) | (sourcePixel & 0x000000FF);
+	}
+
+	private static int iris$auroraBasePixel(int sourcePixel, float rX, float rY, float time) {
+		float radius = (float) Math.sqrt(rX * rX + rY * rY);
+		float paX = (float) Math.sin(rX * radius);
+		float paY = (float) Math.sin(rY * radius);
+		float angle = -(float) Math.cos(radius * 5.0F + time * 10.0F);
+		float rotatedX = paX * (float) Math.cos(angle) - paY * (float) Math.sin(angle);
+		float rotatedY = paX * (float) Math.sin(angle) + paY * (float) Math.cos(angle);
+		float expX = (float) Math.exp(-rotatedX * rotatedX);
+		float expY = (float) Math.exp(-rotatedY * rotatedY);
+		float distA = (float) Math.sqrt(rotatedX * rotatedX + rotatedY * rotatedY);
+		float distB = (float) Math.sqrt(expX * expX + expY * expY);
+		float d = iris$smoothen(distA, distB, 0.9F);
+		int aurora = (iris$toByte((float) Math.sin(d * 4.0F) * 0.5F + 0.5F) << 16)
+			| (iris$toByte((float) Math.sin(d * 3.0F) * 0.5F + 0.5F) << 8)
+			| iris$toByte((float) Math.sin(d * 2.0F) * 0.5F + 0.5F);
+		return iris$blendRgb(sourcePixel, aurora, 0.5F);
+	}
+
+	private static int iris$distortBasePixel(NativeImage source, int sourcePixel, int x, int y, float eX, float eY, float time) {
+		float beat = 0.3F + 0.7F * Math.abs((float) Math.sin(time * 0.7F));
+		int dx = Math.round((float) Math.sin(eY * 40.0F + time * 8.0F) * 1.75F * beat);
+		int dy = Math.round((float) Math.sin(eX * 40.0F + time * 10.0F) * 1.75F * beat);
+		int shifted = iris$sampleClamped(source, x + dx, y + dy);
+		return ((shifted >>> 24) & 0xFF) == 0 ? sourcePixel : shifted;
 	}
 
 	private static int iris$shinyOverlayPixel(float u, float v, float sourceAlpha, float luma, float time, int rgb) {
@@ -947,6 +1080,47 @@ public final class WynncraftMountArmorOverlay {
 		float g = ((argb >>> 8) & 0xFF) / 255.0F;
 		float b = (argb & 0xFF) / 255.0F;
 		return 0.2126F * r + 0.7152F * g + 0.0722F * b;
+	}
+
+	private static int iris$grayscalePixel(int argb) {
+		int gray = iris$toByte(iris$luma(argb));
+		return (argb & 0xFF000000) | (gray << 16) | (gray << 8) | gray;
+	}
+
+	private static int iris$invertPixel(int argb) {
+		int r = 255 - ((argb >>> 16) & 0xFF);
+		int g = 255 - ((argb >>> 8) & 0xFF);
+		int b = 255 - (argb & 0xFF);
+		return (argb & 0xFF000000) | (r << 16) | (g << 8) | b;
+	}
+
+	private static int iris$multiplyRgb(int argb, int rgb) {
+		int r = ((argb >>> 16) & 0xFF) * ((rgb >>> 16) & 0xFF) / 255;
+		int g = ((argb >>> 8) & 0xFF) * ((rgb >>> 8) & 0xFF) / 255;
+		int b = (argb & 0xFF) * (rgb & 0xFF) / 255;
+		return (argb & 0xFF000000) | (r << 16) | (g << 8) | b;
+	}
+
+	private static int iris$blendRgb(int argb, int rgb, float amount) {
+		int r = iris$toByte(iris$mix(((argb >>> 16) & 0xFF) / 255.0F, ((rgb >>> 16) & 0xFF) / 255.0F, amount));
+		int g = iris$toByte(iris$mix(((argb >>> 8) & 0xFF) / 255.0F, ((rgb >>> 8) & 0xFF) / 255.0F, amount));
+		int b = iris$toByte(iris$mix((argb & 0xFF) / 255.0F, (rgb & 0xFF) / 255.0F, amount));
+		return (argb & 0xFF000000) | (r << 16) | (g << 8) | b;
+	}
+
+	private static int iris$withAlpha(int argb, int alpha) {
+		return ((alpha & 0xFF) << 24) | (argb & 0x00FFFFFF);
+	}
+
+	private static int iris$sampleClamped(NativeImage source, int x, int y) {
+		int clampedX = Math.max(0, Math.min(source.getWidth() - 1, x));
+		int clampedY = Math.max(0, Math.min(source.getHeight() - 1, y));
+		return source.getPixel(clampedX, clampedY);
+	}
+
+	private static float iris$smoothen(float distA, float distB, float amount) {
+		float blend = iris$clamp(0.5F + 0.5F * (distB - distA) / amount, 0.0F, 0.5F);
+		return iris$mix(distB, distA, blend) - amount * blend * (1.0F - blend);
 	}
 
 	private static int iris$rgba(int rgb, float alpha) {
@@ -1186,34 +1360,29 @@ public final class WynncraftMountArmorOverlay {
 		target.setPixel(x, y, (outA << 24) | (outR << 16) | (outG << 8) | outB);
 	}
 
-	private static Identifier iris$registerTexture(Minecraft minecraft, String layer, NativeImage image) {
-		Identifier id = Identifier.fromNamespaceAndPath("iris", "dynamic/wynn_mount_armor/" + layer + "_" + textureSequence++);
-		DynamicTexture texture = new DynamicTexture(() -> "wynn_mount_armor_" + layer, image);
-		minecraft.getTextureManager().register(id, texture);
-		texture.upload();
-		return id;
-	}
-
 	private static void iris$clearCache(Minecraft minecraft) {
 		for (OverlayTextures textures : CACHE.values()) {
-			if (textures.outerHeadId != null) {
-				minecraft.getTextureManager().release(textures.outerHeadId);
-			}
-			if (textures.outerBodyId != null) {
-				minecraft.getTextureManager().release(textures.outerBodyId);
-			}
-			if (textures.outerBootsId != null) {
-				minecraft.getTextureManager().release(textures.outerBootsId);
-			}
-			if (textures.leggingsId != null) {
-				minecraft.getTextureManager().release(textures.leggingsId);
-			}
+			iris$releaseArmorTexture(minecraft, textures.outerHead);
+			iris$releaseArmorTexture(minecraft, textures.outerBody);
+			iris$releaseArmorTexture(minecraft, textures.outerBoots);
+			iris$releaseArmorTexture(minecraft, textures.leggings);
 			iris$releaseGlintTexture(minecraft, textures.outerHeadGlint);
 			iris$releaseGlintTexture(minecraft, textures.outerBodyGlint);
 			iris$releaseGlintTexture(minecraft, textures.outerBootsGlint);
 			iris$releaseGlintTexture(minecraft, textures.leggingsGlint);
 		}
 		CACHE.clear();
+	}
+
+	private static void iris$releaseArmorTexture(Minecraft minecraft, ArmorTextureLayer layer) {
+		if (layer == null) {
+			return;
+		}
+
+		minecraft.getTextureManager().release(layer.id);
+		if (layer.source != null) {
+			layer.source.close();
+		}
 	}
 
 	private static void iris$releaseGlintTexture(Minecraft minecraft, DynamicGlintLayer layer) {
@@ -1223,6 +1392,14 @@ public final class WynncraftMountArmorOverlay {
 
 		minecraft.getTextureManager().release(layer.id);
 		layer.source.close();
+	}
+
+	private static Identifier iris$layerId(ArmorTextureLayer layer) {
+		return layer == null ? null : layer.id;
+	}
+
+	private static String iris$layerColor(ArmorTextureLayer layer) {
+		return layer == null ? "none" : String.format("0x%08X", layer.color);
 	}
 
 	private static void iris$logMissingEquipment(ItemStack stack, String reason) {
@@ -1353,6 +1530,28 @@ public final class WynncraftMountArmorOverlay {
 		}
 	}
 
+	private static final class ArmorTextureLayer {
+		private final Identifier id;
+		private final RenderType renderType;
+		private final NativeImage image;
+		private final DynamicTexture texture;
+		private final NativeImage source;
+		private final int effectId;
+		private final int color;
+		private int lastFrame = -1;
+
+		private ArmorTextureLayer(Identifier id, RenderType renderType, NativeImage image, DynamicTexture texture,
+								  NativeImage source, int effectId, int color) {
+			this.id = id;
+			this.renderType = renderType;
+			this.image = image;
+			this.texture = texture;
+			this.source = source;
+			this.effectId = effectId;
+			this.color = color;
+		}
+	}
+
 	private static final class DynamicGlintLayer {
 		private final Identifier id;
 		private final RenderType renderType;
@@ -1394,13 +1593,11 @@ public final class WynncraftMountArmorOverlay {
 		}
 	}
 
-	private record OverlayTextures(Identifier outerHeadId, Identifier outerBodyId, Identifier outerBootsId, Identifier leggingsId,
-								   RenderType outerHeadRenderType, RenderType outerBodyRenderType, RenderType outerBootsRenderType,
-								   RenderType leggingsRenderType, int outerHeadColor, int outerBodyColor, int outerBootsColor,
-								   int leggingsColor, DynamicGlintLayer outerHeadGlint, DynamicGlintLayer outerBodyGlint,
+	private record OverlayTextures(ArmorTextureLayer outerHead, ArmorTextureLayer outerBody, ArmorTextureLayer outerBoots,
+								   ArmorTextureLayer leggings, DynamicGlintLayer outerHeadGlint, DynamicGlintLayer outerBodyGlint,
 								   DynamicGlintLayer outerBootsGlint, DynamicGlintLayer leggingsGlint) {
 		boolean isEmpty() {
-			return outerHeadId == null && outerBodyId == null && outerBootsId == null && leggingsId == null;
+			return outerHead == null && outerBody == null && outerBoots == null && leggings == null;
 		}
 	}
 }
