@@ -54,6 +54,7 @@ run/
 # Local assets / resource packs
 /assets/
 Wynncraft_RP_*/
+Wynncraft_RP_*.zip
 .gradle-local/
 /.agents
 CLAUDE.md
