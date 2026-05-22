@@ -627,7 +627,7 @@ public final class WynncraftMountArmorOverlay {
 				fallbackAssetId.map(ResourceKey::identifier).orElse(null), assetId.get().identifier(), layers.size());
 		}
 
-		int dyeColor = customAssetId.isPresent() ? 0 : DyedItemColor.getOrDefault(stack, 0);
+		int dyeColor = customAssetId.isPresent() ? 0 : iris$getArmorLayerDyeColor(stack);
 		boolean changed = false;
 		for (EquipmentClientInfo.Layer layer : layers) {
 			int layerColor = iris$getColorForLayer(layer, dyeColor);
@@ -767,7 +767,7 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	public static void cacheRenderedArmorSignal(ItemStack stack, int color) {
-		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL || stack == null || stack.isEmpty() || iris$getWynncraftCustomArmorAsset(stack).isEmpty()) {
+		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL || !iris$canReadWynncraftArmorSignal(stack)) {
 			return;
 		}
 
@@ -793,7 +793,7 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static int iris$getWynncraftEffectSignalRgb(ItemStack stack) {
-		if (stack == null || stack.isEmpty() || iris$getWynncraftCustomArmorAsset(stack).isEmpty()) {
+		if (!iris$canReadWynncraftArmorSignal(stack)) {
 			return DEFAULT_OVERLAY_RGB;
 		}
 
@@ -828,6 +828,22 @@ public final class WynncraftMountArmorOverlay {
 
 		iris$logEffectSignal(stack, "none", dyeColor, DEFAULT_OVERLAY_RGB);
 		return DEFAULT_OVERLAY_RGB;
+	}
+
+	private static boolean iris$canReadWynncraftArmorSignal(ItemStack stack) {
+		if (stack == null || stack.isEmpty()) {
+			return false;
+		}
+		if (iris$getWynncraftCustomArmorAsset(stack).isPresent()) {
+			return true;
+		}
+		Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
+		return equippable != null && equippable.assetId().isPresent();
+	}
+
+	private static int iris$getArmorLayerDyeColor(ItemStack stack) {
+		int dyeColor = DyedItemColor.getOrDefault(stack, 0);
+		return iris$decodeWynncraftEffectSignalRgb(dyeColor) == DEFAULT_OVERLAY_RGB ? dyeColor : WHITE_COLOR;
 	}
 
 	private static int iris$decodeWynncraftEffectSignalRgb(int color) {
