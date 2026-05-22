@@ -51,10 +51,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 public final class WynncraftMountArmorOverlay {
-	public static final int OUTER_SIGNAL_COLOR = 0xFFFCFFFF;
-	public static final int LEGGINGS_SIGNAL_COLOR = 0xFFFAFFFF;
+	public static final int OUTER_SIGNAL_COLOR = 0xFCFFFFFF;
+	public static final int LEGGINGS_SIGNAL_COLOR = 0xFAFFFFFF;
 
 	private static final Map<ArmorKey, OverlayTextures> CACHE = new HashMap<>();
+	private static final Map<Integer, Integer> RENDERED_ARMOR_SIGNAL_CACHE = new HashMap<>();
+	private static final int MAX_RENDERED_ARMOR_SIGNAL_CACHE = 128;
 	private static int seenTextureReloadCount = -1;
 	private static long textureSequence;
 	private static ArmorSnapshot lastKnownArmor;
@@ -75,8 +77,11 @@ public final class WynncraftMountArmorOverlay {
 	private static final float SLIM_ARM_ARMOR_WIDTH_EXPAND = 0.5F;
 	private static final float HEAD_ARMOR_SCALE = 10.0F / 8.5F;
 	private static final float BOOTS_ARMOR_SCALE = 11.5F / 8.5F;
-	private static final float OUTER_SIGNAL_GREEN = 252.0F / 255.0F;
-	private static final float LEGGINGS_SIGNAL_GREEN = 250.0F / 255.0F;
+	private static final int OUTER_OVERLAY_ALPHA = 252;
+	private static final int LEGGINGS_OVERLAY_ALPHA = 250;
+	private static final int EFFECT_OVERLAY_ALPHA_BASE = 160;
+	private static final int DEFAULT_OVERLAY_RGB = 0x00FFFFFF;
+	private static final int MAX_WYNNCRAFT_EFFECT_ID = 32;
 	private static final String[] WYNNCRAFT_ARMOR_ASSETS = {
 		"hidden", "leather", "tan", "chainmail", "copper", "iron", "gold", "diamond",
 		"titanium", "netherite", "pale_leather", "pale_chainmail", "pale_copper", "pale_iron",
@@ -95,6 +100,7 @@ public final class WynncraftMountArmorOverlay {
 		LocalPlayer player = minecraft.player;
 		if (minecraft.level == null || player == null) {
 			lastKnownArmor = null;
+			RENDERED_ARMOR_SIGNAL_CACHE.clear();
 			iris$clearCache(minecraft);
 			return;
 		}
@@ -139,19 +145,19 @@ public final class WynncraftMountArmorOverlay {
 
 		if (textures.outerHeadId != null) {
 			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerHeadRenderType, OUTER_SIGNAL_COLOR, HEAD_ARMOR_SCALE);
+				textures.outerHeadRenderType, textures.outerHeadColor, HEAD_ARMOR_SCALE);
 		}
 		if (textures.outerBodyId != null) {
 			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerBodyRenderType, OUTER_SIGNAL_COLOR, HEAD_ARMOR_SCALE);
+				textures.outerBodyRenderType, textures.outerBodyColor, HEAD_ARMOR_SCALE);
 		}
 		if (textures.outerBootsId != null) {
 			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.outerBootsRenderType, OUTER_SIGNAL_COLOR, BOOTS_ARMOR_SCALE);
+				textures.outerBootsRenderType, textures.outerBootsColor, BOOTS_ARMOR_SCALE);
 		}
 		if (textures.leggingsId != null) {
 			iris$submitExpandedSkull(poseStack, submitNodeCollector, packedLight, modelBase,
-				textures.leggingsRenderType, LEGGINGS_SIGNAL_COLOR, HEAD_ARMOR_SCALE);
+				textures.leggingsRenderType, textures.leggingsColor, HEAD_ARMOR_SCALE);
 		}
 	}
 
@@ -184,13 +190,16 @@ public final class WynncraftMountArmorOverlay {
 		}
 
 		if (textures.outerBodyId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBodyRenderType, ArmorLayer.OUTER, player.getSkin().model());
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBodyRenderType,
+				ArmorLayer.OUTER, textures.outerBodyColor, player.getSkin().model());
 		}
 		if (textures.outerBootsId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBootsRenderType, ArmorLayer.BOOTS, player.getSkin().model());
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.outerBootsRenderType,
+				ArmorLayer.BOOTS, textures.outerBootsColor, player.getSkin().model());
 		}
 		if (textures.leggingsId != null) {
-			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType, ArmorLayer.LEGGINGS, player.getSkin().model());
+			iris$submitQuadOverlay(poseStack, submitNodeCollector, packedLight, packedOverlay, fakeQuads, textures.leggingsRenderType,
+				ArmorLayer.LEGGINGS, textures.leggingsColor, player.getSkin().model());
 		}
 	}
 
@@ -241,14 +250,14 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static void iris$submitQuadOverlay(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, int packedOverlay,
-											   List<BakedQuad> quads, RenderType renderType, ArmorLayer armorLayer, PlayerModelType modelType) {
+											   List<BakedQuad> quads, RenderType renderType, ArmorLayer armorLayer, int color, PlayerModelType modelType) {
 		submitNodeCollector.submitCustomGeometry(poseStack, renderType, (pose, vertexConsumer) -> {
 			LimbBounds[] slimArmBounds = modelType == PlayerModelType.SLIM && armorLayer.widensSlimArms()
 				? iris$collectArmBounds(pose, quads) : null;
 			int submitted = 0;
 			for (BakedQuad quad : quads) {
 				int limbIndex = iris$decodeLimbIndex(pose, quad);
-				iris$emitExpandedQuad(pose, vertexConsumer, quad, armorLayer, limbIndex, packedLight, packedOverlay, slimArmBounds);
+				iris$emitExpandedQuad(pose, vertexConsumer, quad, armorLayer, limbIndex, packedLight, packedOverlay, color, slimArmBounds);
 				submitted++;
 			}
 
@@ -304,11 +313,10 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static void iris$emitExpandedQuad(PoseStack.Pose pose, VertexConsumer vertexConsumer, BakedQuad quad,
-											  ArmorLayer armorLayer, int limbIndex, int packedLight, int packedOverlay, LimbBounds[] slimArmBounds) {
+											  ArmorLayer armorLayer, int limbIndex, int packedLight, int packedOverlay, int color, LimbBounds[] slimArmBounds) {
 		Matrix4f matrix = pose.pose();
 		Vector3fc normal = quad.direction().getUnitVec3f();
 		Vector3f transformed = new Vector3f();
-		int color = armorLayer.signalColor();
 		int light = LightTexture.lightCoordsWithEmission(packedLight, quad.lightEmission());
 		float expand = armorLayer.expandFor(limbIndex);
 		LimbBounds limbBounds = slimArmBounds == null || limbIndex < 0 || limbIndex >= slimArmBounds.length ? null : slimArmBounds[limbIndex];
@@ -348,11 +356,16 @@ public final class WynncraftMountArmorOverlay {
 		}
 
 		PlayerModelType modelType = player.getSkin().model();
+		int headSignal = iris$getWynncraftEffectSignalRgb(armor.head);
+		int chestSignal = iris$getWynncraftEffectSignalRgb(armor.chest);
+		int legsSignal = iris$getWynncraftEffectSignalRgb(armor.legs);
+		int feetSignal = iris$getWynncraftEffectSignalRgb(armor.feet);
 		ArmorKey key = new ArmorKey(reloadCount, modelType,
 			ItemStack.hashItemAndComponents(armor.head),
 			ItemStack.hashItemAndComponents(armor.chest),
 			ItemStack.hashItemAndComponents(armor.legs),
-			ItemStack.hashItemAndComponents(armor.feet));
+			ItemStack.hashItemAndComponents(armor.feet),
+			headSignal, chestSignal, legsSignal, feetSignal);
 
 		OverlayTextures cached = CACHE.get(key);
 		if (cached != null) {
@@ -435,6 +448,23 @@ public final class WynncraftMountArmorOverlay {
 			hasOuterBoots |= iris$compositeArmorPiece(minecraft, outerBoots, feet, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_FEET, modelType);
 			hasLeggings |= iris$compositeArmorPiece(minecraft, leggings, legs, EquipmentClientInfo.LayerType.HUMANOID_LEGGINGS, CopyTarget.LEGGINGS, modelType);
 
+			int headEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(head));
+			int chestEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(chest));
+			int legsEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(legs));
+			int feetEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(feet));
+			if (hasOuterHead) {
+				iris$applyStaticTintEffect(outerHead, headEffectId);
+			}
+			if (hasOuterBody) {
+				iris$applyStaticTintEffect(outerBody, chestEffectId);
+			}
+			if (hasOuterBoots) {
+				iris$applyStaticTintEffect(outerBoots, feetEffectId);
+			}
+			if (hasLeggings) {
+				iris$applyStaticTintEffect(leggings, legsEffectId);
+			}
+
 			Identifier outerHeadId = hasOuterHead ? iris$registerTexture(minecraft, "outer_head", outerHead) : null;
 			Identifier outerBodyId = hasOuterBody ? iris$registerTexture(minecraft, "outer_body", outerBody) : null;
 			Identifier outerBootsId = hasOuterBoots ? iris$registerTexture(minecraft, "outer_boots", outerBoots) : null;
@@ -443,16 +473,26 @@ public final class WynncraftMountArmorOverlay {
 			RenderType outerBodyRenderType = outerBodyId == null ? null : RenderTypes.entityTranslucent(outerBodyId);
 			RenderType outerBootsRenderType = outerBootsId == null ? null : RenderTypes.entityTranslucent(outerBootsId);
 			RenderType leggingsRenderType = leggingsId == null ? null : RenderTypes.entityTranslucent(leggingsId);
+			int outerHeadColor = iris$overlaySignalColor(head, OUTER_OVERLAY_ALPHA);
+			int outerBodyColor = iris$overlaySignalColor(chest, OUTER_OVERLAY_ALPHA);
+			int outerBootsColor = iris$overlaySignalColor(feet, OUTER_OVERLAY_ALPHA);
+			int leggingsColor = iris$overlaySignalColor(legs, LEGGINGS_OVERLAY_ALPHA);
 
 			if (WynncraftDebugLog.shouldLog("mount-armor-overlay-cache")) {
 				WynncraftDebugLog.info("mount-armor-overlay-cache",
-					"[WynnIris MountArmor] built overlay textures model={} outerHead={} outerBody={} outerBoots={} leggings={} slots=[{},{},{},{}]",
+					"[WynnIris MountArmor] built overlay textures model={} outerHead={} outerBody={} outerBoots={} leggings={} effects=[{},{},{},{}] baked=[{},{},{},{}] colors=[{},{},{},{}] slots=[{},{},{},{}]",
 					modelType, outerHeadId, outerBodyId, outerBootsId, leggingsId,
+					headEffectId, chestEffectId, feetEffectId, legsEffectId,
+					iris$isStaticTintEffect(headEffectId), iris$isStaticTintEffect(chestEffectId),
+					iris$isStaticTintEffect(feetEffectId), iris$isStaticTintEffect(legsEffectId),
+					String.format("0x%08X", outerHeadColor), String.format("0x%08X", outerBodyColor),
+					String.format("0x%08X", outerBootsColor), String.format("0x%08X", leggingsColor),
 					iris$itemName(head), iris$itemName(chest), iris$itemName(legs), iris$itemName(feet));
 			}
 
 			return new OverlayTextures(outerHeadId, outerBodyId, outerBootsId, leggingsId,
-				outerHeadRenderType, outerBodyRenderType, outerBootsRenderType, leggingsRenderType);
+				outerHeadRenderType, outerBodyRenderType, outerBootsRenderType, leggingsRenderType,
+				outerHeadColor, outerBodyColor, outerBootsColor, leggingsColor);
 		} finally {
 			if (!hasOuterHead) {
 				outerHead.close();
@@ -593,6 +633,180 @@ public final class WynncraftMountArmorOverlay {
 			}
 		}
 		return Optional.empty();
+	}
+
+	private static int iris$overlaySignalColor(ItemStack stack, int overlayAlpha) {
+		int signalRgb = iris$getWynncraftEffectSignalRgb(stack);
+		int effectId = iris$getWynncraftEffectId(signalRgb);
+		int alpha = effectId == 0 || iris$isStaticTintEffect(effectId) ? overlayAlpha : EFFECT_OVERLAY_ALPHA_BASE + effectId;
+		return ((alpha & 0xFF) << 24) | DEFAULT_OVERLAY_RGB;
+	}
+
+	public static void cacheRenderedArmorSignal(ItemStack stack, int color) {
+		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL || stack == null || stack.isEmpty() || iris$getWynncraftCustomArmorAsset(stack).isEmpty()) {
+			return;
+		}
+
+		int signalRgb = iris$decodeWynncraftEffectSignalRgb(color);
+		if (signalRgb == DEFAULT_OVERLAY_RGB) {
+			return;
+		}
+
+		int stackKey = ItemStack.hashItemAndComponents(stack);
+		Integer previous = RENDERED_ARMOR_SIGNAL_CACHE.put(stackKey, signalRgb);
+		if (RENDERED_ARMOR_SIGNAL_CACHE.size() > MAX_RENDERED_ARMOR_SIGNAL_CACHE) {
+			RENDERED_ARMOR_SIGNAL_CACHE.clear();
+			RENDERED_ARMOR_SIGNAL_CACHE.put(stackKey, signalRgb);
+		}
+
+		if ((previous == null || previous != signalRgb)
+			&& WynncraftDebugLog.shouldLog("mount-armor-overlay-render-signal-" + stackKey)) {
+			WynncraftDebugLog.info("mount-armor-overlay-render-signal-" + stackKey,
+				"[WynnIris MountArmor] cached render-time signal stack={} itemModel={} customModelData={} raw={} signal={} effect={}",
+				iris$itemName(stack), stack.get(DataComponents.ITEM_MODEL), iris$customModelDataSummary(stack),
+				String.format("0x%08X", color), String.format("0x%06X", signalRgb), (signalRgb >>> 16) & 0xFF);
+		}
+	}
+
+	private static int iris$getWynncraftEffectSignalRgb(ItemStack stack) {
+		if (stack == null || stack.isEmpty() || iris$getWynncraftCustomArmorAsset(stack).isEmpty()) {
+			return DEFAULT_OVERLAY_RGB;
+		}
+
+		int stackKey = ItemStack.hashItemAndComponents(stack);
+		Integer cachedSignal = RENDERED_ARMOR_SIGNAL_CACHE.get(stackKey);
+		if (cachedSignal != null && cachedSignal != DEFAULT_OVERLAY_RGB) {
+			iris$logEffectSignal(stack, "render-cache", cachedSignal, cachedSignal);
+			return cachedSignal;
+		}
+
+		CustomModelData customModelData = stack.get(DataComponents.CUSTOM_MODEL_DATA);
+		if (customModelData != null) {
+			for (int i = 0; i < customModelData.colors().size(); i++) {
+				Integer color = customModelData.getColor(i);
+				if (color == null) {
+					continue;
+				}
+				int signalRgb = iris$decodeWynncraftEffectSignalRgb(color);
+				if (signalRgb != DEFAULT_OVERLAY_RGB) {
+					iris$logEffectSignal(stack, "custom-model-data-color-" + i, color, signalRgb);
+					return signalRgb;
+				}
+			}
+		}
+
+		int dyeColor = DyedItemColor.getOrDefault(stack, 0);
+		int signalRgb = iris$decodeWynncraftEffectSignalRgb(dyeColor);
+		if (signalRgb != DEFAULT_OVERLAY_RGB) {
+			iris$logEffectSignal(stack, "dyed-item-color", dyeColor, signalRgb);
+			return signalRgb;
+		}
+
+		iris$logEffectSignal(stack, "none", dyeColor, DEFAULT_OVERLAY_RGB);
+		return DEFAULT_OVERLAY_RGB;
+	}
+
+	private static int iris$decodeWynncraftEffectSignalRgb(int color) {
+		int rgb = color & 0x00FFFFFF;
+		int r = (rgb >>> 16) & 0xFF;
+		int g = (rgb >>> 8) & 0xFF;
+		int b = rgb & 0xFF;
+		if (r >= 1 && r <= MAX_WYNNCRAFT_EFFECT_ID && g == 255 && b == 0) {
+			return rgb;
+		}
+		return DEFAULT_OVERLAY_RGB;
+	}
+
+	private static int iris$getWynncraftEffectId(int signalRgb) {
+		if (signalRgb == DEFAULT_OVERLAY_RGB) {
+			return 0;
+		}
+		int effectId = (signalRgb >>> 16) & 0xFF;
+		return effectId >= 1 && effectId <= MAX_WYNNCRAFT_EFFECT_ID ? effectId : 0;
+	}
+
+	private static boolean iris$isStaticTintEffect(int effectId) {
+		return effectId >= 15 && effectId <= 24;
+	}
+
+	private static void iris$applyStaticTintEffect(NativeImage image, int effectId) {
+		if (!iris$isStaticTintEffect(effectId)) {
+			return;
+		}
+
+		int tintRgb = iris$staticTintEffectRgb(effectId);
+		for (int y = 0; y < image.getHeight(); y++) {
+			for (int x = 0; x < image.getWidth(); x++) {
+				int pixel = image.getPixel(x, y);
+				if (((pixel >>> 24) & 0xFF) == 0) {
+					continue;
+				}
+				image.setPixel(x, y, iris$applyTintEffect(pixel, tintRgb));
+			}
+		}
+	}
+
+	private static int iris$staticTintEffectRgb(int effectId) {
+		return switch (effectId) {
+			case 15 -> 0x5082E6;
+			case 16 -> 0x1EE682;
+			case 17 -> 0xEB4646;
+			case 18 -> 0x64BEBE;
+			case 19 -> 0xFA7814;
+			case 20 -> 0x323232;
+			case 21 -> 0xFAE6E6;
+			case 22 -> 0xFF96C8;
+			case 23 -> 0xC83CE6;
+			case 24 -> 0xF0F050;
+			default -> 0xFFFFFF;
+		};
+	}
+
+	private static int iris$applyTintEffect(int argb, int tintRgb) {
+		int a = (argb >>> 24) & 0xFF;
+		float r = ((argb >>> 16) & 0xFF) / 255.0F;
+		float g = ((argb >>> 8) & 0xFF) / 255.0F;
+		float b = (argb & 0xFF) / 255.0F;
+		float brightness = (float) Math.pow(0.2126F * r + 0.7152F * g + 0.0722F * b, 0.7F);
+		float mix = iris$smoothstep(0.7F, 1.0F, brightness) * 0.5F;
+		float tintR = ((tintRgb >>> 16) & 0xFF) / 255.0F;
+		float tintG = ((tintRgb >>> 8) & 0xFF) / 255.0F;
+		float tintB = (tintRgb & 0xFF) / 255.0F;
+		int outR = iris$toByte(iris$mix(tintR * brightness, 1.0F, mix));
+		int outG = iris$toByte(iris$mix(tintG * brightness, 1.0F, mix));
+		int outB = iris$toByte(iris$mix(tintB * brightness, 1.0F, mix));
+		return (a << 24) | (outR << 16) | (outG << 8) | outB;
+	}
+
+	private static float iris$smoothstep(float edge0, float edge1, float value) {
+		float x = iris$clamp((value - edge0) / (edge1 - edge0), 0.0F, 1.0F);
+		return x * x * (3.0F - 2.0F * x);
+	}
+
+	private static float iris$mix(float from, float to, float amount) {
+		return from * (1.0F - amount) + to * amount;
+	}
+
+	private static int iris$toByte(float value) {
+		return Math.round(iris$clamp(value, 0.0F, 1.0F) * 255.0F);
+	}
+
+	private static float iris$clamp(float value, float min, float max) {
+		return Math.max(min, Math.min(max, value));
+	}
+
+	private static void iris$logEffectSignal(ItemStack stack, String source, int rawColor, int signalRgb) {
+		int stackKey = ItemStack.hashItemAndComponents(stack);
+		String key = "mount-armor-overlay-effect-signal-" + stackKey;
+		if (!WynncraftDebugLog.shouldLog(key)) {
+			return;
+		}
+
+		WynncraftDebugLog.info(key,
+			"[WynnIris MountArmor] effect signal source={} stack={} itemModel={} customModelData={} raw={} selected={} effect={}",
+			source, iris$itemName(stack), stack.get(DataComponents.ITEM_MODEL), iris$customModelDataSummary(stack),
+			String.format("0x%08X", rawColor), String.format("0x%06X", signalRgb),
+			signalRgb == DEFAULT_OVERLAY_RGB ? 0 : (signalRgb >>> 16) & 0xFF);
 	}
 
 	private static String iris$customModelDataSummary(ItemStack stack) {
@@ -862,22 +1076,16 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private enum ArmorLayer {
-		OUTER(OUTER_SIGNAL_COLOR, SKIN_OVERLAY_TO_OUTER_ARMOR_EXPAND, SKIN_OVERLAY_TO_OUTER_LEG_ARMOR_EXPAND),
-		BOOTS(OUTER_SIGNAL_COLOR, SKIN_OVERLAY_TO_BOOTS_ARMOR_EXPAND, SKIN_OVERLAY_TO_BOOTS_ARMOR_EXPAND),
-		LEGGINGS(LEGGINGS_SIGNAL_COLOR, SKIN_OVERLAY_TO_LEGGINGS_ARMOR_EXPAND, SKIN_OVERLAY_TO_LEGGINGS_LEG_ARMOR_EXPAND);
+		OUTER(SKIN_OVERLAY_TO_OUTER_ARMOR_EXPAND, SKIN_OVERLAY_TO_OUTER_LEG_ARMOR_EXPAND),
+		BOOTS(SKIN_OVERLAY_TO_BOOTS_ARMOR_EXPAND, SKIN_OVERLAY_TO_BOOTS_ARMOR_EXPAND),
+		LEGGINGS(SKIN_OVERLAY_TO_LEGGINGS_ARMOR_EXPAND, SKIN_OVERLAY_TO_LEGGINGS_LEG_ARMOR_EXPAND);
 
-		private final int signalColor;
 		private final float bodyExpand;
 		private final float legExpand;
 
-		ArmorLayer(int signalColor, float bodyExpand, float legExpand) {
-			this.signalColor = signalColor;
+		ArmorLayer(float bodyExpand, float legExpand) {
 			this.bodyExpand = bodyExpand;
 			this.legExpand = legExpand;
-		}
-
-		private int signalColor() {
-			return signalColor;
 		}
 
 		private float expandFor(int limbIndex) {
@@ -907,7 +1115,8 @@ public final class WynncraftMountArmorOverlay {
 		}
 	}
 
-	private record ArmorKey(int reloadCount, PlayerModelType modelType, int head, int chest, int legs, int feet) {
+	private record ArmorKey(int reloadCount, PlayerModelType modelType, int head, int chest, int legs, int feet,
+							int headSignal, int chestSignal, int legsSignal, int feetSignal) {
 	}
 
 	private record ArmorSnapshot(UUID playerId, ItemStack head, ItemStack chest, ItemStack legs, ItemStack feet) {
@@ -930,7 +1139,8 @@ public final class WynncraftMountArmorOverlay {
 
 	private record OverlayTextures(Identifier outerHeadId, Identifier outerBodyId, Identifier outerBootsId, Identifier leggingsId,
 								   RenderType outerHeadRenderType, RenderType outerBodyRenderType, RenderType outerBootsRenderType,
-								   RenderType leggingsRenderType) {
+								   RenderType leggingsRenderType, int outerHeadColor, int outerBodyColor, int outerBootsColor,
+								   int leggingsColor) {
 		boolean isEmpty() {
 			return outerHeadId == null && outerBodyId == null && outerBootsId == null && leggingsId == null;
 		}

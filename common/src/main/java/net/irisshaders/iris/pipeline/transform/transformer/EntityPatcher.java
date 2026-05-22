@@ -94,13 +94,19 @@ public class EntityPatcher {
 	private static final String IRISW_TRANSLUCENCY_DETECT =
 		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
 
-	// WynnIris mount armor overlay signal. Current vertices use near-white colors with
-	// R=252/250 and G=B=255, so missed neutralization falls back to nearly white instead
-	// of bright green. The legacy green G=252/250 form is still recognized for safety.
+	// WynnIris mount armor overlay signal. Effect-bearing overlays encode the Wynncraft
+	// effect ID in alpha 161-192. No-effect overlays keep the older alpha=252/250 markers.
+	// The legacy green and near-white RGB forms are still recognized for safety.
+	private static final String IRISW_ARMOR_OVERLAY_ALPHA =
+		"int iris_wynn_armorOverlayAlpha = int(round(iris_Color.a * 255.0));";
+	private static final String IRISW_ARMOR_OVERLAY_EFFECT =
+		"int iris_wynn_armorOverlayEffect = (iris_wynn_armorOverlayAlpha >= 161 && iris_wynn_armorOverlayAlpha <= 192) ? iris_wynn_armorOverlayAlpha - 160 : 0;";
 	private static final String IRISW_ARMOR_OVERLAY_DETECT =
-		"int iris_wynn_armorOverlayMode = ((iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 252)"
+		"int iris_wynn_armorOverlayMode = (iris_wynn_armorOverlayAlpha == 252 || iris_wynn_armorOverlayEffect != 0"
+			+ " || (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 252)"
 			+ " || (int(round(iris_Color.r * 255.0)) == 252 && int(round(iris_Color.g * 255.0)) == 255 && int(round(iris_Color.b * 255.0)) == 255)) ? 1"
-			+ " : ((iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 250)"
+			+ " : (iris_wynn_armorOverlayAlpha == 250"
+			+ " || (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 250)"
 			+ " || (int(round(iris_Color.r * 255.0)) == 250 && int(round(iris_Color.g * 255.0)) == 255 && int(round(iris_Color.b * 255.0)) == 255)) ? 2 : 0;";
 
 	// ====================================================================================
@@ -1161,8 +1167,10 @@ public class EntityPatcher {
 				"entityColor = vec4(overlayColor.rgb, 1.0 - overlayColor.a);",
 				IRISW_SIGNAL_DETECT,
 				IRISW_TRANSLUCENCY_DETECT,
+				IRISW_ARMOR_OVERLAY_ALPHA,
+				IRISW_ARMOR_OVERLAY_EFFECT,
 				IRISW_ARMOR_OVERLAY_DETECT,
-				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : 0;",
+				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : iris_wynn_armorOverlayEffect;",
 				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;",
 				"iris_wynncraft_armor_overlay = iris_wynn_armorOverlayMode;",
 				"irisw_pos = iris_Position;",

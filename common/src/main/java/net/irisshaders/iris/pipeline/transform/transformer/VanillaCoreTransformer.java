@@ -452,7 +452,7 @@ public class VanillaCoreTransformer {
 			if (parameters.inputs.hasColor()) {
 				// Neutralize Wynncraft signal colors to white.
 				// Signals: glint (G=255), translucency (G=254), mount armor overlay
-				// (legacy green G=252/250 or near-white R=252/250),
+				// (alpha=252/250, legacy green G=252/250, or near-white R=252/250),
 				// effects (G=240, G=60, G=58, G=59), movements (G=235).
 				// Integer-domain detection: int(round(iris_Color.g * 255.0)) == exact value.
 				// Glint/effect/movement branches use full alpha. Translucency (G=254) uses reduced
@@ -465,7 +465,9 @@ public class VanillaCoreTransformer {
 					"int(round(iris_Color.g * 255.0)) == 240 || int(round(iris_Color.g * 255.0)) == 235"
 					+ " || int(round(iris_Color.g * 255.0)) == 60 || int(round(iris_Color.g * 255.0)) == 58"
 					+ " || int(round(iris_Color.g * 255.0)) == 59";
-				String armorOverlayNeutral = "(iris_Color.r < 0.01 && iris_Color.b < 0.01"
+				String armorOverlayNeutral = "(int(round(iris_Color.a * 255.0)) == 252 || int(round(iris_Color.a * 255.0)) == 250"
+					+ " || (int(round(iris_Color.a * 255.0)) >= 161 && int(round(iris_Color.a * 255.0)) <= 192))"
+					+ " || (iris_Color.r < 0.01 && iris_Color.b < 0.01"
 					+ " && (int(round(iris_Color.g * 255.0)) == 252 || int(round(iris_Color.g * 255.0)) == 250))"
 					+ " || ((int(round(iris_Color.r * 255.0)) == 252 || int(round(iris_Color.r * 255.0)) == 250)"
 					+ " && int(round(iris_Color.g * 255.0)) == 255 && int(round(iris_Color.b * 255.0)) == 255)";

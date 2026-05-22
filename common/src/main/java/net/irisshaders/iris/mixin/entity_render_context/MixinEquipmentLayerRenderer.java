@@ -3,6 +3,7 @@ package net.irisshaders.iris.mixin.entity_render_context;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.irisshaders.iris.helpers.EntityState;
+import net.irisshaders.iris.pathways.WynncraftMountArmorOverlay;
 import net.irisshaders.iris.shaderpack.materialmap.NamespacedId;
 import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
@@ -25,6 +26,7 @@ import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 
@@ -42,6 +44,16 @@ public abstract class MixinEquipmentLayerRenderer {
 
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItem(WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new NamespacedId(location.getNamespace(), location.getPath())));
 		CapturedRenderingState.INSTANCE.setCurrentRenderedItemSkipsItemTint(false);
+	}
+
+	@ModifyArg(method = V,
+		at = @At(value = "INVOKE",
+			target = "Lnet/minecraft/client/renderer/OrderedSubmitNodeCollector;submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IIILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V",
+			ordinal = 0),
+		index = 6)
+	private int iris$captureMountArmorSignal(int color, @Local(argsOnly = true) ItemStack itemStack) {
+		WynncraftMountArmorOverlay.cacheRenderedArmorSignal(itemStack, color);
+		return color;
 	}
 
 	@Inject(method = V, at = @At(value = "FIELD", target = "Lnet/minecraft/client/renderer/entity/layers/EquipmentLayerRenderer;trimSpriteLookup:Ljava/util/function/Function;"))
