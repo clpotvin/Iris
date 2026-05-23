@@ -94,13 +94,16 @@ public class EntityPatcher {
 	private static final String IRISW_TRANSLUCENCY_DETECT =
 		"bool iris_wynn_isTranslucent = (iris_Color.g > 0.994 && iris_Color.g < 0.998 && iris_Color.b < 0.01 && iris_Color.r > 0.002 && iris_Color.r < 0.998);";
 
-	// WynnIris mount armor overlay signal. Effect-bearing overlays encode the Wynncraft
-	// effect ID in alpha 161-192. No-effect overlays keep the older alpha=252/250 markers.
-	// The legacy green and near-white RGB forms are still recognized for safety.
+	// WynnIris mount armor overlay signal. CPU-built overlays keep the alpha=252/250
+	// markers for reliable armor-layer detection. Shader-side effects can be carried in
+	// the submit-time iris_Entity.z item slot with a high sentinel ID. The legacy green,
+	// near-white RGB, and alpha-effect forms are still recognized for safety.
 	private static final String IRISW_ARMOR_OVERLAY_ALPHA =
 		"int iris_wynn_armorOverlayAlpha = int(round(iris_Color.a * 255.0));";
 	private static final String IRISW_ARMOR_OVERLAY_EFFECT =
 		"int iris_wynn_armorOverlayEffect = (iris_wynn_armorOverlayAlpha >= 161 && iris_wynn_armorOverlayAlpha <= 192) ? iris_wynn_armorOverlayAlpha - 160 : 0;";
+	private static final String IRISW_ARMOR_OVERLAY_CPU_EFFECT =
+		"int iris_wynn_mountArmorCpuEffect = (iris_Entity.z >= 64001 && iris_Entity.z <= 64032) ? iris_Entity.z - 64000 : 0;";
 	private static final String IRISW_ARMOR_OVERLAY_DETECT =
 		"int iris_wynn_armorOverlayMode = (iris_wynn_armorOverlayAlpha == 252 || iris_wynn_armorOverlayEffect != 0"
 			+ " || (iris_Color.r < 0.01 && iris_Color.b < 0.01 && int(round(iris_Color.g * 255.0)) == 252)"
@@ -665,18 +668,17 @@ public class EntityPatcher {
 		            break;
 		        }
 		        case 4:  {
-		            // Glitch effect — scale distortion to sprite size, keep chromatic aberration for green tint
-		            float iW_pixelSize4 = 1.0 / max(iW_texSize.x, iW_texSize.y);
-		            float iW_sz = irisW_random(iW_time); float iW_sp = 10.0;
+		            // Glitch effect — Wynncraft RP-style sub-pixel UV pulse.
+		            float iW_intensity4 = iW_isAtlas ? 0.00015 : 0.015;
+		            float iW_colorOffset4 = iW_isAtlas ? 0.0001 : 0.995;
+		            float iW_sz = irisW_random(iW_time);
+		            float iW_sp = 10.0;
 		            float iW_tf = float(irisW_random(floor(iW_time * iW_sp)) < 0.5);
-		            // Scale offset: vanilla 0.015 was for ~1.0 UV range, scale to atlas pixel size
-		            float iW_offX = (irisW_random(floor(iW_uv.y * iW_sz) + iW_time) - 0.5) * iW_pixelSize4 * 2.0 * iW_tf;
-		            float iW_offY = (irisW_random(floor(iW_uv.x * iW_sz) + iW_time + 31.0) - 0.5) * iW_pixelSize4 * 2.0 * iW_tf;
-		            vec2 iW_gu = iW_uv + vec2(iW_offX, iW_offY);
+		            float iW_off4 = (irisW_random(floor(iW_uv.y * iW_sz) + iW_time) - 0.5) * iW_intensity4 * iW_tf;
+		            vec2 iW_gu = iW_uv + vec2(iW_off4);
 		            vec4 iW_gc = texture(Sampler0, iW_gu);
-		            // R/B channel offsets sample far away — this kills R and B, leaving green tint
-		            iW_gc.r = mix(iW_gc.r, texture(Sampler0, iW_gu + vec2(0.995, 0.0)).r, iW_tf);
-		            iW_gc.b = mix(iW_gc.b, texture(Sampler0, iW_gu - vec2(0.995, 0.0)).b, iW_tf);
+		            iW_gc.r = mix(iW_gc.r, texture(Sampler0, iW_gu + vec2(iW_colorOffset4, 0.0)).r, iW_tf);
+		            iW_gc.b = mix(iW_gc.b, texture(Sampler0, iW_gu - vec2(iW_colorOffset4, 0.0)).b, iW_tf);
 		            iW_out.rgb = irisW_blend(iW_tex, iW_gc, iW_gc.a); break;
 		        }
 		        case 5:  {
@@ -684,7 +686,7 @@ public class EntityPatcher {
 		            mat3 iW_m = mat3(-2, -1, 2, 3, -2, 1, 1, 2, 2);
 		            vec3 iW_a = vec3(iW_ru, iW_time * 0.5) * iW_m;
 		            vec3 iW_b = iW_a * iW_m * 0.4; vec3 iW_c = iW_b * iW_m * 0.3;
-		            iW_out.rgb = iW_tex.rgb + vec3(pow(min(min(length(0.5 - fract(iW_a)), length(0.5 - fract(iW_b))), length(0.5 - fract(iW_c))), 7.0) * 12.0);
+		            iW_out.rgb = iW_tex.rgb + vec3(pow(min(min(length(0.5 - fract(iW_a)), length(0.5 - fract(iW_b))), length(0.5 - fract(iW_c))), 7.0) * 30.0);
 		            break;
 		        }
 		        case 6:  { iW_out.rgb = irisW_aberration(iW_uv, 0.0025, iW_time); break; }
@@ -755,14 +757,14 @@ public class EntityPatcher {
 		            break;
 		        }
 		        case 13: {
-		            // Distort effect — perpendicular sine waves for X and Y
-		            float iW_pixelSize13 = 1.0 / max(iW_texSize.x, iW_texSize.y);
-		            // Amplitude modulated by slow beat — occasionally drops to near-zero
-		            float iW_beat13 = 0.3 + 0.7 * abs(sin(iW_time * 0.7));
-		            float iW_doX = sin(iW_eUV.y * 40.0 + iW_time * 8.0) * 0.5;
-		            float iW_doY = sin(iW_eUV.x * 40.0 + iW_time * 10.0) * 0.5;
-		            vec2 iW_do = vec2(iW_doX, iW_doY) * iW_pixelSize13 * iW_beat13;
-		            vec4 iW_dc = texture(Sampler0, iW_uv + iW_do);
+		            // Distort effect — match the Wynncraft RP smooth-noise UV warp.
+		            vec2 iW_distortCoord13 = iW_isAtlas ? (iW_uv * iW_texSize / max(iW_texSize.x, iW_texSize.y)) : iW_uv;
+		            float iW_strength13 = iW_isAtlas ? 0.00025 : 0.1 * sin(10.0) / 2.0;
+		            float iW_distortScale13 = iW_isAtlas ? 1000.0 : 10.0;
+		            float iW_distortSpeed13 = iW_isAtlas ? 4.0 : 2.0;
+		            float iW_noise13 = irisW_smoothNoise(iW_distortCoord13 * iW_distortScale13 + iW_time * iW_distortSpeed13);
+		            vec2 iW_offset13 = vec2(iW_noise13 - 0.5) * iW_strength13;
+		            vec4 iW_dc = texture(Sampler0, iW_uv + iW_offset13);
 		            iW_out.rgb = irisW_blend(iW_tex, iW_dc, iW_dc.a); break;
 		        }
 		        case 14: {
@@ -1169,8 +1171,10 @@ public class EntityPatcher {
 				IRISW_TRANSLUCENCY_DETECT,
 				IRISW_ARMOR_OVERLAY_ALPHA,
 				IRISW_ARMOR_OVERLAY_EFFECT,
+				IRISW_ARMOR_OVERLAY_CPU_EFFECT,
 				IRISW_ARMOR_OVERLAY_DETECT,
-				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : iris_wynn_armorOverlayEffect;",
+				"int iris_wynn_armorOverlayShaderEffect = iris_wynn_mountArmorCpuEffect != 0 ? iris_wynn_mountArmorCpuEffect : iris_wynn_armorOverlayEffect;",
+				"iris_wynncraft_glint = iris_wynn_isSignal ? int(round(iris_Color.r * 255.0)) : iris_wynn_armorOverlayShaderEffect;",
 				"iris_wynncraft_translucency = iris_wynn_isTranslucent ? int(round(iris_Color.r * 255.0)) : 0;",
 				"iris_wynncraft_armor_overlay = iris_wynn_armorOverlayMode;",
 				"irisw_pos = iris_Position;",
