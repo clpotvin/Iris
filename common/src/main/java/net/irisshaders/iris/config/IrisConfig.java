@@ -190,7 +190,7 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftMistWoodsFogMinDistance = Math.max(0, Math.min(300, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogMinDistance", "0"))));
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction = "true".equals(properties.getProperty("wynncraftMistWoodsFogSunTintReduction", "false"));
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogSunTintAmount", "50"))));
-			IrisVideoSettings.wynncraftMountArmorOverlay = !"false".equals(properties.getProperty("wynncraftMountArmorOverlay", "true"));
+			IrisVideoSettings.wynncraftMountArmorOverlay = "true".equals(properties.getProperty("wynncraftMountArmorOverlay", "false"));
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
 			IrisVideoSettings.shadowDistance = 32;
@@ -208,7 +208,7 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftMistWoodsFogMinDistance = 0;
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction = false;
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = 50;
-			IrisVideoSettings.wynncraftMountArmorOverlay = true;
+			IrisVideoSettings.wynncraftMountArmorOverlay = false;
 			save();
 		}
 

@@ -222,7 +222,7 @@ public class IrisConfig implements ConfigEntryPoint {
 		if (net.irisshaders.iris.BuildConfig.WYNNIRIS_EXPERIMENTAL) {
 			var debugGroup = builder.createOptionGroup()
 				.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_mount_armor_overlay"))
-					.setDefaultValue(true)
+					.setDefaultValue(false)
 					.setBinding(value -> IrisVideoSettings.wynncraftMountArmorOverlay = value, () -> IrisVideoSettings.wynncraftMountArmorOverlay)
 					.setName(Component.translatable("options.iris.wynncraftMountArmorOverlay"))
 					.setTooltip(Component.translatable("options.iris.wynncraftMountArmorOverlay.tooltip"))
