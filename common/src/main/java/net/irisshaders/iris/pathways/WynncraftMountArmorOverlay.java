@@ -4,7 +4,6 @@ import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
-import net.irisshaders.iris.BuildConfig;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.gui.option.WynncraftDebugLog;
@@ -101,10 +100,6 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	public static void onClientTick(Minecraft minecraft) {
-		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL) {
-			return;
-		}
-
 		LocalPlayer player = minecraft.player;
 		if (minecraft.level == null || player == null) {
 			lastKnownArmor = null;
@@ -244,7 +239,7 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	private static boolean iris$shouldSubmitOverlays() {
-		return BuildConfig.WYNNIRIS_EXPERIMENTAL && IrisVideoSettings.wynncraftMountArmorOverlay && Iris.isPackInUseQuick();
+		return IrisVideoSettings.wynncraftMountArmorOverlay && Iris.isPackInUseQuick();
 	}
 
 	private static boolean iris$isLikelyMountState(LocalPlayer player) {
@@ -778,7 +773,7 @@ public final class WynncraftMountArmorOverlay {
 	}
 
 	public static void cacheRenderedArmorSignal(ItemStack stack, int color) {
-		if (!BuildConfig.WYNNIRIS_EXPERIMENTAL || !iris$canReadWynncraftArmorSignal(stack)) {
+		if (!iris$canReadWynncraftArmorSignal(stack)) {
 			return;
 		}
 
