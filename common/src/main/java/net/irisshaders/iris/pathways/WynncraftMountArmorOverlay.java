@@ -69,6 +69,7 @@ public final class WynncraftMountArmorOverlay {
 	private static final int FAKE_PLAYER_STEVE_ALEX_RADIX = 2;
 	private static final int FAKE_PLAYER_LIMB_FADE_RADIX = 3;
 	private static final int FAKE_PLAYER_LIMB_INDEX_RADIX = 6;
+	private static final int FAKE_PLAYER_HEAD = 0;
 	private static final int FAKE_PLAYER_LEFT_ARM = 2;
 	private static final int FAKE_PLAYER_RIGHT_ARM = 3;
 	private static final int FAKE_PLAYER_LEFT_LEG = 4;
@@ -88,6 +89,8 @@ public final class WynncraftMountArmorOverlay {
 	private static final int DEFAULT_OVERLAY_RGB = 0x00FFFFFF;
 	private static final int WHITE_COLOR = 0xFFFFFFFF;
 	private static final int MAX_WYNNCRAFT_EFFECT_ID = 32;
+	private static final int HIDE_ARMOR_EFFECT_ID = 2;
+	private static final ResourceKey<EquipmentAsset> HIDDEN_ARMOR_ASSET = EquipmentAssets.createId("hidden");
 	private static final String WYNNCRAFT_HAT_MODEL_PREFIX = "item/wynn/skin/hat/";
 	private static final String[] WYNNCRAFT_ARMOR_ASSETS = {
 		"hidden", "leather", "tan", "chainmail", "copper", "iron", "gold", "diamond",
@@ -149,7 +152,10 @@ public final class WynncraftMountArmorOverlay {
 		}
 
 		if (textures.headCosmetic != null) {
-			iris$submitHeadCosmetic(poseStack, submitNodeCollector, packedLight, textures.headCosmetic);
+			int limbIndex = iris$decodeFakePlayerLimbIndex(poseStack.last().pose().m31());
+			if (limbIndex == FAKE_PLAYER_HEAD) {
+				iris$submitHeadCosmetic(poseStack, submitNodeCollector, packedLight, textures.headCosmetic);
+			}
 		} else if (textures.outerHead != null) {
 			iris$submitExpandedSkullLayer(poseStack, submitNodeCollector, packedLight, modelBase,
 				textures.outerHead, HEAD_ARMOR_SCALE);
@@ -359,22 +365,27 @@ public final class WynncraftMountArmorOverlay {
 		poseStack.translate(0.5F, HEAD_COSMETIC_UP_OFFSET, 0.5F);
 		poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
 		poseStack.scale(0.625F, 0.625F, 0.625F);
+		boolean previousSubmittingHeadCosmetic = submittingHeadCosmetic;
 		submittingHeadCosmetic = true;
 		try {
 			cosmetic.renderState.submit(poseStack, submitNodeCollector, packedLight, OverlayTexture.NO_OVERLAY, WHITE_COLOR);
 		} finally {
-			submittingHeadCosmetic = false;
+			submittingHeadCosmetic = previousSubmittingHeadCosmetic;
 			poseStack.popPose();
 		}
 	}
 
 	private static int iris$decodeLimbIndex(PoseStack.Pose pose, BakedQuad quad) {
 		Vector3f transformed = pose.pose().transformPosition(quad.position(0), new Vector3f());
-		if (transformed.y < 2.0F * FAKE_PLAYER_Y_POSITION_RADIX) {
+		return iris$decodeFakePlayerLimbIndex(transformed.y);
+	}
+
+	private static int iris$decodeFakePlayerLimbIndex(float transformedY) {
+		if (transformedY < 2.0F * FAKE_PLAYER_Y_POSITION_RADIX) {
 			return -1;
 		}
 
-		int metadata = (int) transformed.y - 2 * FAKE_PLAYER_Y_POSITION_RADIX;
+		int metadata = (int) transformedY - 2 * FAKE_PLAYER_Y_POSITION_RADIX;
 		return (metadata / FAKE_PLAYER_Y_POSITION_RADIX / FAKE_PLAYER_STEVE_ALEX_RADIX / FAKE_PLAYER_LIMB_FADE_RADIX) % FAKE_PLAYER_LIMB_INDEX_RADIX;
 	}
 
@@ -528,18 +539,28 @@ public final class WynncraftMountArmorOverlay {
 		boolean hasOuterBoots = false;
 		boolean hasLeggings = false;
 		try {
-			boolean hasHeadCosmeticCandidate = iris$isWynncraftHeadCosmeticCandidate(head);
-			if (!hasHeadCosmeticCandidate) {
-				hasOuterHead |= iris$compositeArmorPiece(minecraft, outerHead, head, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_HEAD, modelType);
-			}
-			hasOuterBody |= iris$compositeArmorPiece(minecraft, outerBody, chest, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_CHEST, modelType);
-			hasOuterBoots |= iris$compositeArmorPiece(minecraft, outerBoots, feet, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_FEET, modelType);
-			hasLeggings |= iris$compositeArmorPiece(minecraft, leggings, legs, EquipmentClientInfo.LayerType.HUMANOID_LEGGINGS, CopyTarget.LEGGINGS, modelType);
-
 			int headEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(head));
 			int chestEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(chest));
 			int legsEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(legs));
 			int feetEffectId = iris$getWynncraftEffectId(iris$getWynncraftEffectSignalRgb(feet));
+			boolean hideHead = iris$shouldHideArmorOverlay(head, headEffectId);
+			boolean hideChest = iris$shouldHideArmorOverlay(chest, chestEffectId);
+			boolean hideLegs = iris$shouldHideArmorOverlay(legs, legsEffectId);
+			boolean hideFeet = iris$shouldHideArmorOverlay(feet, feetEffectId);
+
+			boolean hasHeadCosmeticCandidate = !hideHead && iris$isWynncraftHeadCosmeticCandidate(head);
+			if (!hideHead && !hasHeadCosmeticCandidate) {
+				hasOuterHead |= iris$compositeArmorPiece(minecraft, outerHead, head, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_HEAD, modelType);
+			}
+			if (!hideChest) {
+				hasOuterBody |= iris$compositeArmorPiece(minecraft, outerBody, chest, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_CHEST, modelType);
+			}
+			if (!hideFeet) {
+				hasOuterBoots |= iris$compositeArmorPiece(minecraft, outerBoots, feet, EquipmentClientInfo.LayerType.HUMANOID, CopyTarget.OUTER_FEET, modelType);
+			}
+			if (!hideLegs) {
+				hasLeggings |= iris$compositeArmorPiece(minecraft, leggings, legs, EquipmentClientInfo.LayerType.HUMANOID_LEGGINGS, CopyTarget.LEGGINGS, modelType);
+			}
 			if (hasOuterHead) {
 				iris$applyStaticTintEffect(outerHead, headEffectId);
 			}
@@ -873,6 +894,25 @@ public final class WynncraftMountArmorOverlay {
 
 	private static boolean iris$isStaticTintEffect(int effectId) {
 		return effectId >= 15 && effectId <= 24;
+	}
+
+	private static boolean iris$isHideArmorEffect(int effectId) {
+		return effectId == HIDE_ARMOR_EFFECT_ID;
+	}
+
+	private static boolean iris$shouldHideArmorOverlay(ItemStack stack, int effectId) {
+		return iris$isHideArmorEffect(effectId) || iris$usesHiddenEquipmentAsset(stack);
+	}
+
+	private static boolean iris$usesHiddenEquipmentAsset(ItemStack stack) {
+		if (stack == null || stack.isEmpty()) {
+			return false;
+		}
+
+		Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
+		return equippable != null && equippable.assetId()
+			.filter(HIDDEN_ARMOR_ASSET::equals)
+			.isPresent();
 	}
 
 	private static boolean iris$isDynamicBaseEffect(int effectId) {

@@ -41,9 +41,6 @@ public class ItemStackStateLayerMixin {
 	private ItemStackRenderState parentState;
 
 	@Shadow
-	net.minecraft.client.renderer.texture.TextureAtlasSprite particleIcon;
-
-	@Shadow
 	private java.util.List<net.minecraft.client.renderer.block.model.BakedQuad> quads;
 
 	@Inject(method = "<init>", at = @At("TAIL"))
@@ -207,13 +204,14 @@ public class ItemStackStateLayerMixin {
 
 	@Inject(method = "submit", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;popPose()V"))
 	private void iris$submitWynncraftMountArmorOverlays(PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int packedLight, int packedOverlay, int color, CallbackInfo ci) {
+		ItemContextState itemContext = (ItemContextState) parentState;
 		WynncraftMountArmorOverlay.submitItemLayerOverlays(
 			poseStack,
 			submitNodeCollector,
 			packedLight,
 			packedOverlay,
 			quads,
-			((ItemContextState) parentState).getDisplayContext()
+			itemContext.getDisplayContext()
 		);
 	}
 
