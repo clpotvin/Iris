@@ -22,6 +22,9 @@ public final class AmbienceRuntime {
 	private static long lastSwitchMillis;
 	private static String failedProfileKey;
 	private static long failedProfileRetryAfterMillis;
+	private static String firstFrameSwitchAction;
+	private static String firstFrameSwitchProfileKey;
+	private static long firstFrameSwitchCompleteNanos;
 
 	private AmbienceRuntime() {
 	}
@@ -114,6 +117,7 @@ public final class AmbienceRuntime {
 	}
 
 	public static void afterFrameRendered() {
+		logFirstFrameAfterSwitch();
 		if (pendingRestore) {
 			scheduleDeferredRestore();
 			return;
@@ -128,6 +132,9 @@ public final class AmbienceRuntime {
 		pendingRestore = false;
 		deferredProfile = null;
 		deferredRestore = false;
+		firstFrameSwitchAction = null;
+		firstFrameSwitchProfileKey = null;
+		firstFrameSwitchCompleteNanos = 0L;
 	}
 
 	public static void invalidateActiveProfile() {
@@ -136,13 +143,19 @@ public final class AmbienceRuntime {
 		pendingRestore = false;
 		deferredProfile = null;
 		deferredRestore = false;
+		firstFrameSwitchAction = null;
+		firstFrameSwitchProfileKey = null;
+		firstFrameSwitchCompleteNanos = 0L;
 	}
 
 	public static WarmupResult warmSelectedPackProfiles() {
+		long warmStartNanos = System.nanoTime();
 		AmbiencePackManager manager = AmbiencePackManager.getInstance();
 		manager.reloadIfNeeded();
 		List<AmbiencePackManager.ResolvedProfile> profiles = manager.resolveProfiles(IrisVideoSettings.wynncraftSelectedAmbiencePack);
 		AmbiencePackManager.ResolvedProfile restoreProfile = activeProfile;
+		int beforePoolResources = Iris.getAmbienceRenderTargetPoolResourceCount();
+		long beforePoolBytes = Iris.getAmbienceRenderTargetPoolEstimatedBytes();
 		int warmed = 0;
 		int failed = 0;
 
@@ -178,7 +191,14 @@ public final class AmbienceRuntime {
 		deferredRestore = false;
 		Iris.trimTransientShaderPackCacheToBudget();
 		lastSwitchMillis = System.currentTimeMillis();
+		logWarmupSummary(profiles.size(), warmed, failed, beforePoolResources, beforePoolBytes, System.nanoTime() - warmStartNanos);
 		return new WarmupResult(warmed, failed);
+	}
+
+	public static void markFirstFrameAfterSwitch(String action, String profileKey) {
+		firstFrameSwitchAction = action == null || action.isBlank() ? "unknown" : action;
+		firstFrameSwitchProfileKey = profileKey == null || profileKey.isBlank() ? "unknown" : profileKey;
+		firstFrameSwitchCompleteNanos = System.nanoTime();
 	}
 
 	private static void scheduleDeferredRestore() {
@@ -240,7 +260,7 @@ public final class AmbienceRuntime {
 		AmbiencePackManager manager = AmbiencePackManager.getInstance();
 		long tickMicros = (System.nanoTime() - tickStartNanos) / 1_000L;
 		WynncraftDebugLog.info("ambience-runtime-diagnostics",
-			"Ambience diagnostics: state={} active={} pending={} resolve={}us tick={}us regions={} installedShaderPacks={} transientContexts={} transientContextBudget={} retainedContexts={} programBinarySupported={} programBinaryFormats={} programBinaries={} programBinaryBytes={} targetPoolResources={} targetPoolBytes={} targetPoolHits={} targetPoolMisses={} targetPoolReleases={} targetPoolDestroyed={} profilePressures={}",
+			"Ambience diagnostics: state={} active={} pending={} resolve={}us tick={}us regions={} installedShaderPacks={} transientContexts={} transientContextBudget={} retainedContexts={} programBinarySupported={} programBinaryFormats={} programBinaries={} programBinaryBytes={} targetPoolResources={} targetPoolBytes={} targetPoolBreakdown={} targetPoolHits={} targetPoolMisses={} targetPoolReleases={} targetPoolDestroyed={} profilePressures={}",
 			state,
 			activeProfile == null ? "none" : activeProfile.profileId(),
 			pendingProfile == null ? "none" : pendingProfile.profileId(),
@@ -249,7 +269,7 @@ public final class AmbienceRuntime {
 			manager.getLastResolvedRegionCount(),
 			manager.getInstalledShaderPackCount(),
 			Iris.getTransientShaderPackContextCount(),
-			Iris.getTransientShaderPackContextBudget(),
+			Iris.getTransientShaderPackContextBudgetLabel(),
 			Iris.getRetainedShaderRuntimeContextCount(),
 			Iris.isProgramBinaryCacheAvailable(),
 			Iris.getProgramBinaryCacheFormatCount(),
@@ -257,10 +277,55 @@ public final class AmbienceRuntime {
 			Iris.getProgramBinaryCacheBytes(),
 			Iris.getAmbienceRenderTargetPoolResourceCount(),
 			Iris.getAmbienceRenderTargetPoolEstimatedBytes(),
+			Iris.getAmbienceRenderTargetPoolBreakdownSummary(),
 			Iris.getAmbienceRenderTargetPoolHits(),
 			Iris.getAmbienceRenderTargetPoolMisses(),
 			Iris.getAmbienceRenderTargetPoolReleases(),
 			Iris.getAmbienceRenderTargetPoolDestroyedResources(),
+			Iris.getAmbienceRenderTargetPoolProfilePressureSummary());
+	}
+
+	private static void logFirstFrameAfterSwitch() {
+		if (firstFrameSwitchCompleteNanos == 0L) {
+			return;
+		}
+		long elapsedMicros = (System.nanoTime() - firstFrameSwitchCompleteNanos) / 1_000L;
+		String action = firstFrameSwitchAction;
+		String profileKey = firstFrameSwitchProfileKey;
+		firstFrameSwitchAction = null;
+		firstFrameSwitchProfileKey = null;
+		firstFrameSwitchCompleteNanos = 0L;
+
+		if (!WynncraftDebugLog.shouldLog("ambience-first-frame-after-switch")) {
+			return;
+		}
+		WynncraftDebugLog.info("ambience-first-frame-after-switch",
+			"Ambience first frame after switch: action={} profile={} elapsedSinceSwitch={}us poolResources={} poolBytes={} poolBreakdown={} profilePressures={}",
+			action,
+			profileKey,
+			elapsedMicros,
+			Iris.getAmbienceRenderTargetPoolResourceCount(),
+			Iris.getAmbienceRenderTargetPoolEstimatedBytes(),
+			Iris.getAmbienceRenderTargetPoolBreakdownSummary(),
+			Iris.getAmbienceRenderTargetPoolProfilePressureSummary());
+	}
+
+	private static void logWarmupSummary(int requestedProfiles, int warmed, int failed, int beforePoolResources, long beforePoolBytes, long warmNanos) {
+		if (!WynncraftDebugLog.shouldLog("ambience-warm-cache-summary")) {
+			return;
+		}
+		WynncraftDebugLog.info("ambience-warm-cache-summary",
+			"Ambience warm cache summary: requested={} warmed={} failed={} duration={}ms retainedContexts={} beforePoolResources={} afterPoolResources={} beforePoolBytes={} afterPoolBytes={} afterPoolBreakdown={} profilePressures={}",
+			requestedProfiles,
+			warmed,
+			failed,
+			warmNanos / 1_000_000L,
+			Iris.getRetainedShaderRuntimeContextCount(),
+			beforePoolResources,
+			Iris.getAmbienceRenderTargetPoolResourceCount(),
+			beforePoolBytes,
+			Iris.getAmbienceRenderTargetPoolEstimatedBytes(),
+			Iris.getAmbienceRenderTargetPoolBreakdownSummary(),
 			Iris.getAmbienceRenderTargetPoolProfilePressureSummary());
 	}
 

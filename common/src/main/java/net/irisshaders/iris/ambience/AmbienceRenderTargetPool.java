@@ -58,7 +58,7 @@ public final class AmbienceRenderTargetPool {
 			.setPixelFormat(pixelFormat)
 			.build();
 		long bytes = 2L * width * height * bytesPerPixel(internalFormat);
-		entry = new Entry<>(physical, bytes, physical::destroy, () -> mainColorTargets.remove(key));
+		entry = new Entry<>(ResourceType.MAIN_COLOR, physical, bytes, physical::destroy, () -> mainColorTargets.remove(key));
 		mainColorTargets.put(key, entry);
 		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-main-color");
@@ -81,7 +81,7 @@ public final class AmbienceRenderTargetPool {
 			RenderSystem.getDevice().createTexture("Ambience Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, format, width, height, 1, 1)
 		);
 		long bytes = 2L * width * height * 4L;
-		entry = new Entry<>(physical, bytes, physical::destroy, () -> mainDepthCopies.remove(key));
+		entry = new Entry<>(ResourceType.MAIN_DEPTH, physical, bytes, physical::destroy, () -> mainDepthCopies.remove(key));
 		mainDepthCopies.put(key, entry);
 		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-main-depth");
@@ -104,7 +104,7 @@ public final class AmbienceRenderTargetPool {
 			RenderSystem.getDevice().createTexture("Ambience Shadow Map / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, noTranslucentsMipped ? shadowMipLevels(resolution) : 1)
 		);
 		long bytes = 2L * resolution * resolution * 4L;
-		entry = new Entry<>(physical, bytes, physical::destroy, () -> shadowDepthCopies.remove(key));
+		entry = new Entry<>(ResourceType.SHADOW_DEPTH, physical, bytes, physical::destroy, () -> shadowDepthCopies.remove(key));
 		shadowDepthCopies.put(key, entry);
 		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-shadow-depth");
@@ -129,7 +129,7 @@ public final class AmbienceRenderTargetPool {
 			.setPixelFormat(pixelFormat)
 			.build();
 		long bytes = 2L * resolution * resolution * bytesPerPixel(internalFormat);
-		entry = new Entry<>(physical, bytes, physical::destroy, () -> shadowColorTargets.remove(key));
+		entry = new Entry<>(ResourceType.SHADOW_COLOR, physical, bytes, physical::destroy, () -> shadowColorTargets.remove(key));
 		shadowColorTargets.put(key, entry);
 		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-shadow-color");
@@ -154,7 +154,7 @@ public final class AmbienceRenderTargetPool {
 			information.height(), information.depth());
 		long bytes = (long) Math.max(1, information.width()) * Math.max(1, information.height()) *
 			Math.max(1, information.depth()) * bytesPerPixel(information.internalTextureFormat());
-		entry = new Entry<>(physical, bytes, physical::destroy, () -> customImages.remove(key));
+		entry = new Entry<>(ResourceType.CUSTOM_IMAGE, physical, bytes, physical::destroy, () -> customImages.remove(key));
 		customImages.put(key, entry);
 		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-custom-image");
@@ -210,6 +210,16 @@ public final class AmbienceRenderTargetPool {
 		return destroyedResources;
 	}
 
+	public PoolBreakdown getBreakdown() {
+		return new PoolBreakdown(
+			summarize(mainColorTargets.values()),
+			summarize(mainDepthCopies.values()),
+			summarize(shadowDepthCopies.values()),
+			summarize(shadowColorTargets.values()),
+			summarize(customImages.values())
+		);
+	}
+
 	public Map<String, ProfilePressure> getProfilePressures() {
 		Map<String, Set<Entry<?>>> entriesByProfile = new LinkedHashMap<>();
 		Map<String, Integer> allocationsByProfile = new LinkedHashMap<>();
@@ -228,17 +238,31 @@ public final class AmbienceRenderTargetPool {
 			String profileKey = profileEntry.getKey();
 			long sharedBytes = 0;
 			long exclusiveBytes = 0;
+			BreakdownBuilder sharedBreakdown = new BreakdownBuilder();
+			BreakdownBuilder exclusiveBreakdown = new BreakdownBuilder();
 			for (Entry<?> entry : profileEntry.getValue()) {
 				sharedBytes += entry.bytes;
+				sharedBreakdown.add(entry);
 				if (isEntryExclusiveToProfile(entry, profileKey)) {
 					exclusiveBytes += entry.bytes;
+					exclusiveBreakdown.add(entry);
 				}
 			}
 			pressures.put(profileKey, new ProfilePressure(profileKey, allocationsByProfile.getOrDefault(profileKey, 0),
-				profileEntry.getValue().size(), sharedBytes, exclusiveBytes));
+				profileEntry.getValue().size(), sharedBytes, exclusiveBytes, sharedBreakdown.build(), exclusiveBreakdown.build()));
 		}
 
 		return Collections.unmodifiableMap(pressures);
+	}
+
+	private ResourceBreakdown summarize(Iterable<? extends Entry<?>> entries) {
+		int count = 0;
+		long bytes = 0;
+		for (Entry<?> entry : entries) {
+			count++;
+			bytes += entry.bytes;
+		}
+		return new ResourceBreakdown(count, bytes);
 	}
 
 	private void requireOpen() {
@@ -287,8 +311,8 @@ public final class AmbienceRenderTargetPool {
 			return;
 		}
 		WynncraftDebugLog.info(key,
-			"Ambience render target pool: resources={} estimatedBytes={} hits={} misses={} releases={} destroyed={}",
-			getResourceCount(), estimatedBytes, hits, misses, releases, destroyedResources);
+			"Ambience render target pool: resources={} estimatedBytes={} hits={} misses={} releases={} destroyed={} breakdown={}",
+			getResourceCount(), estimatedBytes, hits, misses, releases, destroyedResources, getBreakdown().compact());
 	}
 
 	private static int shadowMipLevels(int resolution) {
@@ -306,6 +330,62 @@ public final class AmbienceRenderTargetPool {
 			case RGB32F, RGB32I, RGB32UI -> 12;
 			case RGBA32F, RGBA32I, RGBA32UI -> 16;
 		};
+	}
+
+	private enum ResourceType {
+		MAIN_COLOR,
+		MAIN_DEPTH,
+		SHADOW_DEPTH,
+		SHADOW_COLOR,
+		CUSTOM_IMAGE
+	}
+
+	private final class BreakdownBuilder {
+		private int mainColorCount;
+		private long mainColorBytes;
+		private int mainDepthCount;
+		private long mainDepthBytes;
+		private int shadowDepthCount;
+		private long shadowDepthBytes;
+		private int shadowColorCount;
+		private long shadowColorBytes;
+		private int customImageCount;
+		private long customImageBytes;
+
+		private void add(Entry<?> entry) {
+			switch (entry.type) {
+				case MAIN_COLOR -> {
+					mainColorCount++;
+					mainColorBytes += entry.bytes;
+				}
+				case MAIN_DEPTH -> {
+					mainDepthCount++;
+					mainDepthBytes += entry.bytes;
+				}
+				case SHADOW_DEPTH -> {
+					shadowDepthCount++;
+					shadowDepthBytes += entry.bytes;
+				}
+				case SHADOW_COLOR -> {
+					shadowColorCount++;
+					shadowColorBytes += entry.bytes;
+				}
+				case CUSTOM_IMAGE -> {
+					customImageCount++;
+					customImageBytes += entry.bytes;
+				}
+			}
+		}
+
+		private PoolBreakdown build() {
+			return new PoolBreakdown(
+				new ResourceBreakdown(mainColorCount, mainColorBytes),
+				new ResourceBreakdown(mainDepthCount, mainDepthBytes),
+				new ResourceBreakdown(shadowDepthCount, shadowDepthBytes),
+				new ResourceBreakdown(shadowColorCount, shadowColorBytes),
+				new ResourceBreakdown(customImageCount, customImageBytes)
+			);
+		}
 	}
 
 	public final class Allocation implements AutoCloseable {
@@ -351,13 +431,17 @@ public final class AmbienceRenderTargetPool {
 		public ProfilePressure pressure() {
 			long sharedBytes = 0;
 			long exclusiveBytes = 0;
+			BreakdownBuilder sharedBreakdown = new BreakdownBuilder();
+			BreakdownBuilder exclusiveBreakdown = new BreakdownBuilder();
 			for (Entry<?> entry : entries.keySet()) {
 				sharedBytes += entry.bytes;
+				sharedBreakdown.add(entry);
 				if (entry.references == 1) {
 					exclusiveBytes += entry.bytes;
+					exclusiveBreakdown.add(entry);
 				}
 			}
-			return new ProfilePressure(profileKey, 1, entries.size(), sharedBytes, exclusiveBytes);
+			return new ProfilePressure(profileKey, 1, entries.size(), sharedBytes, exclusiveBytes, sharedBreakdown.build(), exclusiveBreakdown.build());
 		}
 
 		@Override
@@ -396,6 +480,7 @@ public final class AmbienceRenderTargetPool {
 	}
 
 	private final class Entry<T> {
+		private final ResourceType type;
 		private final T value;
 		private final long bytes;
 		private final Runnable destroy;
@@ -403,7 +488,8 @@ public final class AmbienceRenderTargetPool {
 		private int references;
 		private boolean entryDestroyed;
 
-		private Entry(T value, long bytes, Runnable destroy, Runnable remove) {
+		private Entry(ResourceType type, T value, long bytes, Runnable destroy, Runnable remove) {
+			this.type = type;
 			this.value = value;
 			this.bytes = bytes;
 			this.destroy = destroy;
@@ -428,7 +514,26 @@ public final class AmbienceRenderTargetPool {
 	public record AcquiredImage(GlImage image, ResourceRef ref) {
 	}
 
-	public record ProfilePressure(String profileKey, int allocations, int resources, long sharedBytes, long exclusiveBytes) {
+	public record ResourceBreakdown(int count, long bytes) {
+		public String compact() {
+			return count + "/" + bytes;
+		}
+	}
+
+	public record PoolBreakdown(ResourceBreakdown mainColor, ResourceBreakdown mainDepth,
+								ResourceBreakdown shadowDepth, ResourceBreakdown shadowColor,
+								ResourceBreakdown customImages) {
+		public String compact() {
+			return "mainColor=" + mainColor.compact()
+				+ "|mainDepth=" + mainDepth.compact()
+				+ "|shadowDepth=" + shadowDepth.compact()
+				+ "|shadowColor=" + shadowColor.compact()
+				+ "|customImages=" + customImages.compact();
+		}
+	}
+
+	public record ProfilePressure(String profileKey, int allocations, int resources, long sharedBytes, long exclusiveBytes,
+								  PoolBreakdown sharedBreakdown, PoolBreakdown exclusiveBreakdown) {
 	}
 
 	public record DepthCopies(GpuTexture first, GpuTexture second) {

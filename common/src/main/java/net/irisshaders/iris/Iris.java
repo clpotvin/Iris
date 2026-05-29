@@ -9,6 +9,7 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import net.caffeinemc.mods.sodium.api.vertex.serializer.VertexSerializerRegistry;
 import net.irisshaders.iris.ambience.AmbienceRenderTargetPool;
 import net.irisshaders.iris.ambience.AmbienceRuntime;
+import net.irisshaders.iris.ambience.AmbienceSwitchTiming;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.config.IrisConfig;
 import net.irisshaders.iris.gl.GLDebug;
@@ -97,7 +98,6 @@ public class Iris {
 	public static final boolean IS_FOOL;
 	private static final Map<String, String> shaderPackOptionQueue = new HashMap<>();
 	private static final int MAX_TRANSIENT_SHADER_PACK_CONTEXTS = 1;
-	private static final int MAX_POOLED_TRANSIENT_SHADER_PACK_CONTEXTS = 32;
 	private static final Map<String, ShaderRuntimeContext> transientShaderPackContexts = new LinkedHashMap<>(16, 0.75f, true);
 	// Change this for snapshots!
 	private static final String backupVersionNumber = "1.21.9";
@@ -433,15 +433,17 @@ public class Iris {
 		String previousBuildProfileKey = ambiencePipelineBuildProfileKey;
 		ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
 		ambiencePipelineBuildProfileKey = name;
+		AmbienceSwitchTiming switchTiming = new AmbienceSwitchTiming("transient", name);
 		try {
 			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
 			if (loaded && Minecraft.getInstance().level != null) {
-				prepareTransientPipelineContext();
+				prepareTransientPipelineContext(switchTiming);
 				if (fallback) {
 					loaded = false;
 				}
 				if (loaded && pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
-					pipeline.onAmbienceProfileActivated();
+					activateAmbiencePipeline(pipeline, switchTiming);
+					completeAmbienceSwitchTiming(switchTiming);
 				}
 			}
 		} finally {
@@ -480,7 +482,7 @@ public class Iris {
 
 		ShaderRuntimeContext cached = transientShaderPackContexts.get(cacheKey);
 		if (cached != null) {
-			activateShaderRuntimeContext(cached, cacheKey);
+			activateShaderRuntimeContext(cached, cacheKey, "cache-hit");
 			logAmbienceContextTiming("ambience-profile-cache-hit", "Activated cached ambience shader profile {}", cacheKey, startNanos);
 			return true;
 		}
@@ -502,10 +504,11 @@ public class Iris {
 		String previousBuildProfileKey = ambiencePipelineBuildProfileKey;
 		ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
 		ambiencePipelineBuildProfileKey = cacheKey;
+		AmbienceSwitchTiming switchTiming = new AmbienceSwitchTiming("cache-miss", cacheKey);
 		try {
 			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
 			if (loaded) {
-				prepareTransientPipelineContext();
+				prepareTransientPipelineContext(switchTiming);
 				if (fallback) {
 					logger.warn("Ambience profile \"{}\" loaded its shader pack, but pipeline creation fell back to vanilla rendering", name);
 					loaded = false;
@@ -516,7 +519,8 @@ public class Iris {
 				transientShaderPackContexts.put(cacheKey, context);
 				activeTransientShaderPackContextKey = cacheKey;
 				if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
-					pipeline.onAmbienceProfileActivated();
+					activateAmbiencePipeline(pipeline, switchTiming);
+					completeAmbienceSwitchTiming(switchTiming);
 				}
 				enforceTransientShaderPackContextBudget();
 				logAmbienceContextTiming("ambience-profile-cache-miss", "Compiled and cached ambience shader profile {}", cacheKey, startNanos);
@@ -541,7 +545,7 @@ public class Iris {
 	public static void restoreConfiguredShaderPack() throws IOException {
 		if (configuredShaderPackContext != null) {
 			long startNanos = System.nanoTime();
-			activateShaderRuntimeContext(configuredShaderPackContext, null);
+			activateShaderRuntimeContext(configuredShaderPackContext, null, "restore-cached");
 			logAmbienceContextTiming("ambience-profile-restore-cached", "Restored configured shader profile from ambience cache", null, startNanos);
 			return;
 		}
@@ -559,7 +563,11 @@ public class Iris {
 	}
 
 	public static int getTransientShaderPackContextBudget() {
-		return ambienceRenderTargetPool == null ? MAX_TRANSIENT_SHADER_PACK_CONTEXTS : MAX_POOLED_TRANSIENT_SHADER_PACK_CONTEXTS;
+		return ambienceRenderTargetPool == null ? MAX_TRANSIENT_SHADER_PACK_CONTEXTS : Integer.MAX_VALUE;
+	}
+
+	public static String getTransientShaderPackContextBudgetLabel() {
+		return ambienceRenderTargetPool == null ? Integer.toString(MAX_TRANSIENT_SHADER_PACK_CONTEXTS) : "unbounded";
 	}
 
 	public static int getTransientShaderPackContextCount() {
@@ -618,6 +626,10 @@ public class Iris {
 		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getDestroyedResources();
 	}
 
+	public static String getAmbienceRenderTargetPoolBreakdownSummary() {
+		return ambienceRenderTargetPool == null ? "none" : ambienceRenderTargetPool.getBreakdown().compact();
+	}
+
 	public static String getAmbienceRenderTargetPoolProfilePressureSummary() {
 		if (ambienceRenderTargetPool == null) {
 			return "none";
@@ -638,6 +650,8 @@ public class Iris {
 				.append(",resources=").append(pressure.resources())
 				.append(",sharedBytes=").append(pressure.sharedBytes())
 				.append(",exclusiveBytes=").append(pressure.exclusiveBytes())
+				.append(",shared=").append(pressure.sharedBreakdown().compact())
+				.append(",exclusive=").append(pressure.exclusiveBreakdown().compact())
 				.append(")");
 		}
 		return builder.toString();
@@ -882,12 +896,22 @@ public class Iris {
 	}
 
 	private static void prepareTransientPipelineContext() {
+		prepareTransientPipelineContext(null);
+	}
+
+	private static void prepareTransientPipelineContext(AmbienceSwitchTiming timing) {
 		NamespacedId dimension = Iris.getCurrentDimension();
 		if (dimension == null) {
 			dimension = DimensionId.OVERWORLD;
 		}
+
+		long prepareStartNanos = System.nanoTime();
 		Iris.getPipelineManager().preparePipeline(dimension);
-		reapplyCurrentPipelineSettings();
+		if (timing != null) {
+			timing.addPreparePipelineNanos(System.nanoTime() - prepareStartNanos);
+		}
+
+		reapplyCurrentPipelineSettings(timing);
 	}
 
 	private static ShaderRuntimeContext snapshotShaderRuntimeContext() {
@@ -895,6 +919,10 @@ public class Iris {
 	}
 
 	private static void activateShaderRuntimeContext(ShaderRuntimeContext context, String transientKey) {
+		activateShaderRuntimeContext(context, transientKey, transientKey == null ? "restore" : "cache-hit");
+	}
+
+	private static void activateShaderRuntimeContext(ShaderRuntimeContext context, String transientKey, String action) {
 		BlendModeStorage.restoreBlend();
 		currentPackName = context.packName();
 		currentPack = context.pack();
@@ -909,27 +937,59 @@ public class Iris {
 			ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
 			ambiencePipelineBuildProfileKey = transientKey;
 		}
+		AmbienceSwitchTiming timing = new AmbienceSwitchTiming(action, transientKey == null ? "configured" : transientKey);
 		try {
-			prepareTransientPipelineContext();
+			prepareTransientPipelineContext(timing);
 		} finally {
 			ambiencePipelineBuildPool = previousBuildPool;
 			ambiencePipelineBuildProfileKey = previousBuildProfileKey;
 		}
 		if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
-			pipeline.onAmbienceProfileActivated();
+			activateAmbiencePipeline(pipeline, timing);
+			completeAmbienceSwitchTiming(timing);
 		}
 	}
 
 	private static void reapplyCurrentPipelineSettings() {
+		reapplyCurrentPipelineSettings(null);
+	}
+
+	private static void reapplyCurrentPipelineSettings(AmbienceSwitchTiming timing) {
+		long reapplyStartNanos = System.nanoTime();
 		if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
 			pipeline.applyWorldRenderingSettings();
 		}
 		if (WorldRenderingSettings.INSTANCE.isReloadRequired()) {
 			if (Minecraft.getInstance().levelRenderer != null) {
+				long reloadStartNanos = System.nanoTime();
 				Minecraft.getInstance().levelRenderer.allChanged();
+				if (timing != null) {
+					timing.addLevelRendererReloadNanos(System.nanoTime() - reloadStartNanos);
+				}
 			}
 			WorldRenderingSettings.INSTANCE.clearReloadRequired();
 		}
+		if (timing != null) {
+			timing.addReapplySettingsNanos(System.nanoTime() - reapplyStartNanos);
+		}
+	}
+
+	private static void activateAmbiencePipeline(IrisRenderingPipeline pipeline, AmbienceSwitchTiming timing) {
+		long activationStartNanos = System.nanoTime();
+		pipeline.onAmbienceProfileActivated(timing);
+		timing.addProfileActivationNanos(System.nanoTime() - activationStartNanos);
+	}
+
+	private static void completeAmbienceSwitchTiming(AmbienceSwitchTiming timing) {
+		timing.finish();
+		if (WynncraftDebugLog.shouldLog("ambience-profile-switch-phases")) {
+			WynncraftDebugLog.info("ambience-profile-switch-phases",
+				"Ambience switch phases: {} poolBreakdown={} profilePressures={}",
+				timing.compactMicros(),
+				getAmbienceRenderTargetPoolBreakdownSummary(),
+				getAmbienceRenderTargetPoolProfilePressureSummary());
+		}
+		AmbienceRuntime.markFirstFrameAfterSwitch(timing.action(), timing.profileKey());
 	}
 
 	private static AmbienceRenderTargetPool getOrCreateAmbienceRenderTargetPool() {
@@ -949,6 +1009,10 @@ public class Iris {
 	}
 
 	private static void enforceTransientShaderPackContextBudget() {
+		if (ambienceRenderTargetPool != null) {
+			return;
+		}
+
 		int budget = getTransientShaderPackContextBudget();
 		if (transientShaderPackContexts.size() <= budget) {
 			return;

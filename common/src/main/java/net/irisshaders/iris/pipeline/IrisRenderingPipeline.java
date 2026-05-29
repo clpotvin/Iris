@@ -15,6 +15,7 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMaps;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.ambience.AmbienceRenderTargetPool;
+import net.irisshaders.iris.ambience.AmbienceSwitchTiming;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.features.FeatureFlags;
@@ -620,19 +621,22 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (ambiencePool != null) {
 			AmbienceRenderTargetPool.ProfilePressure pressure = getAmbienceProfilePressure();
 			WynncraftDebugLog.info("ambience-pipeline-build",
-				"Ambience pipeline build: customImages={}ms renderTargets={}ms total={}ms poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} profileResources={} profileSharedBytes={} profileExclusiveBytes={}",
+				"Ambience pipeline build: customImages={}ms renderTargets={}ms total={}ms poolResources={} poolBytes={} poolBreakdown={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} profileResources={} profileSharedBytes={} profileExclusiveBytes={} profileSharedBreakdown={} profileExclusiveBreakdown={}",
 				customImagesNanos / 1_000_000L,
 				renderTargetsNanos / 1_000_000L,
 				(System.nanoTime() - constructorStartNanos) / 1_000_000L,
 				ambiencePool.getResourceCount(),
 				ambiencePool.getEstimatedBytes(),
+				ambiencePool.getBreakdown().compact(),
 				ambiencePool.getHits(),
 				ambiencePool.getMisses(),
 				ambiencePool.getReleases(),
 				ambiencePool.getDestroyedResources(),
 				pressure == null ? 0 : pressure.resources(),
 				pressure == null ? 0L : pressure.sharedBytes(),
-				pressure == null ? 0L : pressure.exclusiveBytes());
+				pressure == null ? 0L : pressure.exclusiveBytes(),
+				pressure == null ? "none" : pressure.sharedBreakdown().compact(),
+				pressure == null ? "none" : pressure.exclusiveBreakdown().compact());
 		}
 		constructed = true;
 		} finally {
@@ -659,23 +663,51 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	}
 
 	public void onAmbienceProfileActivated() {
+		onAmbienceProfileActivated(null);
+	}
+
+	public void onAmbienceProfileActivated(@Nullable AmbienceSwitchTiming timing) {
 		if (ambiencePool == null) {
 			return;
 		}
 
+		long phaseStartNanos = System.nanoTime();
 		renderTargets.forceFullClear();
+		if (timing != null) {
+			timing.addForceMainClearNanos(System.nanoTime() - phaseStartNanos);
+		}
+
+		phaseStartNanos = System.nanoTime();
 		rebuildMainClearPasses();
+		if (timing != null) {
+			timing.addRebuildMainClearPassesNanos(System.nanoTime() - phaseStartNanos);
+		}
+
 		if (shadowRenderTargets != null) {
+			phaseStartNanos = System.nanoTime();
 			shadowRenderTargets.forceFullClear();
+			if (timing != null) {
+				timing.addForceShadowClearNanos(System.nanoTime() - phaseStartNanos);
+			}
 		}
 		if (shadowRenderer != null) {
+			phaseStartNanos = System.nanoTime();
 			shadowRenderer.refreshSamplingSettings();
+			if (timing != null) {
+				timing.addShadowSamplerRefreshNanos(System.nanoTime() - phaseStartNanos);
+			}
 		}
+
+		phaseStartNanos = System.nanoTime();
 		for (GlImage image : customImages) {
 			if (image.isPooledView()) {
 				image.clearTexture();
 			}
 		}
+		if (timing != null) {
+			timing.addCustomImageClearNanos(System.nanoTime() - phaseStartNanos);
+		}
+
 		WynncraftDebugLog.info("ambience-profile-activate-pool",
 			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} profilePressure={}",
 			ambiencePool.getResourceCount(), ambiencePool.getEstimatedBytes(), ambiencePool.getHits(), ambiencePool.getMisses(),
