@@ -12,120 +12,153 @@ import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.shaderpack.ImageInformation;
 import net.irisshaders.iris.targets.RenderTarget;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 public final class AmbienceRenderTargetPool {
-	private final Map<ColorTargetKey, RenderTarget> mainColorTargets = new HashMap<>();
-	private final Map<DepthCopiesKey, DepthCopies> mainDepthCopies = new HashMap<>();
-	private final Map<ShadowDepthKey, DepthCopies> shadowDepthCopies = new HashMap<>();
-	private final Map<ShadowColorTargetKey, RenderTarget> shadowColorTargets = new HashMap<>();
-	private final Map<ImageKey, GlImage> customImages = new HashMap<>();
+	private final Map<ColorTargetKey, Entry<RenderTarget>> mainColorTargets = new HashMap<>();
+	private final Map<DepthCopiesKey, Entry<DepthCopies>> mainDepthCopies = new HashMap<>();
+	private final Map<ShadowDepthKey, Entry<DepthCopies>> shadowDepthCopies = new HashMap<>();
+	private final Map<ShadowColorTargetKey, Entry<RenderTarget>> shadowColorTargets = new HashMap<>();
+	private final Map<ImageKey, Entry<GlImage>> customImages = new HashMap<>();
+	private final Set<Allocation> allocations = Collections.newSetFromMap(new IdentityHashMap<>());
 	private long estimatedBytes;
 	private long hits;
 	private long misses;
+	private long releases;
+	private long destroyedResources;
 	private boolean destroyed;
 
-	public RenderTarget acquireMainColorTarget(int index, int width, int height, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
+	public Allocation createAllocation(String profileKey) {
+		requireOpen();
+		Allocation allocation = new Allocation(profileKey);
+		allocations.add(allocation);
+		return allocation;
+	}
+
+	public AcquiredRenderTarget acquireMainColorTarget(Allocation allocation, int index, int width, int height, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
+		requireOpen();
+		requireAllocation(allocation);
 		ColorTargetKey key = new ColorTargetKey(index, width, height, internalFormat, pixelFormat);
-		RenderTarget physical = mainColorTargets.get(key);
-		if (physical != null) {
+		Entry<RenderTarget> entry = mainColorTargets.get(key);
+		if (entry != null) {
 			hits++;
-			return physical.sharedView();
+			return new AcquiredRenderTarget(entry.value.sharedView(), allocation.retain(entry));
 		}
 
 		misses++;
-		physical = RenderTarget.builder()
+		RenderTarget physical = RenderTarget.builder()
 			.setName("ambience-colortex" + index)
 			.setDimensions(width, height)
 			.setInternalFormat(internalFormat)
 			.setPixelFormat(pixelFormat)
 			.build();
-		mainColorTargets.put(key, physical);
-		estimatedBytes += 2L * width * height * bytesPerPixel(internalFormat);
-		// TODO: Evict orphaned exact-size entries after window resize once pooled views are ref-counted.
+		long bytes = 2L * width * height * bytesPerPixel(internalFormat);
+		entry = new Entry<>(physical, bytes, physical::destroy, () -> mainColorTargets.remove(key));
+		mainColorTargets.put(key, entry);
+		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-main-color");
-		return physical.sharedView();
+		return new AcquiredRenderTarget(physical.sharedView(), allocation.retain(entry));
 	}
 
-	public DepthCopies acquireMainDepthCopies(int width, int height, TextureFormat format) {
+	public AcquiredDepthCopies acquireMainDepthCopies(Allocation allocation, int width, int height, TextureFormat format) {
+		requireOpen();
+		requireAllocation(allocation);
 		DepthCopiesKey key = new DepthCopiesKey(width, height, format);
-		DepthCopies physical = mainDepthCopies.get(key);
-		if (physical != null) {
+		Entry<DepthCopies> entry = mainDepthCopies.get(key);
+		if (entry != null) {
 			hits++;
-			return physical;
+			return new AcquiredDepthCopies(entry.value, allocation.retain(entry));
 		}
 
 		misses++;
-		physical = new DepthCopies(
+		DepthCopies physical = new DepthCopies(
 			RenderSystem.getDevice().createTexture("Ambience Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, format, width, height, 1, 1),
 			RenderSystem.getDevice().createTexture("Ambience Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, format, width, height, 1, 1)
 		);
-		mainDepthCopies.put(key, physical);
-		estimatedBytes += 2L * width * height * 4L;
+		long bytes = 2L * width * height * 4L;
+		entry = new Entry<>(physical, bytes, physical::destroy, () -> mainDepthCopies.remove(key));
+		mainDepthCopies.put(key, entry);
+		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-main-depth");
-		return physical;
+		return new AcquiredDepthCopies(physical, allocation.retain(entry));
 	}
 
-	public DepthCopies acquireShadowDepthCopies(int resolution, boolean mainMipped, boolean noTranslucentsMipped) {
+	public AcquiredDepthCopies acquireShadowDepthCopies(Allocation allocation, int resolution, boolean mainMipped, boolean noTranslucentsMipped) {
+		requireOpen();
+		requireAllocation(allocation);
 		ShadowDepthKey key = new ShadowDepthKey(resolution, mainMipped, noTranslucentsMipped);
-		DepthCopies physical = shadowDepthCopies.get(key);
-		if (physical != null) {
+		Entry<DepthCopies> entry = shadowDepthCopies.get(key);
+		if (entry != null) {
 			hits++;
-			return physical;
+			return new AcquiredDepthCopies(entry.value, allocation.retain(entry));
 		}
 
 		misses++;
-		physical = new DepthCopies(
+		DepthCopies physical = new DepthCopies(
 			RenderSystem.getDevice().createTexture("Ambience Shadow Map", GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, mainMipped ? shadowMipLevels(resolution) : 1),
 			RenderSystem.getDevice().createTexture("Ambience Shadow Map / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, noTranslucentsMipped ? shadowMipLevels(resolution) : 1)
 		);
-		shadowDepthCopies.put(key, physical);
-		estimatedBytes += 2L * resolution * resolution * 4L;
+		long bytes = 2L * resolution * resolution * 4L;
+		entry = new Entry<>(physical, bytes, physical::destroy, () -> shadowDepthCopies.remove(key));
+		shadowDepthCopies.put(key, entry);
+		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-shadow-depth");
-		return physical;
+		return new AcquiredDepthCopies(physical, allocation.retain(entry));
 	}
 
-	public RenderTarget acquireShadowColorTarget(int index, int resolution, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
+	public AcquiredRenderTarget acquireShadowColorTarget(Allocation allocation, int index, int resolution, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
+		requireOpen();
+		requireAllocation(allocation);
 		ShadowColorTargetKey key = new ShadowColorTargetKey(index, resolution, internalFormat, pixelFormat);
-		RenderTarget physical = shadowColorTargets.get(key);
-		if (physical != null) {
+		Entry<RenderTarget> entry = shadowColorTargets.get(key);
+		if (entry != null) {
 			hits++;
-			return physical.sharedView();
+			return new AcquiredRenderTarget(entry.value.sharedView(), allocation.retain(entry));
 		}
 
 		misses++;
-		physical = RenderTarget.builder()
+		RenderTarget physical = RenderTarget.builder()
 			.setName("ambience-shadowcolor" + index)
 			.setDimensions(resolution, resolution)
 			.setInternalFormat(internalFormat)
 			.setPixelFormat(pixelFormat)
 			.build();
-		shadowColorTargets.put(key, physical);
-		estimatedBytes += 2L * resolution * resolution * bytesPerPixel(internalFormat);
+		long bytes = 2L * resolution * resolution * bytesPerPixel(internalFormat);
+		entry = new Entry<>(physical, bytes, physical::destroy, () -> shadowColorTargets.remove(key));
+		shadowColorTargets.put(key, entry);
+		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-shadow-color");
-		return physical.sharedView();
+		return new AcquiredRenderTarget(physical.sharedView(), allocation.retain(entry));
 	}
 
-	public GlImage acquireCustomImage(ImageInformation information) {
+	public AcquiredImage acquireCustomImage(Allocation allocation, ImageInformation information) {
+		requireOpen();
+		requireAllocation(allocation);
 		ImageKey key = new ImageKey(information.name(), information.samplerName(), information.target(), information.format(),
 			information.internalTextureFormat(), information.type(), information.width(), information.height(),
 			information.depth(), information.clear());
-		GlImage physical = customImages.get(key);
-		if (physical != null) {
+		Entry<GlImage> entry = customImages.get(key);
+		if (entry != null) {
 			hits++;
-			return physical.sharedView();
+			return new AcquiredImage(entry.value.sharedView(), allocation.retain(entry));
 		}
 
 		misses++;
-		physical = new GlImage(information.name(), information.samplerName(), information.target(), information.format(),
+		GlImage physical = new GlImage(information.name(), information.samplerName(), information.target(), information.format(),
 			information.internalTextureFormat(), information.type(), information.clear(), information.width(),
 			information.height(), information.depth());
-		customImages.put(key, physical);
-		estimatedBytes += (long) Math.max(1, information.width()) * Math.max(1, information.height()) *
+		long bytes = (long) Math.max(1, information.width()) * Math.max(1, information.height()) *
 			Math.max(1, information.depth()) * bytesPerPixel(information.internalTextureFormat());
+		entry = new Entry<>(physical, bytes, physical::destroy, () -> customImages.remove(key));
+		customImages.put(key, entry);
+		estimatedBytes += bytes;
 		logPoolStats("ambience-pool-custom-image");
-		return physical.sharedView();
+		return new AcquiredImage(physical.sharedView(), allocation.retain(entry));
 	}
 
 	public void destroy() {
@@ -133,12 +166,13 @@ public final class AmbienceRenderTargetPool {
 			return;
 		}
 		destroyed = true;
+		allocations.clear();
 
-		mainColorTargets.values().forEach(RenderTarget::destroy);
-		shadowColorTargets.values().forEach(RenderTarget::destroy);
-		customImages.values().forEach(GlImage::destroy);
-		mainDepthCopies.values().forEach(DepthCopies::destroy);
-		shadowDepthCopies.values().forEach(DepthCopies::destroy);
+		mainColorTargets.values().forEach(Entry::destroy);
+		shadowColorTargets.values().forEach(Entry::destroy);
+		customImages.values().forEach(Entry::destroy);
+		mainDepthCopies.values().forEach(Entry::destroy);
+		shadowDepthCopies.values().forEach(Entry::destroy);
 
 		mainColorTargets.clear();
 		mainDepthCopies.clear();
@@ -148,6 +182,8 @@ public final class AmbienceRenderTargetPool {
 		estimatedBytes = 0;
 		hits = 0;
 		misses = 0;
+		releases = 0;
+		destroyedResources = 0;
 	}
 
 	public int getResourceCount() {
@@ -166,13 +202,93 @@ public final class AmbienceRenderTargetPool {
 		return misses;
 	}
 
+	public long getReleases() {
+		return releases;
+	}
+
+	public long getDestroyedResources() {
+		return destroyedResources;
+	}
+
+	public Map<String, ProfilePressure> getProfilePressures() {
+		Map<String, Set<Entry<?>>> entriesByProfile = new LinkedHashMap<>();
+		Map<String, Integer> allocationsByProfile = new LinkedHashMap<>();
+
+		for (Allocation allocation : allocations) {
+			if (allocation.closed) {
+				continue;
+			}
+			entriesByProfile.computeIfAbsent(allocation.profileKey, ignored -> Collections.newSetFromMap(new IdentityHashMap<>()))
+				.addAll(allocation.entries.keySet());
+			allocationsByProfile.merge(allocation.profileKey, 1, Integer::sum);
+		}
+
+		Map<String, ProfilePressure> pressures = new LinkedHashMap<>();
+		for (Map.Entry<String, Set<Entry<?>>> profileEntry : entriesByProfile.entrySet()) {
+			String profileKey = profileEntry.getKey();
+			long sharedBytes = 0;
+			long exclusiveBytes = 0;
+			for (Entry<?> entry : profileEntry.getValue()) {
+				sharedBytes += entry.bytes;
+				if (isEntryExclusiveToProfile(entry, profileKey)) {
+					exclusiveBytes += entry.bytes;
+				}
+			}
+			pressures.put(profileKey, new ProfilePressure(profileKey, allocationsByProfile.getOrDefault(profileKey, 0),
+				profileEntry.getValue().size(), sharedBytes, exclusiveBytes));
+		}
+
+		return Collections.unmodifiableMap(pressures);
+	}
+
+	private void requireOpen() {
+		if (destroyed) {
+			throw new IllegalStateException("Ambience render target pool has already been destroyed");
+		}
+	}
+
+	private void requireAllocation(Allocation allocation) {
+		if (allocation == null) {
+			throw new IllegalArgumentException("Ambience render target pool acquisition requires an allocation owner");
+		}
+	}
+
+	private void release(Entry<?> entry) {
+		if (destroyed || entry.entryDestroyed) {
+			return;
+		}
+
+		entry.references--;
+		releases++;
+
+		if (entry.references < 0) {
+			throw new IllegalStateException("Ambience render target pool resource released too many times");
+		}
+		if (entry.references == 0) {
+			entry.destroy();
+			entry.remove.run();
+			estimatedBytes = Math.max(0L, estimatedBytes - entry.bytes);
+			destroyedResources++;
+			logPoolStats("ambience-pool-release");
+		}
+	}
+
+	private boolean isEntryExclusiveToProfile(Entry<?> entry, String profileKey) {
+		for (Allocation allocation : allocations) {
+			if (!allocation.closed && !allocation.profileKey.equals(profileKey) && allocation.entries.containsKey(entry)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private void logPoolStats(String key) {
 		if (!WynncraftDebugLog.shouldLog(key)) {
 			return;
 		}
 		WynncraftDebugLog.info(key,
-			"Ambience render target pool: resources={} estimatedBytes={} hits={} misses={}",
-			getResourceCount(), estimatedBytes, hits, misses);
+			"Ambience render target pool: resources={} estimatedBytes={} hits={} misses={} releases={} destroyed={}",
+			getResourceCount(), estimatedBytes, hits, misses, releases, destroyedResources);
 	}
 
 	private static int shadowMipLevels(int resolution) {
@@ -190,6 +306,129 @@ public final class AmbienceRenderTargetPool {
 			case RGB32F, RGB32I, RGB32UI -> 12;
 			case RGBA32F, RGBA32I, RGBA32UI -> 16;
 		};
+	}
+
+	public final class Allocation implements AutoCloseable {
+		private final String profileKey;
+		private final Map<Entry<?>, Integer> entries = new IdentityHashMap<>();
+		private boolean closed;
+
+		private Allocation(String profileKey) {
+			this.profileKey = profileKey == null || profileKey.isBlank() ? "unknown" : profileKey;
+		}
+
+		private ResourceRef retain(Entry<?> entry) {
+			if (closed) {
+				throw new IllegalStateException("Ambience render target pool allocation has already been closed");
+			}
+			AmbienceRenderTargetPool.this.requireOpen();
+
+			int count = entries.getOrDefault(entry, 0);
+			entries.put(entry, count + 1);
+			if (count == 0) {
+				entry.references++;
+			}
+			return new ResourceRef(this, entry);
+		}
+
+		private void release(Entry<?> entry) {
+			Integer count = entries.get(entry);
+			if (count == null) {
+				if (closed) {
+					return;
+				}
+				throw new IllegalStateException("Ambience render target pool allocation released an unknown resource");
+			}
+			if (count > 1) {
+				entries.put(entry, count - 1);
+				return;
+			}
+
+			entries.remove(entry);
+			AmbienceRenderTargetPool.this.release(entry);
+		}
+
+		public ProfilePressure pressure() {
+			long sharedBytes = 0;
+			long exclusiveBytes = 0;
+			for (Entry<?> entry : entries.keySet()) {
+				sharedBytes += entry.bytes;
+				if (entry.references == 1) {
+					exclusiveBytes += entry.bytes;
+				}
+			}
+			return new ProfilePressure(profileKey, 1, entries.size(), sharedBytes, exclusiveBytes);
+		}
+
+		@Override
+		public void close() {
+			if (closed) {
+				return;
+			}
+			closed = true;
+			allocations.remove(this);
+
+			for (Entry<?> entry : entries.keySet().toArray(new Entry<?>[0])) {
+				entries.remove(entry);
+				AmbienceRenderTargetPool.this.release(entry);
+			}
+		}
+	}
+
+	public static final class ResourceRef implements AutoCloseable {
+		private final Allocation allocation;
+		private final Entry<?> entry;
+		private boolean closed;
+
+		private ResourceRef(Allocation allocation, Entry<?> entry) {
+			this.allocation = allocation;
+			this.entry = entry;
+		}
+
+		@Override
+		public void close() {
+			if (closed) {
+				return;
+			}
+			closed = true;
+			allocation.release(entry);
+		}
+	}
+
+	private final class Entry<T> {
+		private final T value;
+		private final long bytes;
+		private final Runnable destroy;
+		private final Runnable remove;
+		private int references;
+		private boolean entryDestroyed;
+
+		private Entry(T value, long bytes, Runnable destroy, Runnable remove) {
+			this.value = value;
+			this.bytes = bytes;
+			this.destroy = destroy;
+			this.remove = remove;
+		}
+
+		private void destroy() {
+			if (entryDestroyed) {
+				return;
+			}
+			entryDestroyed = true;
+			destroy.run();
+		}
+	}
+
+	public record AcquiredRenderTarget(RenderTarget target, ResourceRef ref) {
+	}
+
+	public record AcquiredDepthCopies(DepthCopies copies, ResourceRef ref) {
+	}
+
+	public record AcquiredImage(GlImage image, ResourceRef ref) {
+	}
+
+	public record ProfilePressure(String profileKey, int allocations, int resources, long sharedBytes, long exclusiveBytes) {
 	}
 
 	public record DepthCopies(GpuTexture first, GpuTexture second) {

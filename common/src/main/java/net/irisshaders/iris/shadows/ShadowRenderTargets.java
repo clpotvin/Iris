@@ -24,10 +24,13 @@ import java.util.List;
 
 public class ShadowRenderTargets {
 	private final RenderTarget[] targets;
+	private final AmbienceRenderTargetPool.ResourceRef[] targetRefs;
 	private final PackShadowDirectives shadowDirectives;
 	private final AmbienceRenderTargetPool ambiencePool;
+	private final AmbienceRenderTargetPool.Allocation ambienceAllocation;
 	private final GpuTexture mainDepth;
 	private final GpuTexture noTranslucents;
+	private final AmbienceRenderTargetPool.ResourceRef depthCopiesRef;
 	private final GlFramebuffer depthSourceFb;
 	private final GlFramebuffer noTranslucentsDestFb;
 	private final boolean[] flipped;
@@ -44,14 +47,19 @@ public class ShadowRenderTargets {
 	private boolean translucentDepthDirty;
 
 	public ShadowRenderTargets(WorldRenderingPipeline pipeline, int resolution, PackShadowDirectives shadowDirectives) {
-		this(pipeline, resolution, shadowDirectives, null);
+		this(pipeline, resolution, shadowDirectives, null, null);
 	}
 
-	public ShadowRenderTargets(WorldRenderingPipeline pipeline, int resolution, PackShadowDirectives shadowDirectives, AmbienceRenderTargetPool ambiencePool) {
+	public ShadowRenderTargets(WorldRenderingPipeline pipeline, int resolution, PackShadowDirectives shadowDirectives, AmbienceRenderTargetPool ambiencePool, AmbienceRenderTargetPool.Allocation ambienceAllocation) {
 		this.shadowDirectives = shadowDirectives;
 		this.ambiencePool = ambiencePool;
+		this.ambienceAllocation = ambienceAllocation;
+		if (ambiencePool != null && ambienceAllocation == null) {
+			throw new IllegalArgumentException("Pooled shadow render targets require an ambience allocation owner");
+		}
 		this.size = pipeline.hasFeature(FeatureFlags.HIGHER_SHADOWCOLOR) ? PackShadowDirectives.MAX_SHADOW_COLOR_BUFFERS_IRIS : PackShadowDirectives.MAX_SHADOW_COLOR_BUFFERS_OF;
 		targets = new RenderTarget[size];
+		targetRefs = new AmbienceRenderTargetPool.ResourceRef[size];
 		formats = new InternalTextureFormat[size];
 		flipped = new boolean[size];
 		hardwareFiltered = new boolean[size];
@@ -72,10 +80,12 @@ public class ShadowRenderTargets {
 		if (ambiencePool == null) {
 			this.mainDepth = RenderSystem.getDevice().createTexture("Shadow Map", GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, this.mipped[0] ? log2(resolution) : 1);
 			this.noTranslucents = RenderSystem.getDevice().createTexture("Shadow Map / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, this.mipped[1] ? log2(resolution) : 1);
+			this.depthCopiesRef = null;
 		} else {
-			AmbienceRenderTargetPool.DepthCopies copies = ambiencePool.acquireShadowDepthCopies(resolution, this.mipped[0], this.mipped[1]);
-			this.mainDepth = copies.first();
-			this.noTranslucents = copies.second();
+			AmbienceRenderTargetPool.AcquiredDepthCopies acquired = ambiencePool.acquireShadowDepthCopies(ambienceAllocation, resolution, this.mipped[0], this.mipped[1]);
+			this.mainDepth = acquired.copies().first();
+			this.noTranslucents = acquired.copies().second();
+			this.depthCopiesRef = acquired.ref();
 		}
 		// TODO: linear filtered shadow maps
 
@@ -117,10 +127,18 @@ public class ShadowRenderTargets {
 				target.destroy();
 			}
 		}
+		for (int i = 0; i < targetRefs.length; i++) {
+			if (targetRefs[i] != null) {
+				targetRefs[i].close();
+				targetRefs[i] = null;
+			}
+		}
 
 		if (ambiencePool == null) {
 			mainDepth.close();
 			noTranslucents.close();
+		} else if (depthCopiesRef != null) {
+			depthCopiesRef.close();
 		}
 	}
 
@@ -161,8 +179,18 @@ public class ShadowRenderTargets {
 				.setName("shadowcolor" + index)
 				.setPixelFormat(settings.getFormat().getPixelFormat()).build();
 		} else {
-			targets[index] = ambiencePool.acquireShadowColorTarget(index, resolution,
+			AmbienceRenderTargetPool.AcquiredRenderTarget acquired = ambiencePool.acquireShadowColorTarget(ambienceAllocation, index, resolution,
 				settings.getFormat(), settings.getFormat().getPixelFormat());
+			RenderTarget previousTarget = targets[index];
+			AmbienceRenderTargetPool.ResourceRef previousRef = targetRefs[index];
+			targets[index] = acquired.target();
+			targetRefs[index] = acquired.ref();
+			if (previousTarget != null) {
+				previousTarget.destroy();
+			}
+			if (previousRef != null) {
+				previousRef.close();
+			}
 		}
 		formats[index] = settings.getFormat();
 		if (settings.getClear()) {

@@ -26,8 +26,10 @@ import java.util.Map;
 
 public class RenderTargets {
 	private final RenderTarget[] targets;
+	private final AmbienceRenderTargetPool.ResourceRef[] targetRefs;
 	private GpuTexture noTranslucents;
 	private GpuTexture noHand;
+	private AmbienceRenderTargetPool.ResourceRef depthCopiesRef;
 	private final GlFramebuffer depthSourceFb;
 	private final GlFramebuffer noTranslucentsDestFb;
 	private final GlFramebuffer noHandDestFb;
@@ -35,6 +37,7 @@ public class RenderTargets {
 	private final Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> targetSettingsMap;
 	private final PackDirectives packDirectives;
 	private final AmbienceRenderTargetPool ambiencePool;
+	private final AmbienceRenderTargetPool.Allocation ambienceAllocation;
 	private GpuTexture currentDepthTexture;
 	private DepthBufferFormat currentDepthFormat;
 	private DepthCopyStrategy copyStrategy;
@@ -48,15 +51,20 @@ public class RenderTargets {
 	private boolean destroyed;
 
 	public RenderTargets(int width, int height, GpuTexture depthTexture, int depthBufferVersion, DepthBufferFormat depthFormat, Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> renderTargets, PackDirectives packDirectives) {
-		this(width, height, depthTexture, depthBufferVersion, depthFormat, renderTargets, packDirectives, null);
+		this(width, height, depthTexture, depthBufferVersion, depthFormat, renderTargets, packDirectives, null, null);
 	}
 
-	public RenderTargets(int width, int height, GpuTexture depthTexture, int depthBufferVersion, DepthBufferFormat depthFormat, Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> renderTargets, PackDirectives packDirectives, AmbienceRenderTargetPool ambiencePool) {
+	public RenderTargets(int width, int height, GpuTexture depthTexture, int depthBufferVersion, DepthBufferFormat depthFormat, Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> renderTargets, PackDirectives packDirectives, AmbienceRenderTargetPool ambiencePool, AmbienceRenderTargetPool.Allocation ambienceAllocation) {
 		targets = new RenderTarget[renderTargets.size()];
+		targetRefs = new AmbienceRenderTargetPool.ResourceRef[renderTargets.size()];
 
 		targetSettingsMap = renderTargets;
 		this.packDirectives = packDirectives;
 		this.ambiencePool = ambiencePool;
+		this.ambienceAllocation = ambienceAllocation;
+		if (ambiencePool != null && ambienceAllocation == null) {
+			throw new IllegalArgumentException("Pooled render targets require an ambience allocation owner");
+		}
 
 		this.currentDepthTexture = depthTexture;
 		this.currentDepthFormat = depthFormat;
@@ -80,9 +88,10 @@ public class RenderTargets {
 			this.noTranslucents = RenderSystem.getDevice().createTexture("Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, mojangDepthFormat, width, height, 1, 1);
 			this.noHand = RenderSystem.getDevice().createTexture("Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, mojangDepthFormat, width, height, 1, 1);
 		} else {
-			AmbienceRenderTargetPool.DepthCopies copies = ambiencePool.acquireMainDepthCopies(width, height, mojangDepthFormat);
-			this.noTranslucents = copies.first();
-			this.noHand = copies.second();
+			AmbienceRenderTargetPool.AcquiredDepthCopies acquired = ambiencePool.acquireMainDepthCopies(ambienceAllocation, width, height, mojangDepthFormat);
+			this.noTranslucents = acquired.copies().first();
+			this.noHand = acquired.copies().second();
+			this.depthCopiesRef = acquired.ref();
 		}
 
 		this.noTranslucentsDestFb = createFramebufferWritingToMain(new int[]{0});
@@ -107,10 +116,19 @@ public class RenderTargets {
 				target.destroy();
 			}
 		}
+		for (int i = 0; i < targetRefs.length; i++) {
+			if (targetRefs[i] != null) {
+				targetRefs[i].close();
+				targetRefs[i] = null;
+			}
+		}
 
 		if (ambiencePool == null) {
 			noTranslucents.close();
 			noHand.close();
+		} else if (depthCopiesRef != null) {
+			depthCopiesRef.close();
+			depthCopiesRef = null;
 		}
 	}
 
@@ -153,8 +171,18 @@ public class RenderTargets {
 		if (ambiencePool == null) {
 			targets[index] = builder.build();
 		} else {
-			targets[index] = ambiencePool.acquireMainColorTarget(index, dimensions.x, dimensions.y,
+			AmbienceRenderTargetPool.AcquiredRenderTarget acquired = ambiencePool.acquireMainColorTarget(ambienceAllocation, index, dimensions.x, dimensions.y,
 				settings.getInternalFormat(), settings.getInternalFormat().getPixelFormat());
+			RenderTarget previousTarget = targets[index];
+			AmbienceRenderTargetPool.ResourceRef previousRef = targetRefs[index];
+			targets[index] = acquired.target();
+			targetRefs[index] = acquired.ref();
+			if (previousTarget != null) {
+				previousTarget.destroy();
+			}
+			if (previousRef != null) {
+				previousRef.close();
+			}
 		}
 	}
 
@@ -193,6 +221,7 @@ public class RenderTargets {
 
 		if (depthFormatChanged || sizeChanged) {
 			TextureFormat mojangDepthFormat = IrisPlatformHelpers.getInstance().mojangDepthFormat(newDepthFormat);
+			AmbienceRenderTargetPool.ResourceRef previousDepthCopiesRef = null;
 
 			if (ambiencePool == null) {
 				// Reallocate depth buffers
@@ -202,15 +231,20 @@ public class RenderTargets {
 				this.noTranslucents = RenderSystem.getDevice().createTexture("Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, newDepthTextureId.getFormat(), newWidth, newHeight, 1, 1);
 				this.noHand = RenderSystem.getDevice().createTexture("Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, newDepthTextureId.getFormat(), newWidth, newHeight, 1, 1);
 			} else {
-				AmbienceRenderTargetPool.DepthCopies copies = ambiencePool.acquireMainDepthCopies(newWidth, newHeight, mojangDepthFormat);
-				this.noTranslucents = copies.first();
-				this.noHand = copies.second();
+				previousDepthCopiesRef = depthCopiesRef;
+				AmbienceRenderTargetPool.AcquiredDepthCopies acquired = ambiencePool.acquireMainDepthCopies(ambienceAllocation, newWidth, newHeight, mojangDepthFormat);
+				this.noTranslucents = acquired.copies().first();
+				this.noHand = acquired.copies().second();
+				this.depthCopiesRef = acquired.ref();
 			}
 
 			// TODO: linear horrors
 
 			this.noTranslucentsDestFb.addDepthAttachment(this.noTranslucents);
 			this.noHandDestFb.addDepthAttachment(this.noHand);
+			if (previousDepthCopiesRef != null) {
+				previousDepthCopiesRef.close();
+			}
 
 			this.translucentDepthDirty = true;
 			this.handDepthDirty = true;

@@ -130,6 +130,7 @@ public class Iris {
 	private static String activeTransientShaderPackContextKey;
 	private static AmbienceRenderTargetPool ambienceRenderTargetPool;
 	private static AmbienceRenderTargetPool ambiencePipelineBuildPool;
+	private static String ambiencePipelineBuildProfileKey;
 
 	static {
 		if (!BuildConfig.ACTIVATE_RENDERDOC && IrisPlatformHelpers.getInstance().isDevelopmentEnvironment() && System.getProperty("user.name").contains("ims") && Util.getPlatform() == Util.OS.LINUX) {
@@ -428,7 +429,10 @@ public class Iris {
 		destroyEverything();
 
 		boolean loaded;
+		AmbienceRenderTargetPool previousBuildPool = ambiencePipelineBuildPool;
+		String previousBuildProfileKey = ambiencePipelineBuildProfileKey;
 		ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
+		ambiencePipelineBuildProfileKey = name;
 		try {
 			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
 			if (loaded && Minecraft.getInstance().level != null) {
@@ -441,7 +445,8 @@ public class Iris {
 				}
 			}
 		} finally {
-			ambiencePipelineBuildPool = null;
+			ambiencePipelineBuildPool = previousBuildPool;
+			ambiencePipelineBuildProfileKey = previousBuildProfileKey;
 		}
 
 		if (!loaded) {
@@ -493,7 +498,10 @@ public class Iris {
 		activeTransientShaderPackContextKey = null;
 
 		boolean loaded = false;
+		AmbienceRenderTargetPool previousBuildPool = ambiencePipelineBuildPool;
+		String previousBuildProfileKey = ambiencePipelineBuildProfileKey;
 		ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
+		ambiencePipelineBuildProfileKey = cacheKey;
 		try {
 			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
 			if (loaded) {
@@ -515,12 +523,14 @@ public class Iris {
 				return true;
 			}
 		} catch (RuntimeException e) {
-			ambiencePipelineBuildPool = null;
+			ambiencePipelineBuildPool = previousBuildPool;
+			ambiencePipelineBuildProfileKey = previousBuildProfileKey;
 			destroyCurrentTransientAttempt();
 			activateShaderRuntimeContext(previous, previousTransientKey);
 			throw e;
 		} finally {
-			ambiencePipelineBuildPool = null;
+			ambiencePipelineBuildPool = previousBuildPool;
+			ambiencePipelineBuildProfileKey = previousBuildProfileKey;
 		}
 
 		destroyCurrentTransientAttempt();
@@ -580,6 +590,10 @@ public class Iris {
 		return ambiencePipelineBuildPool;
 	}
 
+	public static String getAmbienceRenderTargetPoolProfileKeyForPipelineBuild() {
+		return ambiencePipelineBuildProfileKey;
+	}
+
 	public static int getAmbienceRenderTargetPoolResourceCount() {
 		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getResourceCount();
 	}
@@ -594,6 +608,50 @@ public class Iris {
 
 	public static long getAmbienceRenderTargetPoolMisses() {
 		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getMisses();
+	}
+
+	public static long getAmbienceRenderTargetPoolReleases() {
+		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getReleases();
+	}
+
+	public static long getAmbienceRenderTargetPoolDestroyedResources() {
+		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getDestroyedResources();
+	}
+
+	public static String getAmbienceRenderTargetPoolProfilePressureSummary() {
+		if (ambienceRenderTargetPool == null) {
+			return "none";
+		}
+
+		Map<String, AmbienceRenderTargetPool.ProfilePressure> pressures = ambienceRenderTargetPool.getProfilePressures();
+		if (pressures.isEmpty()) {
+			return "none";
+		}
+
+		StringBuilder builder = new StringBuilder();
+		for (AmbienceRenderTargetPool.ProfilePressure pressure : pressures.values()) {
+			if (builder.length() > 0) {
+				builder.append(",");
+			}
+			builder.append(summarizeAmbienceProfileKey(pressure.profileKey()))
+				.append("(allocs=").append(pressure.allocations())
+				.append(",resources=").append(pressure.resources())
+				.append(",sharedBytes=").append(pressure.sharedBytes())
+				.append(",exclusiveBytes=").append(pressure.exclusiveBytes())
+				.append(")");
+		}
+		return builder.toString();
+	}
+
+	private static String summarizeAmbienceProfileKey(String key) {
+		if (key == null || key.isBlank()) {
+			return "unknown";
+		}
+		String[] parts = key.split(":", 3);
+		if (parts.length >= 2) {
+			return parts[0] + ":" + parts[1];
+		}
+		return key;
 	}
 
 	private static void handleException(Exception e) {
@@ -846,13 +904,16 @@ public class Iris {
 		activeTransientShaderPackContextKey = transientKey;
 
 		AmbienceRenderTargetPool previousBuildPool = ambiencePipelineBuildPool;
+		String previousBuildProfileKey = ambiencePipelineBuildProfileKey;
 		if (transientKey != null) {
 			ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
+			ambiencePipelineBuildProfileKey = transientKey;
 		}
 		try {
 			prepareTransientPipelineContext();
 		} finally {
 			ambiencePipelineBuildPool = previousBuildPool;
+			ambiencePipelineBuildProfileKey = previousBuildProfileKey;
 		}
 		if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
 			pipeline.onAmbienceProfileActivated();
@@ -884,6 +945,7 @@ public class Iris {
 			ambienceRenderTargetPool = null;
 		}
 		ambiencePipelineBuildPool = null;
+		ambiencePipelineBuildProfileKey = null;
 	}
 
 	private static void enforceTransientShaderPackContextBudget() {

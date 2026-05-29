@@ -146,6 +146,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 	@Nullable
 	private final AmbienceRenderTargetPool ambiencePool;
+	@Nullable
+	private final AmbienceRenderTargetPool.Allocation ambiencePoolAllocation;
+	private final List<AmbienceRenderTargetPool.ResourceRef> ambienceCustomImageRefs = new ArrayList<>();
 	private final RenderTargets renderTargets;
 	private final ShaderMap shaderMap;
 	private final CustomUniforms customUniforms;
@@ -254,6 +257,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		long constructorStartNanos = System.nanoTime();
 		ShaderPrinter.resetPrintState();
 		this.ambiencePool = Iris.getAmbienceRenderTargetPoolForPipelineBuild();
+		this.ambiencePoolAllocation = ambiencePool == null ? null : ambiencePool.createAllocation(Iris.getAmbienceRenderTargetPoolProfileKeyForPipelineBuild());
+		boolean constructed = false;
+		try {
 
 		this.shouldRenderUnderwaterOverlay = programSet.getPackDirectives().underwaterOverlay();
 		this.supportsEndFlash = programSet.getPackDirectives().supportsEndFlash();
@@ -308,7 +314,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		this.customImages = new HashSet<>();
 		for (ImageInformation information : programSet.getPack().getIrisCustomImages()) {
 			if (ambiencePool != null && !information.isRelative() && information.clear()) {
-				customImages.add(ambiencePool.acquireCustomImage(information));
+				AmbienceRenderTargetPool.AcquiredImage acquired = ambiencePool.acquireCustomImage(ambiencePoolAllocation, information);
+				customImages.add(acquired.image());
+				ambienceCustomImageRefs.add(acquired.ref());
 			} else if (information.isRelative()) {
 				customImages.add(new GlImage.Relative(information.name(), information.samplerName(), information.format(), information.internalTextureFormat(), information.type(), information.clear(), information.relativeWidth(), information.relativeHeight(), main.width, main.height));
 			} else {
@@ -337,7 +345,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		}
 
 		long renderTargetsStartNanos = System.nanoTime();
-		this.renderTargets = new RenderTargets(main.width, main.height, depthTexture, ((Blaze3dRenderTargetExt) main).iris$getDepthBufferVersion(), depthBufferFormat, programSet.getPackDirectives().getRenderTargetDirectives().getRenderTargetSettings(), programSet.getPackDirectives(), ambiencePool);
+		this.renderTargets = new RenderTargets(main.width, main.height, depthTexture, ((Blaze3dRenderTargetExt) main).iris$getDepthBufferVersion(), depthBufferFormat, programSet.getPackDirectives().getRenderTargetDirectives().getRenderTargetSettings(), programSet.getPackDirectives(), ambiencePool, ambiencePoolAllocation);
 		long renderTargetsNanos = System.nanoTime() - renderTargetsStartNanos;
 		this.sunPathRotation = programSet.getPackDirectives().getSunPathRotation();
 
@@ -376,7 +384,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		this.shadowTargetsSupplier = () -> {
 			if (shadowRenderTargets == null) {
 				// TODO: Support more than two shadowcolor render targets
-				this.shadowRenderTargets = new ShadowRenderTargets(this, shadowMapResolution, shadowDirectives, ambiencePool);
+				this.shadowRenderTargets = new ShadowRenderTargets(this, shadowMapResolution, shadowDirectives, ambiencePool, ambiencePoolAllocation);
 			}
 
 			return shadowRenderTargets;
@@ -610,15 +618,27 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			this, renderTargets, flippedAfterPrepare);
 
 		if (ambiencePool != null) {
+			AmbienceRenderTargetPool.ProfilePressure pressure = getAmbienceProfilePressure();
 			WynncraftDebugLog.info("ambience-pipeline-build",
-				"Ambience pipeline build: customImages={}ms renderTargets={}ms total={}ms poolResources={} poolBytes={} poolHits={} poolMisses={}",
+				"Ambience pipeline build: customImages={}ms renderTargets={}ms total={}ms poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} profileResources={} profileSharedBytes={} profileExclusiveBytes={}",
 				customImagesNanos / 1_000_000L,
 				renderTargetsNanos / 1_000_000L,
 				(System.nanoTime() - constructorStartNanos) / 1_000_000L,
 				ambiencePool.getResourceCount(),
 				ambiencePool.getEstimatedBytes(),
 				ambiencePool.getHits(),
-				ambiencePool.getMisses());
+				ambiencePool.getMisses(),
+				ambiencePool.getReleases(),
+				ambiencePool.getDestroyedResources(),
+				pressure == null ? 0 : pressure.resources(),
+				pressure == null ? 0L : pressure.sharedBytes(),
+				pressure == null ? 0L : pressure.exclusiveBytes());
+		}
+		constructed = true;
+		} finally {
+			if (!constructed && ambiencePoolAllocation != null) {
+				ambiencePoolAllocation.close();
+			}
 		}
 	}
 
@@ -657,8 +677,14 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 		WynncraftDebugLog.info("ambience-profile-activate-pool",
-			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={}",
-			ambiencePool.getResourceCount(), ambiencePool.getEstimatedBytes(), ambiencePool.getHits(), ambiencePool.getMisses());
+			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} profilePressure={}",
+			ambiencePool.getResourceCount(), ambiencePool.getEstimatedBytes(), ambiencePool.getHits(), ambiencePool.getMisses(),
+			ambiencePool.getReleases(), ambiencePool.getDestroyedResources(), getAmbienceProfilePressure());
+	}
+
+	@Nullable
+	public AmbienceRenderTargetPool.ProfilePressure getAmbienceProfilePressure() {
+		return ambiencePoolAllocation == null ? null : ambiencePoolAllocation.pressure();
 	}
 
 	private void rebuildMainClearPasses() {
@@ -1680,6 +1706,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		clearImages.forEach(ImageClearPass::destroy);
 		customImages.forEach(GlImage::destroy);
+		releaseAmbienceCustomImageRefs();
 
 		if (shadowRenderTargets != null) {
 			shadowRenderTargets.destroy();
@@ -1692,6 +1719,16 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (shaderStorageBufferHolder != null) {
 			shaderStorageBufferHolder.destroyBuffers();
 		}
+		if (ambiencePoolAllocation != null) {
+			ambiencePoolAllocation.close();
+		}
+	}
+
+	private void releaseAmbienceCustomImageRefs() {
+		for (AmbienceRenderTargetPool.ResourceRef ref : ambienceCustomImageRefs) {
+			ref.close();
+		}
+		ambienceCustomImageRefs.clear();
 	}
 
 	@Override
