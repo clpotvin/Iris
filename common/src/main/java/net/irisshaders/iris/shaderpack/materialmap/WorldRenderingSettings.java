@@ -14,6 +14,7 @@ public class WorldRenderingSettings {
 	public static final WorldRenderingSettings INSTANCE = new WorldRenderingSettings();
 
 	private boolean reloadRequired;
+	private final StringBuilder reloadReasons = new StringBuilder();
 	private Object2IntMap<BlockState> blockStateIds;
 	private Map<Block, BlockRenderType> blockTypeIds;
 	private Object2IntFunction<NamespacedId> entityIds;
@@ -46,6 +47,15 @@ public class WorldRenderingSettings {
 
 	public void clearReloadRequired() {
 		reloadRequired = false;
+		reloadReasons.setLength(0);
+	}
+
+	public String getReloadReasonSummary() {
+		if (reloadReasons.length() == 0) {
+			return "none";
+		}
+
+		return reloadReasons.toString();
 	}
 
 	@Nullable
@@ -58,7 +68,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("blockStateIds", describeMap(this.blockStateIds), describeMap(blockStateIds));
 		this.blockStateIds = blockStateIds;
 	}
 
@@ -71,7 +81,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("blockTypeIds", describeMap(this.blockTypeIds), describeMap(blockTypeIds));
 		this.blockTypeIds = blockTypeIds;
 	}
 
@@ -105,7 +115,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("ambientOcclusionLevel", Float.toString(this.ambientOcclusionLevel), Float.toString(ambientOcclusionLevel));
 		this.ambientOcclusionLevel = ambientOcclusionLevel;
 	}
 
@@ -118,7 +128,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("disableDirectionalShading", Boolean.toString(this.disableDirectionalShading), Boolean.toString(disableDirectionalShading));
 		this.disableDirectionalShading = disableDirectionalShading;
 	}
 
@@ -131,7 +141,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("useSeparateAo", Boolean.toString(this.useSeparateAo), Boolean.toString(useSeparateAo));
 		this.useSeparateAo = useSeparateAo;
 	}
 
@@ -144,7 +154,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("chunkVertexFormat", describeValue(this.chunkVertexFormat), describeValue(chunkVertexFormat));
 		this.chunkVertexFormat = chunkVertexFormat;
 	}
 
@@ -157,7 +167,7 @@ public class WorldRenderingSettings {
 			return;
 		}
 
-		this.reloadRequired = true;
+		markReloadRequired("voxelizeLightBlocks", Boolean.toString(this.voxelizeLightBlocks), Boolean.toString(voxelizeLightBlocks));
 		this.voxelizeLightBlocks = voxelizeLightBlocks;
 	}
 
@@ -179,5 +189,25 @@ public class WorldRenderingSettings {
 
 	public boolean breaksAnisotropy() {
 		return breaksAnisotropy;
+	}
+
+	private void markReloadRequired(String field, String before, String after) {
+		this.reloadRequired = true;
+		if (reloadReasons.length() > 0) {
+			reloadReasons.append("; ");
+		}
+		reloadReasons.append(field).append('(').append(before).append(" -> ").append(after).append(')');
+	}
+
+	private static String describeMap(@Nullable Map<?, ?> map) {
+		if (map == null) {
+			return "null";
+		}
+
+		return map.getClass().getSimpleName() + "[size=" + map.size() + ",id=" + System.identityHashCode(map) + ']';
+	}
+
+	private static String describeValue(@Nullable Object value) {
+		return value == null ? "null" : value.toString();
 	}
 }

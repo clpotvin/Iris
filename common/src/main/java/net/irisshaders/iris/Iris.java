@@ -960,6 +960,12 @@ public class Iris {
 			pipeline.applyWorldRenderingSettings();
 		}
 		if (WorldRenderingSettings.INSTANCE.isReloadRequired()) {
+			String reloadReasons = WorldRenderingSettings.INSTANCE.getReloadReasonSummary();
+			if (timing != null && WynncraftDebugLog.shouldLog("ambience-world-settings-reload")) {
+				WynncraftDebugLog.info("ambience-world-settings-reload",
+					"Ambience world rendering reload required: action={} profile={} reasons={}",
+					timing.action(), timing.profileKey(), reloadReasons);
+			}
 			if (Minecraft.getInstance().levelRenderer != null) {
 				long reloadStartNanos = System.nanoTime();
 				Minecraft.getInstance().levelRenderer.allChanged();
