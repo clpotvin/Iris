@@ -240,7 +240,7 @@ public final class AmbienceRuntime {
 		AmbiencePackManager manager = AmbiencePackManager.getInstance();
 		long tickMicros = (System.nanoTime() - tickStartNanos) / 1_000L;
 		WynncraftDebugLog.info("ambience-runtime-diagnostics",
-			"Ambience diagnostics: state={} active={} pending={} resolve={}us tick={}us regions={} installedShaderPacks={} transientContexts={} transientContextBudget={} retainedContexts={} programBinarySupported={} programBinaryFormats={} programBinaries={} programBinaryBytes={}",
+			"Ambience diagnostics: state={} active={} pending={} resolve={}us tick={}us regions={} installedShaderPacks={} transientContexts={} transientContextBudget={} retainedContexts={} programBinarySupported={} programBinaryFormats={} programBinaries={} programBinaryBytes={} targetPoolResources={} targetPoolBytes={} targetPoolHits={} targetPoolMisses={}",
 			state,
 			activeProfile == null ? "none" : activeProfile.profileId(),
 			pendingProfile == null ? "none" : pendingProfile.profileId(),
@@ -254,7 +254,11 @@ public final class AmbienceRuntime {
 			Iris.isProgramBinaryCacheAvailable(),
 			Iris.getProgramBinaryCacheFormatCount(),
 			Iris.getProgramBinaryCacheEntryCount(),
-			Iris.getProgramBinaryCacheBytes());
+			Iris.getProgramBinaryCacheBytes(),
+			Iris.getAmbienceRenderTargetPoolResourceCount(),
+			Iris.getAmbienceRenderTargetPoolEstimatedBytes(),
+			Iris.getAmbienceRenderTargetPoolHits(),
+			Iris.getAmbienceRenderTargetPoolMisses());
 	}
 
 	public record WarmupResult(int warmed, int failed) {

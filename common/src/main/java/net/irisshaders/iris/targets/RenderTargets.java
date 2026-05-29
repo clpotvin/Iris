@@ -7,6 +7,7 @@ import com.mojang.blaze3d.textures.AddressMode;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.TextureFormat;
+import net.irisshaders.iris.ambience.AmbienceRenderTargetPool;
 import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.framebuffer.GlFramebuffer;
 import net.irisshaders.iris.gl.texture.DepthBufferFormat;
@@ -33,6 +34,7 @@ public class RenderTargets {
 	private final List<GlFramebuffer> ownedFramebuffers;
 	private final Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> targetSettingsMap;
 	private final PackDirectives packDirectives;
+	private final AmbienceRenderTargetPool ambiencePool;
 	private GpuTexture currentDepthTexture;
 	private DepthBufferFormat currentDepthFormat;
 	private DepthCopyStrategy copyStrategy;
@@ -46,10 +48,15 @@ public class RenderTargets {
 	private boolean destroyed;
 
 	public RenderTargets(int width, int height, GpuTexture depthTexture, int depthBufferVersion, DepthBufferFormat depthFormat, Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> renderTargets, PackDirectives packDirectives) {
+		this(width, height, depthTexture, depthBufferVersion, depthFormat, renderTargets, packDirectives, null);
+	}
+
+	public RenderTargets(int width, int height, GpuTexture depthTexture, int depthBufferVersion, DepthBufferFormat depthFormat, Map<Integer, PackRenderTargetDirectives.RenderTargetSettings> renderTargets, PackDirectives packDirectives, AmbienceRenderTargetPool ambiencePool) {
 		targets = new RenderTarget[renderTargets.size()];
 
 		targetSettingsMap = renderTargets;
 		this.packDirectives = packDirectives;
+		this.ambiencePool = ambiencePool;
 
 		this.currentDepthTexture = depthTexture;
 		this.currentDepthFormat = depthFormat;
@@ -69,8 +76,14 @@ public class RenderTargets {
 
 		TextureFormat mojangDepthFormat = IrisPlatformHelpers.getInstance().mojangDepthFormat(depthFormat);
 
-		this.noTranslucents = RenderSystem.getDevice().createTexture("Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, mojangDepthFormat, width, height, 1, 1);
-		this.noHand = RenderSystem.getDevice().createTexture("Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, mojangDepthFormat, width, height, 1, 1);
+		if (ambiencePool == null) {
+			this.noTranslucents = RenderSystem.getDevice().createTexture("Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, mojangDepthFormat, width, height, 1, 1);
+			this.noHand = RenderSystem.getDevice().createTexture("Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, mojangDepthFormat, width, height, 1, 1);
+		} else {
+			AmbienceRenderTargetPool.DepthCopies copies = ambiencePool.acquireMainDepthCopies(width, height, mojangDepthFormat);
+			this.noTranslucents = copies.first();
+			this.noHand = copies.second();
+		}
 
 		this.noTranslucentsDestFb = createFramebufferWritingToMain(new int[]{0});
 		this.noTranslucentsDestFb.addDepthAttachment(this.noTranslucents);
@@ -95,8 +108,10 @@ public class RenderTargets {
 			}
 		}
 
-		noTranslucents.close();
-		noHand.close();
+		if (ambiencePool == null) {
+			noTranslucents.close();
+			noHand.close();
+		}
 	}
 
 	public int getRenderTargetCount() {
@@ -130,10 +145,17 @@ public class RenderTargets {
 	private void create(int index) {
 		PackRenderTargetDirectives.RenderTargetSettings settings = targetSettingsMap.get(index);
 		Vector2i dimensions = packDirectives.getTextureScaleOverride(index, cachedWidth, cachedHeight);
-		targets[index] = RenderTarget.builder().setDimensions(dimensions.x, dimensions.y)
+		RenderTarget.Builder builder = RenderTarget.builder().setDimensions(dimensions.x, dimensions.y)
 			.setName("colortex" + index)
 			.setInternalFormat(settings.getInternalFormat())
-			.setPixelFormat(settings.getInternalFormat().getPixelFormat()).build();
+			.setPixelFormat(settings.getInternalFormat().getPixelFormat());
+
+		if (ambiencePool == null) {
+			targets[index] = builder.build();
+		} else {
+			targets[index] = ambiencePool.acquireMainColorTarget(index, dimensions.x, dimensions.y,
+				settings.getInternalFormat(), settings.getInternalFormat().getPixelFormat());
+		}
 	}
 
 	public GpuTexture getDepthTexture() {
@@ -170,12 +192,20 @@ public class RenderTargets {
 		}
 
 		if (depthFormatChanged || sizeChanged) {
-			// Reallocate depth buffers
-			noTranslucents.close();
-			noHand.close();
+			TextureFormat mojangDepthFormat = IrisPlatformHelpers.getInstance().mojangDepthFormat(newDepthFormat);
 
-			this.noTranslucents = RenderSystem.getDevice().createTexture("Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, newDepthTextureId.getFormat(), newWidth, newHeight, 1, 1);
-			this.noHand = RenderSystem.getDevice().createTexture("Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, newDepthTextureId.getFormat(), newWidth, newHeight, 1, 1);
+			if (ambiencePool == null) {
+				// Reallocate depth buffers
+				noTranslucents.close();
+				noHand.close();
+
+				this.noTranslucents = RenderSystem.getDevice().createTexture("Depth / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, newDepthTextureId.getFormat(), newWidth, newHeight, 1, 1);
+				this.noHand = RenderSystem.getDevice().createTexture("Depth / Before Hand", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, newDepthTextureId.getFormat(), newWidth, newHeight, 1, 1);
+			} else {
+				AmbienceRenderTargetPool.DepthCopies copies = ambiencePool.acquireMainDepthCopies(newWidth, newHeight, mojangDepthFormat);
+				this.noTranslucents = copies.first();
+				this.noHand = copies.second();
+			}
 
 			// TODO: linear horrors
 
@@ -209,8 +239,16 @@ public class RenderTargets {
 
 			for (int i = 0; i < targets.length; i++) {
 				if (targets[i] != null) {
-					targets[i].resize(packDirectives.getTextureScaleOverride(i, newWidth, newHeight));
+					if (ambiencePool == null) {
+						targets[i].resize(packDirectives.getTextureScaleOverride(i, newWidth, newHeight));
+					} else {
+						create(i);
+					}
 				}
+			}
+
+			if (ambiencePool != null) {
+				refreshDepthCopyFramebufferColorAttachments();
 			}
 
 			fullClearRequired = true;
@@ -249,6 +287,19 @@ public class RenderTargets {
 
 	public void onFullClear() {
 		fullClearRequired = false;
+	}
+
+	public void forceFullClear() {
+		fullClearRequired = true;
+		translucentDepthDirty = true;
+		handDepthDirty = true;
+	}
+
+	private void refreshDepthCopyFramebufferColorAttachments() {
+		int mainColor = getOrCreate(0).getMainTexture();
+		depthSourceFb.addColorAttachment(0, mainColor);
+		noTranslucentsDestFb.addColorAttachment(0, mainColor);
+		noHandDestFb.addColorAttachment(0, mainColor);
 	}
 
 	public GlFramebuffer createFramebufferWritingToMain(int[] drawBuffers) {
@@ -318,6 +369,49 @@ public class RenderTargets {
 		framebuffer.addDepthAttachment(currentDepthTexture);
 
 		return framebuffer;
+	}
+
+	public void refreshGbufferFramebuffer(GlFramebuffer framebuffer, ImmutableSet<Integer> stageWritesToAlt, int[] drawBuffers) {
+		if (drawBuffers.length == 0) {
+			framebuffer.addDepthAttachment(currentDepthTexture);
+			framebuffer.addColorAttachment(0, getOrCreate(0).getMainTexture());
+			framebuffer.noDrawBuffers();
+			return;
+		}
+
+		refreshColorFramebuffer(framebuffer, stageWritesToAlt, drawBuffers);
+		framebuffer.addDepthAttachment(currentDepthTexture);
+	}
+
+	public void refreshColorFramebuffer(GlFramebuffer framebuffer, ImmutableSet<Integer> stageWritesToAlt, int[] drawBuffers) {
+		if (drawBuffers.length == 0) {
+			throw new IllegalArgumentException("Framebuffer must have at least one color buffer");
+		}
+
+		ImmutableSet<Integer> stageWritesToMain = invert(stageWritesToAlt, drawBuffers);
+		int[] actualDrawBuffers = new int[drawBuffers.length];
+
+		for (int i = 0; i < drawBuffers.length; i++) {
+			actualDrawBuffers[i] = i;
+
+			if (drawBuffers[i] >= getRenderTargetCount()) {
+				throw new IllegalStateException("Render target with index " + drawBuffers[i] + " is not supported, only "
+					+ getRenderTargetCount() + " render targets are supported.");
+			}
+
+			RenderTarget target = this.getOrCreate(drawBuffers[i]);
+			int textureId = stageWritesToMain.contains(drawBuffers[i]) ? target.getMainTexture() : target.getAltTexture();
+
+			framebuffer.addColorAttachment(i, textureId);
+		}
+
+		framebuffer.drawBuffers(actualDrawBuffers);
+		framebuffer.readBuffer(0);
+
+		int status = framebuffer.getStatus();
+		if (status != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+			throw new IllegalStateException("Unexpected error while refreshing framebuffer: Draw buffers " + Arrays.toString(actualDrawBuffers) + " Status: " + status);
+		}
 	}
 
 	private GlFramebuffer createFullFramebuffer(boolean clearsAlt, int[] drawBuffers) {

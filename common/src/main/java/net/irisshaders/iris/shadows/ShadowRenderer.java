@@ -69,6 +69,7 @@ import org.joml.Vector3d;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 import org.lwjgl.opengl.ARBTextureSwizzle;
+import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30C;
 
@@ -92,6 +93,7 @@ public class ShadowRenderer {
 	private final int resolution;
 	private final float intervalSize;
 	private final Float fov;
+	private final PackShadowDirectives shadowDirectives;
 	private final ShadowRenderTargets targets;
 	private final ShadowCullState packCullingState;
 	private final ShadowCompositeRenderer compositeRenderer;
@@ -127,6 +129,7 @@ public class ShadowRenderer {
 		this.separateHardwareSamplers = separateHardwareSamplers;
 
 		final PackShadowDirectives shadowDirectives = directives.getShadowDirectives();
+		this.shadowDirectives = shadowDirectives;
 
 		this.halfPlaneLength = shadowDirectives.getDistance();
 		this.nearPlane = shadowDirectives.getNearPlane();
@@ -176,6 +179,11 @@ public class ShadowRenderer {
 		levelRenderState = new LevelRenderState();
 		submitNodeStorage = new SubmitNodeStorage();
 		featureRenderDispatcher = new FeatureRenderDispatcher(submitNodeStorage, Minecraft.getInstance().getBlockRenderer(), buffers.bufferSource(), Minecraft.getInstance().getAtlasManager(), outlineBuffers, buffers.crumblingBufferSource(), Minecraft.getInstance().font);
+	}
+
+	public void refreshSamplingSettings() {
+		mipmapPasses.clear();
+		configureSamplingSettings(shadowDirectives);
 	}
 
 	public static PoseStack createShadowModelView(float sunPathRotation, float intervalSize, float nearPlane, float farPlane) {
@@ -249,6 +257,8 @@ public class ShadowRenderer {
 		if (settings.getHardwareFiltering() && !separateHardwareSamplers) {
 			// We have to do this or else shadow hardware filtering breaks entirely!
 			IrisRenderSystem.texParameteri(glTextureId, GL20C.GL_TEXTURE_2D, GL20C.GL_TEXTURE_COMPARE_MODE, GL30C.GL_COMPARE_REF_TO_TEXTURE);
+		} else {
+			IrisRenderSystem.texParameteri(glTextureId, GL20C.GL_TEXTURE_2D, GL20C.GL_TEXTURE_COMPARE_MODE, GL11C.GL_NONE);
 		}
 
 		// Workaround for issues with old shader packs like Chocapic v4.

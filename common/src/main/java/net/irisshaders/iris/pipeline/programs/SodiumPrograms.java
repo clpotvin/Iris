@@ -45,6 +45,9 @@ import java.util.function.Supplier;
 public class SodiumPrograms {
 	private final EnumMap<Pass, GlFramebuffer> framebuffers = new EnumMap<>(Pass.class);
 	private final EnumMap<Pass, GlProgram<ChunkShaderInterface>> shaders = new EnumMap<>(Pass.class);
+	private final EnumMap<Pass, ProgramSource> sources = new EnumMap<>(Pass.class);
+	private final EnumMap<Pass, Supplier<ImmutableSet<Integer>>> flipStates = new EnumMap<>(Pass.class);
+	private final RenderTargets renderTargets;
 
 	private boolean hasBlockId;
 	private boolean hasMidUv;
@@ -54,9 +57,14 @@ public class SodiumPrograms {
 	public SodiumPrograms(IrisRenderingPipeline pipeline, ProgramSet programSet, ProgramFallbackResolver resolver,
 						  RenderTargets renderTargets, Supplier<ShadowRenderTargets> shadowRenderTargets,
 						  CustomUniforms customUniforms) {
+		this.renderTargets = renderTargets;
+
 		for (Pass pass : Pass.values()) {
 			ProgramSource source = resolver.resolveNullable(pass.getOriginalId());
 			Supplier<ImmutableSet<Integer>> flipState = getFlipState(pipeline, pass, pass == Pass.SHADOW || pass == Pass.SHADOW_CUTOUT);
+			sources.put(pass, source);
+			flipStates.put(pass, flipState);
+
 			GlFramebuffer framebuffer = createFramebuffer(pass, source, shadowRenderTargets, renderTargets, flipState);
 			framebuffers.put(pass, framebuffer);
 
@@ -138,7 +146,7 @@ public class SodiumPrograms {
 											Supplier<ShadowRenderTargets> shadowRenderTargets,
 											RenderTargets renderTargets,
 											Supplier<ImmutableSet<Integer>> flipState) {
-		if (pass == Pass.SHADOW || pass == Pass.SHADOW_CUTOUT || pass == Pass.SHADOW_TRANS) {
+		if (isShadowPass(pass)) {
 			return shadowRenderTargets.get().createShadowFramebuffer(ImmutableSet.of(),
 				source == null ? new int[]{0, 1} : (source.getDirectives().hasUnknownDrawBuffers() ? new int[]{0, 1} : source.getDirectives().getDrawBuffers()));
 		} else {
@@ -184,6 +192,27 @@ public class SodiumPrograms {
 					createBufferBlendOverrides(source), customUniforms, flipState,
 					alphaTest.reference(), containsTessellation);
 			});
+	}
+
+	public void refreshMainFramebuffers() {
+		for (Pass pass : Pass.values()) {
+			if (isShadowPass(pass)) {
+				continue;
+			}
+
+			GlFramebuffer framebuffer = framebuffers.get(pass);
+			if (framebuffer == null) {
+				continue;
+			}
+
+			ProgramSource source = sources.get(pass);
+			int[] drawBuffers = source == null ? new int[]{0, 1} : (source.getDirectives().hasUnknownDrawBuffers() ? new int[]{0} : source.getDirectives().getDrawBuffers());
+			renderTargets.refreshGbufferFramebuffer(framebuffer, flipStates.get(pass).get(), drawBuffers);
+		}
+	}
+
+	private static boolean isShadowPass(Pass pass) {
+		return pass == Pass.SHADOW || pass == Pass.SHADOW_CUTOUT || pass == Pass.SHADOW_TRANS;
 	}
 
 	public GlProgram<ChunkShaderInterface> getProgram(TerrainRenderPass pass) {

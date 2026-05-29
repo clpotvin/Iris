@@ -78,6 +78,7 @@ public class FinalPassRenderer {
 	private final Pass finalPass;
 	private final ImmutableList<SwapPass> swapPasses;
 	private final GlFramebuffer baseline;
+	private final ImmutableSet<Integer> baselineFlippedBuffers;
 	private final GlFramebuffer colorHolder;
 	private final Object2ObjectMap<String, TextureAccess> irisCustomTextures;
 	private final Set<GlImage> customImages;
@@ -128,6 +129,7 @@ public class FinalPassRenderer {
 		// up with whatever was written last (since we're reading from these framebuffers) instead of trying to create
 		// a framebuffer with color attachments different from what was written last (as we do with normal composite
 		// passes that write to framebuffers).
+		this.baselineFlippedBuffers = flippedBuffers;
 		this.baseline = renderTargets.createGbufferFramebuffer(flippedBuffers, new int[]{0});
 		this.colorHolder = new GlFramebuffer();
 		this.lastColorTextureId = Minecraft.getInstance().getMainRenderTarget().getColorTexture().iris$getGlId();
@@ -319,6 +321,8 @@ public class FinalPassRenderer {
 	}
 
 	public void recalculateSwapPassSize() {
+		renderTargets.refreshGbufferFramebuffer(baseline, baselineFlippedBuffers, new int[]{0});
+
 		for (SwapPass swapPass : swapPasses) {
 			RenderTarget target = renderTargets.get(swapPass.target);
 			renderTargets.destroyFramebuffer(swapPass.from);

@@ -7,6 +7,7 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.TextureFormat;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import net.irisshaders.iris.ambience.AmbienceRenderTargetPool;
 import net.irisshaders.iris.features.FeatureFlags;
 import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.framebuffer.GlFramebuffer;
@@ -24,6 +25,7 @@ import java.util.List;
 public class ShadowRenderTargets {
 	private final RenderTarget[] targets;
 	private final PackShadowDirectives shadowDirectives;
+	private final AmbienceRenderTargetPool ambiencePool;
 	private final GpuTexture mainDepth;
 	private final GpuTexture noTranslucents;
 	private final GlFramebuffer depthSourceFb;
@@ -42,7 +44,12 @@ public class ShadowRenderTargets {
 	private boolean translucentDepthDirty;
 
 	public ShadowRenderTargets(WorldRenderingPipeline pipeline, int resolution, PackShadowDirectives shadowDirectives) {
+		this(pipeline, resolution, shadowDirectives, null);
+	}
+
+	public ShadowRenderTargets(WorldRenderingPipeline pipeline, int resolution, PackShadowDirectives shadowDirectives, AmbienceRenderTargetPool ambiencePool) {
 		this.shadowDirectives = shadowDirectives;
+		this.ambiencePool = ambiencePool;
 		this.size = pipeline.hasFeature(FeatureFlags.HIGHER_SHADOWCOLOR) ? PackShadowDirectives.MAX_SHADOW_COLOR_BUFFERS_IRIS : PackShadowDirectives.MAX_SHADOW_COLOR_BUFFERS_OF;
 		targets = new RenderTarget[size];
 		formats = new InternalTextureFormat[size];
@@ -62,8 +69,14 @@ public class ShadowRenderTargets {
 			this.linearFiltered[i] = !shadowDirectives.getDepthSamplingSettings().get(i).getNearest();
 		}
 
-		this.mainDepth = RenderSystem.getDevice().createTexture("Shadow Map", GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, this.mipped[0] ? log2(resolution) : 1);
-		this.noTranslucents = RenderSystem.getDevice().createTexture("Shadow Map / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, this.mipped[1] ? log2(resolution) : 1);
+		if (ambiencePool == null) {
+			this.mainDepth = RenderSystem.getDevice().createTexture("Shadow Map", GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, this.mipped[0] ? log2(resolution) : 1);
+			this.noTranslucents = RenderSystem.getDevice().createTexture("Shadow Map / Opaque", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, TextureFormat.DEPTH32, resolution, resolution, 1, this.mipped[1] ? log2(resolution) : 1);
+		} else {
+			AmbienceRenderTargetPool.DepthCopies copies = ambiencePool.acquireShadowDepthCopies(resolution, this.mipped[0], this.mipped[1]);
+			this.mainDepth = copies.first();
+			this.noTranslucents = copies.second();
+		}
 		// TODO: linear filtered shadow maps
 
 		// NB: Make sure all buffers are cleared so that they don't contain undefined
@@ -105,8 +118,10 @@ public class ShadowRenderTargets {
 			}
 		}
 
-		mainDepth.close();
-		noTranslucents.close();
+		if (ambiencePool == null) {
+			mainDepth.close();
+			noTranslucents.close();
+		}
 	}
 
 	public int getRenderTargetCount() {
@@ -140,10 +155,15 @@ public class ShadowRenderTargets {
 
 
 		PackShadowDirectives.SamplingSettings settings = shadowDirectives.getColorSamplingSettings().computeIfAbsent(index, i -> new PackShadowDirectives.SamplingSettings());
-		targets[index] = RenderTarget.builder().setDimensions(resolution, resolution)
-			.setInternalFormat(settings.getFormat())
-			.setName("shadowcolor" + index)
-			.setPixelFormat(settings.getFormat().getPixelFormat()).build();
+		if (ambiencePool == null) {
+			targets[index] = RenderTarget.builder().setDimensions(resolution, resolution)
+				.setInternalFormat(settings.getFormat())
+				.setName("shadowcolor" + index)
+				.setPixelFormat(settings.getFormat().getPixelFormat()).build();
+		} else {
+			targets[index] = ambiencePool.acquireShadowColorTarget(index, resolution,
+				settings.getFormat(), settings.getFormat().getPixelFormat());
+		}
 		formats[index] = settings.getFormat();
 		if (settings.getClear()) {
 			buffersToBeCleared.add(index);
@@ -197,6 +217,11 @@ public class ShadowRenderTargets {
 
 	public void onFullClear() {
 		fullClearRequired = false;
+	}
+
+	public void forceFullClear() {
+		fullClearRequired = true;
+		translucentDepthDirty = true;
 	}
 
 	public GlFramebuffer createFramebufferWritingToMain(int[] drawBuffers) {

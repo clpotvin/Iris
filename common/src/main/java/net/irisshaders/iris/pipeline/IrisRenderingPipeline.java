@@ -14,6 +14,7 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMaps;
 import net.irisshaders.iris.Iris;
+import net.irisshaders.iris.ambience.AmbienceRenderTargetPool;
 import net.irisshaders.iris.vertices.ImmediateState;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.features.FeatureFlags;
@@ -41,6 +42,7 @@ import net.irisshaders.iris.gl.state.ShaderAttributeInputs;
 import net.irisshaders.iris.gl.texture.DepthBufferFormat;
 import net.irisshaders.iris.gl.texture.TextureType;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
+import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.helpers.FakeChainedJsonException;
 import net.irisshaders.iris.helpers.OptionalBoolean;
 import net.irisshaders.iris.helpers.Tri;
@@ -121,7 +123,9 @@ import org.lwjgl.opengl.GL30C;
 import org.lwjgl.opengl.GL43C;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -140,6 +144,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		BlendModeFunction.ONE.getGlId(),
 		BlendModeFunction.ONE_MINUS_SRC_ALPHA.getGlId()));
 
+	@Nullable
+	private final AmbienceRenderTargetPool ambiencePool;
 	private final RenderTargets renderTargets;
 	private final ShaderMap shaderMap;
 	private final CustomUniforms customUniforms;
@@ -151,6 +157,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final boolean wynncraftFallbackVfxTranslucency;
 	private final Supplier<ShadowRenderTargets> shadowTargetsSupplier;
 	private final Set<GlProgram> loadedShaders;
+	private final List<GbufferFramebufferBinding> gbufferFramebuffers = new ArrayList<>();
 	private final CompositeRenderer beginRenderer;
 	private final CompositeRenderer prepareRenderer;
 	private final CompositeRenderer deferredRenderer;
@@ -244,7 +251,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	public static float skyboxFadeOpacity = 0.0f;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
+		long constructorStartNanos = System.nanoTime();
 		ShaderPrinter.resetPrintState();
+		this.ambiencePool = Iris.getAmbienceRenderTargetPoolForPipelineBuild();
 
 		this.shouldRenderUnderwaterOverlay = programSet.getPackDirectives().underwaterOverlay();
 		this.supportsEndFlash = programSet.getPackDirectives().supportsEndFlash();
@@ -295,14 +304,18 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 
+		long customImagesStartNanos = System.nanoTime();
 		this.customImages = new HashSet<>();
 		for (ImageInformation information : programSet.getPack().getIrisCustomImages()) {
-			if (information.isRelative()) {
+			if (ambiencePool != null && !information.isRelative() && information.clear()) {
+				customImages.add(ambiencePool.acquireCustomImage(information));
+			} else if (information.isRelative()) {
 				customImages.add(new GlImage.Relative(information.name(), information.samplerName(), information.format(), information.internalTextureFormat(), information.type(), information.clear(), information.relativeWidth(), information.relativeHeight(), main.width, main.height));
 			} else {
 				customImages.add(new GlImage(information.name(), information.samplerName(), information.target(), information.format(), information.internalTextureFormat(), information.type(), information.clear(), information.width(), information.height(), information.depth()));
 			}
 		}
+		long customImagesNanos = System.nanoTime() - customImagesStartNanos;
 
 		this.clearImages = customImages.stream()
 			.filter(GlImage::shouldClear)
@@ -323,8 +336,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			this.particleRenderingSettings = ParticleRenderingSettings.MIXED;
 		}
 
-
-		this.renderTargets = new RenderTargets(main.width, main.height, depthTexture, ((Blaze3dRenderTargetExt) main).iris$getDepthBufferVersion(), depthBufferFormat, programSet.getPackDirectives().getRenderTargetDirectives().getRenderTargetSettings(), programSet.getPackDirectives());
+		long renderTargetsStartNanos = System.nanoTime();
+		this.renderTargets = new RenderTargets(main.width, main.height, depthTexture, ((Blaze3dRenderTargetExt) main).iris$getDepthBufferVersion(), depthBufferFormat, programSet.getPackDirectives().getRenderTargetDirectives().getRenderTargetSettings(), programSet.getPackDirectives(), ambiencePool);
+		long renderTargetsNanos = System.nanoTime() - renderTargetsStartNanos;
 		this.sunPathRotation = programSet.getPackDirectives().getSunPathRotation();
 
 		PackShadowDirectives shadowDirectives = programSet.getPackDirectives().getShadowDirectives();
@@ -362,7 +376,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		this.shadowTargetsSupplier = () -> {
 			if (shadowRenderTargets == null) {
 				// TODO: Support more than two shadowcolor render targets
-				this.shadowRenderTargets = new ShadowRenderTargets(this, shadowMapResolution, shadowDirectives);
+				this.shadowRenderTargets = new ShadowRenderTargets(this, shadowMapResolution, shadowDirectives, ambiencePool);
 			}
 
 			return shadowRenderTargets;
@@ -594,6 +608,18 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// terrain CUTOUT pass, before any flip to the translucent state).
 		this.voxyEntityDepthClear = net.irisshaders.iris.pathways.VoxyEntityDepthClearPass.tryCreate(
 			this, renderTargets, flippedAfterPrepare);
+
+		if (ambiencePool != null) {
+			WynncraftDebugLog.info("ambience-pipeline-build",
+				"Ambience pipeline build: customImages={}ms renderTargets={}ms total={}ms poolResources={} poolBytes={} poolHits={} poolMisses={}",
+				customImagesNanos / 1_000_000L,
+				renderTargetsNanos / 1_000_000L,
+				(System.nanoTime() - constructorStartNanos) / 1_000_000L,
+				ambiencePool.getResourceCount(),
+				ambiencePool.getEstimatedBytes(),
+				ambiencePool.getHits(),
+				ambiencePool.getMisses());
+		}
 	}
 
 	public void applyWorldRenderingSettings() {
@@ -610,6 +636,38 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		WorldRenderingSettings.INSTANCE.setBlockTypeIds(BlockMaterialMapping.createBlockTypeMap(pack.getIdMap().getBlockRenderTypeMap()));
 		initializedBlockIds = true;
 		sodiumPrograms.applyWorldRenderingSettings();
+	}
+
+	public void onAmbienceProfileActivated() {
+		if (ambiencePool == null) {
+			return;
+		}
+
+		renderTargets.forceFullClear();
+		rebuildMainClearPasses();
+		if (shadowRenderTargets != null) {
+			shadowRenderTargets.forceFullClear();
+		}
+		if (shadowRenderer != null) {
+			shadowRenderer.refreshSamplingSettings();
+		}
+		for (GlImage image : customImages) {
+			if (image.isPooledView()) {
+				image.clearTexture();
+			}
+		}
+		WynncraftDebugLog.info("ambience-profile-activate-pool",
+			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={}",
+			ambiencePool.getResourceCount(), ambiencePool.getEstimatedBytes(), ambiencePool.getHits(), ambiencePool.getMisses());
+	}
+
+	private void rebuildMainClearPasses() {
+		this.clearPassesFull.forEach(clearPass -> renderTargets.destroyFramebuffer(clearPass.getFramebuffer()));
+		this.clearPasses.forEach(clearPass -> renderTargets.destroyFramebuffer(clearPass.getFramebuffer()));
+		this.clearPassesFull = ClearPassCreator.createClearPasses(renderTargets, true,
+			packDirectives.getRenderTargetDirectives());
+		this.clearPasses = ClearPassCreator.createClearPasses(renderTargets, false,
+			packDirectives.getRenderTargetDirectives());
 	}
 
 	private ComputeProgram[] createShadowComputes(ComputeSource[] compute, ProgramSet programSet) {
@@ -758,8 +816,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private ShaderSupplier createShader(String name, ShaderKey key, ProgramSource source, ProgramId programId, AlphaTest fallbackAlpha,
 										VertexFormat vertexFormat, FogMode fogMode,
 										boolean isIntensity, boolean isFullbright, boolean isGlint, boolean isText, boolean isIE) throws IOException {
-		GlFramebuffer beforeTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterPrepare, source.getDirectives().getDrawBuffers());
-		GlFramebuffer afterTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterTranslucent, source.getDirectives().getDrawBuffers());
+		int[] drawBuffers = source.getDirectives().getDrawBuffers();
+		GlFramebuffer beforeTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterPrepare, drawBuffers);
+		GlFramebuffer afterTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterTranslucent, drawBuffers);
+		trackGbufferFramebuffer(beforeTranslucent, flippedAfterPrepare, drawBuffers);
+		trackGbufferFramebuffer(afterTranslucent, flippedAfterTranslucent, drawBuffers);
 		boolean isLines = programId == ProgramId.Line && resolver.has(ProgramId.Line);
 
 
@@ -784,6 +845,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		BlendModeOverride blendModeOverride = photonVfxLayer ? WYNNCRAFT_PHOTON_VFX_BLEND : null;
 		GlFramebuffer beforeTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterPrepare, drawBuffers);
 		GlFramebuffer afterTranslucent = renderTargets.createGbufferFramebuffer(flippedAfterTranslucent, drawBuffers);
+		trackGbufferFramebuffer(beforeTranslucent, flippedAfterPrepare, drawBuffers);
+		trackGbufferFramebuffer(afterTranslucent, flippedAfterTranslucent, drawBuffers);
 
 		ShaderSupplier shader = ShaderCreator.createFallback(name, key, beforeTranslucent, afterTranslucent,
 			key.getAlphaTest(), key.getVertexFormat(), blendModeOverride, this, key.getFogMode(),
@@ -791,6 +854,32 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			photonVfxLayer);
 
 		return shader;
+	}
+
+	private void trackGbufferFramebuffer(GlFramebuffer framebuffer, ImmutableSet<Integer> stageWritesToAlt, int[] drawBuffers) {
+		if (ambiencePool != null) {
+			gbufferFramebuffers.add(new GbufferFramebufferBinding(framebuffer, stageWritesToAlt, drawBuffers.clone()));
+		}
+	}
+
+	private void refreshPooledFramebufferAttachments() {
+		for (GbufferFramebufferBinding binding : gbufferFramebuffers) {
+			renderTargets.refreshGbufferFramebuffer(binding.framebuffer(), binding.stageWritesToAlt(), binding.drawBuffers());
+		}
+
+		sodiumPrograms.refreshMainFramebuffers();
+
+		int defaultTex = packDirectives.getFallbackTex();
+		renderTargets.refreshGbufferFramebuffer(defaultFB, flippedAfterPrepare, new int[]{defaultTex});
+		renderTargets.refreshGbufferFramebuffer(defaultFBAlt, flippedAfterTranslucent, new int[]{defaultTex});
+
+		if (voxyEntityDepthClear != null) {
+			voxyEntityDepthClear.refreshFramebufferAttachments();
+		}
+	}
+
+	private record GbufferFramebufferBinding(GlFramebuffer framebuffer, ImmutableSet<Integer> stageWritesToAlt,
+											 int[] drawBuffers) {
 	}
 
 	private ShaderSupplier createShadowShader(String name, Optional<ProgramSource> source, ShaderKey key) throws IOException {
@@ -1031,6 +1120,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			main.height, depthBufferFormat, packDirectives);
 
 		if (changed) {
+			if (ambiencePool != null) {
+				refreshPooledFramebufferAttachments();
+			}
 			beginRenderer.recalculateSizes();
 			prepareRenderer.recalculateSizes();
 			deferredRenderer.recalculateSizes();
@@ -1697,8 +1789,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	}
 
 	public GlFramebuffer createDHFramebuffer(ProgramSource sources, boolean trans) {
-		return renderTargets.createDHFramebuffer(trans ? flippedAfterTranslucent : flippedAfterPrepare,
-			sources.getDirectives().getDrawBuffers());
+		ImmutableSet<Integer> flipped = trans ? flippedAfterTranslucent : flippedAfterPrepare;
+		int[] drawBuffers = sources.getDirectives().getDrawBuffers();
+		GlFramebuffer framebuffer = renderTargets.createDHFramebuffer(flipped, drawBuffers);
+		trackGbufferFramebuffer(framebuffer, flipped, drawBuffers);
+		return framebuffer;
 	}
 
 	public ImmutableSet<Integer> getFlippedBeforeShadow() {

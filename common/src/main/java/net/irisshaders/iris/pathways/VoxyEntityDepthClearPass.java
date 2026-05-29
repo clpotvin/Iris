@@ -246,6 +246,12 @@ public class VoxyEntityDepthClearPass {
 		framebuffer.drawBuffers(drawBuffers);
 	}
 
+	public void refreshFramebufferAttachments() {
+		if (framebuffer != null) {
+			renderTargets.refreshColorFramebuffer(framebuffer, flippedBeforeDeferred, auxTargets);
+		}
+	}
+
 	private static String buildFragmentSource(int numOutputs) {
 		StringBuilder sb = new StringBuilder();
 		sb.append("#version 330 core\n");

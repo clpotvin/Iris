@@ -21,6 +21,7 @@ public class RenderTarget {
 	private final PixelType type;
 	private final int mainTexture;
 	private final int altTexture;
+	private final boolean ownsTextures;
 	private int width;
 	private int height;
 	private boolean isValid;
@@ -30,7 +31,12 @@ public class RenderTarget {
 	private boolean mipmapsOnMain;
 
 	public RenderTarget(Builder builder) {
+		this(builder, GlStateManager._genTexture(), GlStateManager._genTexture(), true, true);
+	}
+
+	private RenderTarget(Builder builder, int mainTexture, int altTexture, boolean ownsTextures, boolean setupTextures) {
 		this.isValid = true;
+		this.ownsTextures = ownsTextures;
 
 		this.name = builder.name;
 		this.internalFormat = builder.internalFormat;
@@ -41,17 +47,28 @@ public class RenderTarget {
 		this.height = builder.height;
 
 
-		this.mainTexture = GlStateManager._genTexture();
-		this.altTexture = GlStateManager._genTexture();
+		this.mainTexture = mainTexture;
+		this.altTexture = altTexture;
 
 		boolean isPixelFormatInteger = builder.internalFormat.getPixelFormat().isInteger();
 		this.allowsLinear = !isPixelFormatInteger;
-		setupTexture(mainTexture, builder.width, builder.height, !isPixelFormatInteger, false);
-		setupTexture(altTexture, builder.width, builder.height, !isPixelFormatInteger, true);
+		if (setupTextures) {
+			setupTexture(mainTexture, builder.width, builder.height, !isPixelFormatInteger, false);
+			setupTexture(altTexture, builder.width, builder.height, !isPixelFormatInteger, true);
+		}
 
 		// Clean up after ourselves
 		// This is strictly defensive to ensure that other buggy code doesn't tamper with our textures
 		GlStateManager._bindTexture(0);
+	}
+
+	public RenderTarget sharedView() {
+		return new RenderTarget(new Builder()
+			.setName(name)
+			.setInternalFormat(internalFormat)
+			.setPixelFormat(format)
+			.setPixelType(type)
+			.setDimensions(width, height), mainTexture, altTexture, false, false);
 	}
 
 	public static Builder builder() {
@@ -119,8 +136,10 @@ public class RenderTarget {
 		requireValid();
 		isValid = false;
 
-		GlStateManager._deleteTexture(mainTexture);
-		GlStateManager._deleteTexture(altTexture);
+		if (ownsTextures) {
+			GlStateManager._deleteTexture(mainTexture);
+			GlStateManager._deleteTexture(altTexture);
+		}
 	}
 
 	private void requireValid() {

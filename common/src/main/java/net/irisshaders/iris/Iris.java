@@ -7,6 +7,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import net.caffeinemc.mods.sodium.api.vertex.serializer.VertexSerializerRegistry;
+import net.irisshaders.iris.ambience.AmbienceRenderTargetPool;
 import net.irisshaders.iris.ambience.AmbienceRuntime;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.config.IrisConfig;
@@ -96,6 +97,7 @@ public class Iris {
 	public static final boolean IS_FOOL;
 	private static final Map<String, String> shaderPackOptionQueue = new HashMap<>();
 	private static final int MAX_TRANSIENT_SHADER_PACK_CONTEXTS = 1;
+	private static final int MAX_POOLED_TRANSIENT_SHADER_PACK_CONTEXTS = 32;
 	private static final Map<String, ShaderRuntimeContext> transientShaderPackContexts = new LinkedHashMap<>(16, 0.75f, true);
 	// Change this for snapshots!
 	private static final String backupVersionNumber = "1.21.9";
@@ -126,6 +128,8 @@ public class Iris {
 	private static boolean suppressAmbienceInvalidation;
 	private static ShaderRuntimeContext configuredShaderPackContext;
 	private static String activeTransientShaderPackContextKey;
+	private static AmbienceRenderTargetPool ambienceRenderTargetPool;
+	private static AmbienceRenderTargetPool ambiencePipelineBuildPool;
 
 	static {
 		if (!BuildConfig.ACTIVATE_RENDERDOC && IrisPlatformHelpers.getInstance().isDevelopmentEnvironment() && System.getProperty("user.name").contains("ims") && Util.getPlatform() == Util.OS.LINUX) {
@@ -423,12 +427,21 @@ public class Iris {
 		CapturedRenderingState.INSTANCE.resetTextureReloadCount();
 		destroyEverything();
 
-		boolean loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
-		if (loaded && Minecraft.getInstance().level != null) {
-			prepareTransientPipelineContext();
-			if (fallback) {
-				loaded = false;
+		boolean loaded;
+		ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
+		try {
+			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
+			if (loaded && Minecraft.getInstance().level != null) {
+				prepareTransientPipelineContext();
+				if (fallback) {
+					loaded = false;
+				}
+				if (loaded && pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
+					pipeline.onAmbienceProfileActivated();
+				}
 			}
+		} finally {
+			ambiencePipelineBuildPool = null;
 		}
 
 		if (!loaded) {
@@ -480,6 +493,7 @@ public class Iris {
 		activeTransientShaderPackContextKey = null;
 
 		boolean loaded = false;
+		ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
 		try {
 			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
 			if (loaded) {
@@ -493,14 +507,20 @@ public class Iris {
 				ShaderRuntimeContext context = snapshotShaderRuntimeContext();
 				transientShaderPackContexts.put(cacheKey, context);
 				activeTransientShaderPackContextKey = cacheKey;
+				if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
+					pipeline.onAmbienceProfileActivated();
+				}
 				enforceTransientShaderPackContextBudget();
 				logAmbienceContextTiming("ambience-profile-cache-miss", "Compiled and cached ambience shader profile {}", cacheKey, startNanos);
 				return true;
 			}
 		} catch (RuntimeException e) {
+			ambiencePipelineBuildPool = null;
 			destroyCurrentTransientAttempt();
 			activateShaderRuntimeContext(previous, previousTransientKey);
 			throw e;
+		} finally {
+			ambiencePipelineBuildPool = null;
 		}
 
 		destroyCurrentTransientAttempt();
@@ -529,7 +549,7 @@ public class Iris {
 	}
 
 	public static int getTransientShaderPackContextBudget() {
-		return MAX_TRANSIENT_SHADER_PACK_CONTEXTS;
+		return ambienceRenderTargetPool == null ? MAX_TRANSIENT_SHADER_PACK_CONTEXTS : MAX_POOLED_TRANSIENT_SHADER_PACK_CONTEXTS;
 	}
 
 	public static int getTransientShaderPackContextCount() {
@@ -554,6 +574,26 @@ public class Iris {
 
 	public static long getProgramBinaryCacheBytes() {
 		return ProgramBinaryCache.getTotalBytes();
+	}
+
+	public static AmbienceRenderTargetPool getAmbienceRenderTargetPoolForPipelineBuild() {
+		return ambiencePipelineBuildPool;
+	}
+
+	public static int getAmbienceRenderTargetPoolResourceCount() {
+		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getResourceCount();
+	}
+
+	public static long getAmbienceRenderTargetPoolEstimatedBytes() {
+		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getEstimatedBytes();
+	}
+
+	public static long getAmbienceRenderTargetPoolHits() {
+		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getHits();
+	}
+
+	public static long getAmbienceRenderTargetPoolMisses() {
+		return ambienceRenderTargetPool == null ? 0 : ambienceRenderTargetPool.getMisses();
 	}
 
 	private static void handleException(Exception e) {
@@ -771,6 +811,7 @@ public class Iris {
 
 		// Destroy all allocated resources
 		destroyEverything();
+		destroyAmbienceRenderTargetPool();
 
 		// Load the new shaderpack
 		loadShaderpack();
@@ -804,7 +845,18 @@ public class Iris {
 		fallback = context.fallback();
 		activeTransientShaderPackContextKey = transientKey;
 
-		prepareTransientPipelineContext();
+		AmbienceRenderTargetPool previousBuildPool = ambiencePipelineBuildPool;
+		if (transientKey != null) {
+			ambiencePipelineBuildPool = getOrCreateAmbienceRenderTargetPool();
+		}
+		try {
+			prepareTransientPipelineContext();
+		} finally {
+			ambiencePipelineBuildPool = previousBuildPool;
+		}
+		if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
+			pipeline.onAmbienceProfileActivated();
+		}
 	}
 
 	private static void reapplyCurrentPipelineSettings() {
@@ -817,6 +869,21 @@ public class Iris {
 			}
 			WorldRenderingSettings.INSTANCE.clearReloadRequired();
 		}
+	}
+
+	private static AmbienceRenderTargetPool getOrCreateAmbienceRenderTargetPool() {
+		if (ambienceRenderTargetPool == null) {
+			ambienceRenderTargetPool = new AmbienceRenderTargetPool();
+		}
+		return ambienceRenderTargetPool;
+	}
+
+	private static void destroyAmbienceRenderTargetPool() {
+		if (ambienceRenderTargetPool != null) {
+			ambienceRenderTargetPool.destroy();
+			ambienceRenderTargetPool = null;
+		}
+		ambiencePipelineBuildPool = null;
 	}
 
 	private static void enforceTransientShaderPackContextBudget() {

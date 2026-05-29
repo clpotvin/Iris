@@ -23,9 +23,15 @@ public class GlImage extends GlResource {
 	protected final InternalTextureFormat internalTextureFormat;
 	protected final PixelType pixelType;
 	private final boolean clear;
+	private final boolean ownsTexture;
+	private final boolean pooledView;
 
 	public GlImage(String name, String samplerName, TextureType target, PixelFormat format, InternalTextureFormat internalFormat, PixelType pixelType, boolean clear, int width, int height, int depth) {
-		super(IrisRenderSystem.createTexture(target.getGlType()));
+		this(IrisRenderSystem.createTexture(target.getGlType()), name, samplerName, target, format, internalFormat, pixelType, clear, width, height, depth, true, false, true);
+	}
+
+	private GlImage(int texture, String name, String samplerName, TextureType target, PixelFormat format, InternalTextureFormat internalFormat, PixelType pixelType, boolean clear, int width, int height, int depth, boolean ownsTexture, boolean pooledView, boolean setupTexture) {
+		super(texture);
 
 		this.name = name;
 		this.samplerName = samplerName;
@@ -34,17 +40,23 @@ public class GlImage extends GlResource {
 		this.internalTextureFormat = internalFormat;
 		this.pixelType = pixelType;
 		this.clear = clear;
+		this.ownsTexture = ownsTexture;
+		this.pooledView = pooledView;
 
 		GLDebug.nameObject(GL43C.GL_TEXTURE, getGlId(), name);
 
-		IrisRenderSystem.bindTextureForSetup(target.getGlType(), getGlId());
-		target.apply(getGlId(), width, height, depth, internalFormat.getGlFormat(), format.getGlFormat(), pixelType.getGlFormat(), null);
+		if (setupTexture) {
+			IrisRenderSystem.bindTextureForSetup(target.getGlType(), getGlId());
+			target.apply(getGlId(), width, height, depth, internalFormat.getGlFormat(), format.getGlFormat(), pixelType.getGlFormat(), null);
 
-		int texture = getGlId();
+			setup(texture, width, height, depth);
 
-		setup(texture, width, height, depth);
+			IrisRenderSystem.bindTextureForSetup(target.getGlType(), 0);
+		}
+	}
 
-		IrisRenderSystem.bindTextureForSetup(target.getGlType(), 0);
+	public GlImage sharedView() {
+		return new GlImage(getGlId(), name, samplerName, target, format, internalTextureFormat, pixelType, clear, 1, 1, 0, false, true, false);
 	}
 
 	protected void setup(int texture, int width, int height, int depth) {
@@ -66,7 +78,7 @@ public class GlImage extends GlResource {
 		IrisRenderSystem.texParameteri(texture, target.getGlType(), GL20C.GL_TEXTURE_MAX_LOD, 0);
 		IrisRenderSystem.texParameterf(texture, target.getGlType(), GL20C.GL_TEXTURE_LOD_BIAS, 0.0F);
 
-		ARBClearTexture.glClearTexImage(texture, 0, format.getGlFormat(), pixelType.getGlFormat(), (int[]) null);
+		clearTexture(texture);
 	}
 
 	public String getName() {
@@ -85,6 +97,18 @@ public class GlImage extends GlResource {
 		return clear;
 	}
 
+	public boolean isPooledView() {
+		return pooledView;
+	}
+
+	public void clearTexture() {
+		clearTexture(getGlId());
+	}
+
+	private void clearTexture(int texture) {
+		ARBClearTexture.glClearTexImage(texture, 0, format.getGlFormat(), pixelType.getGlFormat(), (int[]) null);
+	}
+
 	public int getId() {
 		return getGlId();
 	}
@@ -101,7 +125,9 @@ public class GlImage extends GlResource {
 
 	@Override
 	protected void destroyInternal() {
-		GlStateManager._deleteTexture(getGlId());
+		if (ownsTexture) {
+			GlStateManager._deleteTexture(getGlId());
+		}
 	}
 
 	public InternalTextureFormat getInternalFormat() {
