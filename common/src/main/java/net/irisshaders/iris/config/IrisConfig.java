@@ -191,6 +191,8 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction = "true".equals(properties.getProperty("wynncraftMistWoodsFogSunTintReduction", "false"));
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogSunTintAmount", "50"))));
 			IrisVideoSettings.wynncraftMountArmorOverlay = "true".equals(properties.getProperty("wynncraftMountArmorOverlay", "false"));
+			IrisVideoSettings.wynncraftAmbienceEnabled = "true".equals(properties.getProperty("wynncraftAmbienceEnabled", "false"));
+			IrisVideoSettings.wynncraftSelectedAmbiencePack = properties.getProperty("wynncraftSelectedAmbiencePack", "");
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
 			IrisVideoSettings.shadowDistance = 32;
@@ -209,6 +211,8 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction = false;
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = 50;
 			IrisVideoSettings.wynncraftMountArmorOverlay = false;
+			IrisVideoSettings.wynncraftAmbienceEnabled = false;
+			IrisVideoSettings.wynncraftSelectedAmbiencePack = "";
 			save();
 		}
 
@@ -248,6 +252,8 @@ public class IrisConfig {
 		properties.setProperty("wynncraftMistWoodsFogSunTintReduction", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogSunTintReduction));
 		properties.setProperty("wynncraftMistWoodsFogSunTintAmount", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount));
 		properties.setProperty("wynncraftMountArmorOverlay", String.valueOf(IrisVideoSettings.wynncraftMountArmorOverlay));
+		properties.setProperty("wynncraftAmbienceEnabled", String.valueOf(IrisVideoSettings.wynncraftAmbienceEnabled));
+		properties.setProperty("wynncraftSelectedAmbiencePack", IrisVideoSettings.wynncraftSelectedAmbiencePack == null ? "" : IrisVideoSettings.wynncraftSelectedAmbiencePack);
 		// NB: This uses ISO-8859-1 with unicode escapes as the encoding
 		try (OutputStream os = Files.newOutputStream(propertiesPath)) {
 			properties.store(os, COMMENT);

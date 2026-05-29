@@ -7,6 +7,7 @@ import net.irisshaders.iris.gl.image.ImageHolder;
 import net.irisshaders.iris.gl.sampler.GlSampler;
 import net.irisshaders.iris.gl.sampler.SamplerHolder;
 import net.irisshaders.iris.gl.shader.GlShader;
+import net.irisshaders.iris.gl.shader.ProgramBinaryCache;
 import net.irisshaders.iris.gl.shader.ProgramCreator;
 import net.irisshaders.iris.gl.shader.ShaderCompileException;
 import net.irisshaders.iris.gl.shader.ShaderType;
@@ -15,6 +16,7 @@ import net.irisshaders.iris.gl.texture.InternalTextureFormat;
 import net.irisshaders.iris.gl.texture.TextureType;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.OptionalInt;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -35,6 +37,12 @@ public class ProgramBuilder extends ProgramUniforms.Builder implements SamplerHo
 									   @Nullable String fragmentSource, ImmutableSet<Integer> reservedTextureUnits) {
 		RenderSystem.assertOnRenderThread();
 
+		String cacheKey = ProgramBinaryCache.key("program-builder", name, vertexSource, geometrySource, fragmentSource);
+		OptionalInt cachedProgram = ProgramBinaryCache.tryCreateProgram(cacheKey, name);
+		if (cachedProgram.isPresent()) {
+			return new ProgramBuilder(name, cachedProgram.getAsInt(), reservedTextureUnits);
+		}
+
 		GlShader vertex;
 		GlShader geometry;
 		GlShader fragment;
@@ -52,9 +60,9 @@ public class ProgramBuilder extends ProgramUniforms.Builder implements SamplerHo
 		int programId;
 
 		if (geometry != null) {
-			programId = ProgramCreator.create(name, vertex, geometry, fragment);
+			programId = ProgramCreator.create(name, cacheKey, ProgramCreator::bindDefaultAttributes, vertex, geometry, fragment);
 		} else {
-			programId = ProgramCreator.create(name, vertex, fragment);
+			programId = ProgramCreator.create(name, cacheKey, ProgramCreator::bindDefaultAttributes, vertex, fragment);
 		}
 
 		vertex.destroy();
@@ -75,9 +83,15 @@ public class ProgramBuilder extends ProgramUniforms.Builder implements SamplerHo
 			throw new IllegalStateException("This PC does not support compute shaders, but it's attempting to be used???");
 		}
 
+		String cacheKey = ProgramBinaryCache.key("compute-builder", name, source);
+		OptionalInt cachedProgram = ProgramBinaryCache.tryCreateProgram(cacheKey, name);
+		if (cachedProgram.isPresent()) {
+			return new ProgramBuilder(name, cachedProgram.getAsInt(), reservedTextureUnits);
+		}
+
 		GlShader compute = buildShader(ShaderType.COMPUTE, name + ".csh", source);
 
-		int programId = ProgramCreator.create(name, compute);
+		int programId = ProgramCreator.create(name, cacheKey, null, compute);
 
 		compute.destroy();
 

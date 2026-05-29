@@ -15,6 +15,7 @@ import net.caffeinemc.mods.sodium.client.gui.options.control.ControlValueFormatt
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.features.FeatureFlags;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
+import net.irisshaders.iris.gui.screen.AmbiencePackScreen;
 import net.irisshaders.iris.gui.screen.ShaderPackScreen;
 import net.irisshaders.iris.pathways.colorspace.ColorSpace;
 import net.minecraft.client.Minecraft;
@@ -217,6 +218,22 @@ public class IrisConfig implements ConfigEntryPoint {
 		settingsPage.addOptionGroup(textGroup);
 		settingsPage.addOptionGroup(skyboxGroup);
 		settingsPage.addOptionGroup(mistWoodsGroup);
+
+		var ambienceGroup = builder.createOptionGroup()
+			.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_ambience_enabled"))
+				.setDefaultValue(false)
+				.setBinding(value -> IrisVideoSettings.wynncraftAmbienceEnabled = value, () -> IrisVideoSettings.wynncraftAmbienceEnabled)
+				.setName(Component.translatable("options.iris.wynncraftAmbienceEnabled"))
+				.setTooltip(Component.translatable("options.iris.wynncraftAmbienceEnabled.tooltip"))
+				.setStorageHandler(SAVE_HANDLER)
+				.setImpact(OptionImpact.MEDIUM)
+			)
+			.addOption(builder.createExternalButtonOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_ambience_packs"))
+				.setName(Component.translatable("options.iris.wynncraftAmbiencePacks"))
+				.setTooltip(Component.translatable("options.iris.wynncraftAmbiencePacks.tooltip"))
+				.setScreenConsumer(screen -> Minecraft.getInstance().setScreen(new AmbiencePackScreen(screen)))
+			);
+		settingsPage.addOptionGroup(ambienceGroup);
 
 		// Mount armor overlay: available in all builds (default off, user-enabled)
 		var mountArmorGroup = builder.createOptionGroup()

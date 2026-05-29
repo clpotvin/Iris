@@ -1,6 +1,7 @@
 package net.irisshaders.iris.mixin;
 
 import net.irisshaders.iris.Iris;
+import net.irisshaders.iris.ambience.AmbienceRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -18,6 +19,7 @@ public class MixinMinecraft_PipelineManagement {
 	@Inject(method = "clearClientLevel", at = @At("HEAD"))
 	public void iris$trackLastDimensionOnLeave(Screen arg, CallbackInfo ci) {
 		Iris.lastDimension = Iris.getCurrentDimension();
+		AmbienceRuntime.reset();
 	}
 
 	/**
@@ -27,6 +29,7 @@ public class MixinMinecraft_PipelineManagement {
 	@Inject(method = "setLevel", at = @At("HEAD"))
 	private void iris$trackLastDimensionOnLevelChange(ClientLevel clientLevel, CallbackInfo ci) {
 		Iris.lastDimension = Iris.getCurrentDimension();
+		AmbienceRuntime.reset();
 	}
 
 	/**

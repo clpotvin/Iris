@@ -7,14 +7,17 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import net.caffeinemc.mods.sodium.api.vertex.serializer.VertexSerializerRegistry;
+import net.irisshaders.iris.ambience.AmbienceRuntime;
 import net.irisshaders.iris.compat.dh.DHCompat;
 import net.irisshaders.iris.config.IrisConfig;
 import net.irisshaders.iris.gl.GLDebug;
 import net.irisshaders.iris.gl.buffer.ShaderStorageBufferHolder;
 import net.irisshaders.iris.gl.blending.BlendModeStorage;
+import net.irisshaders.iris.gl.shader.ProgramBinaryCache;
 import net.irisshaders.iris.gl.shader.ShaderCompileException;
 import net.irisshaders.iris.gl.shader.StandardMacros;
 import net.irisshaders.iris.gui.debug.DebugLoadFailedGridScreen;
+import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.gui.screen.ShaderPackScreen;
 import net.irisshaders.iris.helpers.OptionalBoolean;
 import net.irisshaders.iris.pbr.texture.PBRTextureManager;
@@ -27,6 +30,7 @@ import net.irisshaders.iris.shaderpack.DimensionId;
 import net.irisshaders.iris.shaderpack.ShaderPack;
 import net.irisshaders.iris.shaderpack.discovery.ShaderpackDirectoryManager;
 import net.irisshaders.iris.shaderpack.materialmap.NamespacedId;
+import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.shaderpack.option.OptionSet;
 import net.irisshaders.iris.shaderpack.option.Profile;
 import net.irisshaders.iris.shaderpack.option.values.MutableOptionValues;
@@ -58,7 +62,9 @@ import org.lwjgl.opengl.KHRParallelShaderCompile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URI;
 import java.nio.file.FileSystem;
+import java.nio.file.FileSystemAlreadyExistsException;
 import java.nio.file.FileSystemNotFoundException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -68,9 +74,11 @@ import java.nio.file.Path;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Stream;
 import java.util.zip.ZipError;
 import java.util.zip.ZipException;
@@ -87,6 +95,8 @@ public class Iris {
 	public static final IrisLogging logger = new IrisLogging(MODNAME);
 	public static final boolean IS_FOOL;
 	private static final Map<String, String> shaderPackOptionQueue = new HashMap<>();
+	private static final int MAX_TRANSIENT_SHADER_PACK_CONTEXTS = 1;
+	private static final Map<String, ShaderRuntimeContext> transientShaderPackContexts = new LinkedHashMap<>(16, 0.75f, true);
 	// Change this for snapshots!
 	private static final String backupVersionNumber = "1.21.9";
 	public static NamespacedId lastDimension = null;
@@ -113,6 +123,9 @@ public class Iris {
 	private static UpdateChecker updateChecker;
 	private static boolean fallback;
 	private static boolean loadShaderPackWhenPossible;
+	private static boolean suppressAmbienceInvalidation;
+	private static ShaderRuntimeContext configuredShaderPackContext;
+	private static String activeTransientShaderPackContextKey;
 
 	static {
 		if (!BuildConfig.ACTIVATE_RENDERDOC && IrisPlatformHelpers.getInstance().isDevelopmentEnvironment() && System.getProperty("user.name").contains("ims") && Util.getPlatform() == Util.OS.LINUX) {
@@ -264,8 +277,33 @@ public class Iris {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
+	private static void loadConfiguredShaderpackWithoutTransientSideEffects() {
+		if (!irisConfig.areShadersEnabled()) {
+			logger.info("Shaders are disabled because enableShaders is set to false in iris.properties");
+			setShadersDisabled();
+			return;
+		}
+
+		Optional<String> externalName = irisConfig.getShaderPackName();
+		if (externalName.isEmpty()) {
+			logger.info("Shaders are disabled because no valid shaderpack is selected");
+			setShadersDisabled();
+			return;
+		}
+
+		if (!loadExternalShaderpack(externalName.get(), null, true, false, true)) {
+			logger.warn("Falling back to normal rendering without shaders because the shaderpack could not be loaded");
+			setShadersDisabled();
+			fallback = true;
+		}
+	}
+
 	private static boolean loadExternalShaderpack(String name) {
+		return loadExternalShaderpack(name, null, true, true, true);
+	}
+
+	@SuppressWarnings("unchecked")
+	private static boolean loadExternalShaderpack(String name, Map<String, String> optionOverrides, boolean readPackOptions, boolean consumeOptionQueue, boolean persistPackOptions) {
 		Path shaderPackRoot;
 		Path shaderPackConfigTxt;
 
@@ -328,29 +366,39 @@ public class Iris {
 			return false;
 		}
 
-		Map<String, String> changedConfigs = tryReadConfigProperties(shaderPackConfigTxt)
-			.map(properties -> (Map<String, String>) (Object) properties)
-			.orElse(new HashMap<>());
+		Map<String, String> changedConfigs = readPackOptions
+			? tryReadConfigProperties(shaderPackConfigTxt)
+				.map(properties -> (Map<String, String>) (Object) properties)
+				.orElse(new HashMap<>())
+			: new HashMap<>();
 
-		changedConfigs.putAll(shaderPackOptionQueue);
-		clearShaderPackOptionQueue();
-
-		if (resetShaderPackOptions) {
-			changedConfigs.clear();
+		if (optionOverrides != null) {
+			changedConfigs.putAll(optionOverrides);
 		}
-		resetShaderPackOptions = false;
+
+		if (consumeOptionQueue) {
+			changedConfigs.putAll(shaderPackOptionQueue);
+			clearShaderPackOptionQueue();
+
+			if (resetShaderPackOptions) {
+				changedConfigs.clear();
+			}
+			resetShaderPackOptions = false;
+		}
 
 		try {
 			currentPack = new ShaderPack(shaderPackPath, changedConfigs, StandardMacros.createStandardEnvironmentDefines(), isZip);
 
-			MutableOptionValues changedConfigsValues = currentPack.getShaderPackOptions().getOptionValues().mutableCopy();
+			if (persistPackOptions) {
+				MutableOptionValues changedConfigsValues = currentPack.getShaderPackOptions().getOptionValues().mutableCopy();
 
-			// Store changed values from those currently in use by the shader pack
-			Properties configsToSave = new Properties();
-			changedConfigsValues.getBooleanValues().forEach((k, v) -> configsToSave.setProperty(k, Boolean.toString(v)));
-			changedConfigsValues.getStringValues().forEach(configsToSave::setProperty);
+				// Store changed values from those currently in use by the shader pack
+				Properties configsToSave = new Properties();
+				changedConfigsValues.getBooleanValues().forEach((k, v) -> configsToSave.setProperty(k, Boolean.toString(v)));
+				changedConfigsValues.getStringValues().forEach(configsToSave::setProperty);
 
-			tryUpdateConfigPropertiesFile(shaderPackConfigTxt, configsToSave);
+				tryUpdateConfigPropertiesFile(shaderPackConfigTxt, configsToSave);
+			}
 		} catch (Exception e) {
 			logger.error("Failed to load the shaderpack \"{}\"!", name);
 			logger.error("", e);
@@ -367,6 +415,147 @@ public class Iris {
 		return true;
 	}
 
+	public static boolean applyTransientShaderPack(String name, Map<String, String> optionOverrides) throws IOException {
+		if (name == null || name.isBlank()) {
+			return false;
+		}
+
+		CapturedRenderingState.INSTANCE.resetTextureReloadCount();
+		destroyEverything();
+
+		boolean loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
+		if (loaded && Minecraft.getInstance().level != null) {
+			prepareTransientPipelineContext();
+			if (fallback) {
+				loaded = false;
+			}
+		}
+
+		if (!loaded) {
+			logger.warn("Restoring configured shaderpack after ambience profile \"{}\" failed to load", name);
+			loadConfiguredShaderpackWithoutTransientSideEffects();
+			if (Minecraft.getInstance().level != null) {
+				prepareTransientPipelineContext();
+			}
+		}
+
+		return loaded;
+	}
+
+	public static boolean applyCachedTransientShaderPack(String cacheKey, String name, Map<String, String> optionOverrides) throws IOException {
+		if (cacheKey == null || cacheKey.isBlank()) {
+			return applyTransientShaderPack(name, optionOverrides);
+		}
+		if (name == null || name.isBlank()) {
+			return false;
+		}
+
+		long startNanos = System.nanoTime();
+		if (cacheKey.equals(activeTransientShaderPackContextKey)) {
+			logAmbienceContextTiming("ambience-profile-cache-current", "Ambience shader profile {} already active", cacheKey, startNanos);
+			return true;
+		}
+
+		if (configuredShaderPackContext == null && activeTransientShaderPackContextKey == null) {
+			configuredShaderPackContext = snapshotShaderRuntimeContext();
+		}
+
+		ShaderRuntimeContext cached = transientShaderPackContexts.get(cacheKey);
+		if (cached != null) {
+			activateShaderRuntimeContext(cached, cacheKey);
+			logAmbienceContextTiming("ambience-profile-cache-hit", "Activated cached ambience shader profile {}", cacheKey, startNanos);
+			return true;
+		}
+
+		ShaderRuntimeContext previous = snapshotShaderRuntimeContext();
+		String previousTransientKey = activeTransientShaderPackContextKey;
+
+		CapturedRenderingState.INSTANCE.resetTextureReloadCount();
+		BlendModeStorage.restoreBlend();
+		currentPack = null;
+		currentPackName = null;
+		zipFileSystem = null;
+		pipelineManager = new PipelineManager(Iris::createPipeline);
+		fallback = false;
+		activeTransientShaderPackContextKey = null;
+
+		boolean loaded = false;
+		try {
+			loaded = loadExternalShaderpack(name, optionOverrides == null ? Map.of() : optionOverrides, false, false, false);
+			if (loaded) {
+				prepareTransientPipelineContext();
+				if (fallback) {
+					logger.warn("Ambience profile \"{}\" loaded its shader pack, but pipeline creation fell back to vanilla rendering", name);
+					loaded = false;
+				}
+			}
+			if (loaded) {
+				ShaderRuntimeContext context = snapshotShaderRuntimeContext();
+				transientShaderPackContexts.put(cacheKey, context);
+				activeTransientShaderPackContextKey = cacheKey;
+				enforceTransientShaderPackContextBudget();
+				logAmbienceContextTiming("ambience-profile-cache-miss", "Compiled and cached ambience shader profile {}", cacheKey, startNanos);
+				return true;
+			}
+		} catch (RuntimeException e) {
+			destroyCurrentTransientAttempt();
+			activateShaderRuntimeContext(previous, previousTransientKey);
+			throw e;
+		}
+
+		destroyCurrentTransientAttempt();
+		activateShaderRuntimeContext(previous, previousTransientKey);
+		return false;
+	}
+
+	public static void restoreConfiguredShaderPack() throws IOException {
+		if (configuredShaderPackContext != null) {
+			long startNanos = System.nanoTime();
+			activateShaderRuntimeContext(configuredShaderPackContext, null);
+			logAmbienceContextTiming("ambience-profile-restore-cached", "Restored configured shader profile from ambience cache", null, startNanos);
+			return;
+		}
+
+		suppressAmbienceInvalidation = true;
+		try {
+			reload();
+		} finally {
+			suppressAmbienceInvalidation = false;
+		}
+	}
+
+	public static void trimTransientShaderPackCacheToBudget() {
+		enforceTransientShaderPackContextBudget();
+	}
+
+	public static int getTransientShaderPackContextBudget() {
+		return MAX_TRANSIENT_SHADER_PACK_CONTEXTS;
+	}
+
+	public static int getTransientShaderPackContextCount() {
+		return transientShaderPackContexts.size();
+	}
+
+	public static int getRetainedShaderRuntimeContextCount() {
+		return transientShaderPackContexts.size() + (configuredShaderPackContext == null ? 0 : 1);
+	}
+
+	public static int getProgramBinaryCacheEntryCount() {
+		return ProgramBinaryCache.getEntryCount();
+	}
+
+	public static boolean isProgramBinaryCacheAvailable() {
+		return ProgramBinaryCache.isAvailable();
+	}
+
+	public static int getProgramBinaryCacheFormatCount() {
+		return ProgramBinaryCache.getBinaryFormatCount();
+	}
+
+	public static long getProgramBinaryCacheBytes() {
+		return ProgramBinaryCache.getTotalBytes();
+	}
+
 	private static void handleException(Exception e) {
 		if (irisConfig.areDebugOptionsEnabled()) {
 			Minecraft.getInstance().setScreen(new DebugLoadFailedGridScreen(Minecraft.getInstance().screen, Component.literal(e instanceof ShaderCompileException ? "Failed to compile shaders" : "Exception"), e));
@@ -381,7 +570,12 @@ public class Iris {
 	}
 
 	private static Optional<Path> loadExternalZipShaderpack(Path shaderpackPath) throws IOException {
-		FileSystem zipSystem = FileSystems.newFileSystem(shaderpackPath, Iris.class.getClassLoader());
+		FileSystem zipSystem;
+		try {
+			zipSystem = FileSystems.newFileSystem(shaderpackPath, Iris.class.getClassLoader());
+		} catch (FileSystemAlreadyExistsException e) {
+			zipSystem = FileSystems.getFileSystem(URI.create("jar:" + shaderpackPath.toUri()));
+		}
 		zipFileSystem = zipSystem;
 
 		// Should only be one root directory for a zip shaderpack
@@ -564,6 +758,11 @@ public class Iris {
 	}
 
 	public static void reload() throws IOException {
+		if (!suppressAmbienceInvalidation) {
+			AmbienceRuntime.invalidateActiveProfile();
+		}
+		clearInactiveTransientShaderPackContexts();
+
 		// allows shaderpacks to be changed at runtime
 		irisConfig.initialize();
 
@@ -579,7 +778,133 @@ public class Iris {
 		// Very important - we need to re-create the pipeline straight away.
 		// https://github.com/IrisShaders/Iris/issues/1330
 		if (Minecraft.getInstance().level != null) {
-			Iris.getPipelineManager().preparePipeline(Iris.getCurrentDimension());
+			prepareTransientPipelineContext();
+		}
+	}
+
+	private static void prepareTransientPipelineContext() {
+		NamespacedId dimension = Iris.getCurrentDimension();
+		if (dimension == null) {
+			dimension = DimensionId.OVERWORLD;
+		}
+		Iris.getPipelineManager().preparePipeline(dimension);
+		reapplyCurrentPipelineSettings();
+	}
+
+	private static ShaderRuntimeContext snapshotShaderRuntimeContext() {
+		return new ShaderRuntimeContext(currentPackName, currentPack, pipelineManager, zipFileSystem, fallback);
+	}
+
+	private static void activateShaderRuntimeContext(ShaderRuntimeContext context, String transientKey) {
+		BlendModeStorage.restoreBlend();
+		currentPackName = context.packName();
+		currentPack = context.pack();
+		pipelineManager = context.pipelineManager();
+		zipFileSystem = context.zipFileSystem();
+		fallback = context.fallback();
+		activeTransientShaderPackContextKey = transientKey;
+
+		prepareTransientPipelineContext();
+	}
+
+	private static void reapplyCurrentPipelineSettings() {
+		if (pipelineManager != null && pipelineManager.getPipelineNullable() instanceof IrisRenderingPipeline pipeline) {
+			pipeline.applyWorldRenderingSettings();
+		}
+		if (WorldRenderingSettings.INSTANCE.isReloadRequired()) {
+			if (Minecraft.getInstance().levelRenderer != null) {
+				Minecraft.getInstance().levelRenderer.allChanged();
+			}
+			WorldRenderingSettings.INSTANCE.clearReloadRequired();
+		}
+	}
+
+	private static void enforceTransientShaderPackContextBudget() {
+		int budget = getTransientShaderPackContextBudget();
+		if (transientShaderPackContexts.size() <= budget) {
+			return;
+		}
+
+		Set<PipelineManager> destroyedPipelineManagers = new HashSet<>();
+		Set<FileSystem> closedFileSystems = new HashSet<>();
+		transientShaderPackContexts.entrySet().removeIf(entry -> {
+			if (transientShaderPackContexts.size() <= budget) {
+				return false;
+			}
+			if (entry.getKey().equals(activeTransientShaderPackContextKey)) {
+				return false;
+			}
+			destroyInactiveShaderRuntimeContext(entry.getValue(), destroyedPipelineManagers, closedFileSystems, true);
+			return true;
+		});
+	}
+
+	private static void clearInactiveTransientShaderPackContexts() {
+		Set<PipelineManager> destroyedPipelineManagers = new HashSet<>();
+		Set<FileSystem> closedFileSystems = new HashSet<>();
+
+		transientShaderPackContexts.values().forEach(context -> destroyInactiveShaderRuntimeContext(context, destroyedPipelineManagers, closedFileSystems, false));
+		destroyInactiveShaderRuntimeContext(configuredShaderPackContext, destroyedPipelineManagers, closedFileSystems, false);
+		transientShaderPackContexts.clear();
+		configuredShaderPackContext = null;
+		activeTransientShaderPackContextKey = null;
+	}
+
+	private static void destroyInactiveShaderRuntimeContext(ShaderRuntimeContext context, Set<PipelineManager> destroyedPipelineManagers, Set<FileSystem> closedFileSystems,
+														   boolean keepSharedFileSystems) {
+		if (context == null) {
+			return;
+		}
+		if (context.pipelineManager() != null && context.pipelineManager() != pipelineManager && destroyedPipelineManagers.add(context.pipelineManager())) {
+			context.pipelineManager().destroyPipeline();
+		}
+		if (context.zipFileSystem() != null
+			&& context.zipFileSystem() != zipFileSystem
+			&& (!keepSharedFileSystems || !isZipFileSystemReferencedByOtherRuntimeContext(context, context.zipFileSystem()))
+			&& closedFileSystems.add(context.zipFileSystem())) {
+			try {
+				context.zipFileSystem().close();
+			} catch (IOException e) {
+				logger.warn("Failed to close cached shaderpack zip file system", e);
+			}
+		}
+	}
+
+	private static void destroyCurrentTransientAttempt() {
+		if (zipFileSystem != null && isZipFileSystemReferencedByRuntimeContext(zipFileSystem)) {
+			zipFileSystem = null;
+		}
+		destroyEverything();
+	}
+
+	private static boolean isZipFileSystemReferencedByRuntimeContext(FileSystem fileSystem) {
+		return isZipFileSystemReferencedByOtherRuntimeContext(null, fileSystem);
+	}
+
+	private static boolean isZipFileSystemReferencedByOtherRuntimeContext(ShaderRuntimeContext owner, FileSystem fileSystem) {
+		if (fileSystem == null) {
+			return false;
+		}
+		if (configuredShaderPackContext != null && configuredShaderPackContext != owner && configuredShaderPackContext.zipFileSystem() == fileSystem) {
+			return true;
+		}
+		for (ShaderRuntimeContext context : transientShaderPackContexts.values()) {
+			if (context != owner && context.zipFileSystem() == fileSystem) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static void logAmbienceContextTiming(String key, String message, String cacheKey, long startNanos) {
+		if (!WynncraftDebugLog.shouldLog(key)) {
+			return;
+		}
+		long elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000L;
+		if (cacheKey == null) {
+			WynncraftDebugLog.info(key, message + " in {} ms", elapsedMillis);
+		} else {
+			WynncraftDebugLog.info(key, message + " in {} ms", cacheKey, elapsedMillis);
 		}
 	}
 
@@ -605,6 +930,8 @@ public class Iris {
 				logger.warn("Failed to close the shaderpack zip when reloading because it was deleted, proceeding anyways.");
 			} catch (IOException e) {
 				logger.error("Failed to close zip file system?", e);
+			} finally {
+				zipFileSystem = null;
 			}
 		}
 	}
@@ -776,6 +1103,10 @@ public class Iris {
 
 	public static String getVersionSimple() {
 		return getVersion().split("\\+")[0];
+	}
+
+	private record ShaderRuntimeContext(String packName, ShaderPack pack, PipelineManager pipelineManager,
+										FileSystem zipFileSystem, boolean fallback) {
 	}
 
     /**

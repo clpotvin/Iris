@@ -73,6 +73,10 @@ public class SodiumPrograms {
 		WorldRenderingSettings.INSTANCE.setVertexFormat(FormatAnalyzer.createFormat(hasBlockId, hasNormal, hasMidUv, hasMidBlock));
 	}
 
+	public void applyWorldRenderingSettings() {
+		WorldRenderingSettings.INSTANCE.setVertexFormat(FormatAnalyzer.createFormat(hasBlockId, hasNormal, hasMidUv, hasMidBlock));
+	}
+
 	private AlphaTest getAlphaTest(Pass pass, ProgramSource source) {
 		return source.getDirectives().getAlphaTestOverride().orElse(
 			pass == Pass.TRANSLUCENT ? AlphaTests.NON_ZERO_ALPHA : (pass == Pass.TERRAIN_CUTOUT || pass == Pass.SHADOW_CUTOUT ? AlphaTests.HALF_ALPHA : AlphaTest.ALWAYS));

@@ -10,20 +10,22 @@ import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.KHRDebug;
 
+import java.util.function.IntConsumer;
+
 public class ProgramCreator {
 	private static final Logger LOGGER = LogManager.getLogger(ProgramCreator.class);
 
 	public static int create(String name, GlShader... shaders) {
+		return create(name, null, ProgramCreator::bindDefaultAttributes, shaders);
+	}
+
+	public static int create(String name, String cacheKey, IntConsumer attributeBinder, GlShader... shaders) {
 		int program = GlStateManager.glCreateProgram();
+		ProgramBinaryCache.markRetrievable(program);
 
-		GlStateManager._glBindAttribLocation(program, 11, "iris_Entity");
-		GlStateManager._glBindAttribLocation(program, 11, "mc_Entity");
-		GlStateManager._glBindAttribLocation(program, 12, "mc_midTexCoord");
-		GlStateManager._glBindAttribLocation(program, 13, "at_tangent");
-		GlStateManager._glBindAttribLocation(program, 14, "at_midBlock");
-
-		GlStateManager._glBindAttribLocation(program, 0, "Position");
-		GlStateManager._glBindAttribLocation(program, 1, "UV0");
+		if (attributeBinder != null) {
+			attributeBinder.accept(program);
+		}
 
 		for (GlShader shader : shaders) {
 			GLDebug.nameObject(KHRDebug.GL_SHADER, shader.getHandle(), shader.getName());
@@ -52,6 +54,21 @@ public class ProgramCreator {
 			throw new ShaderCompileException(name, log);
 		}
 
+		if (cacheKey != null) {
+			ProgramBinaryCache.store(cacheKey, name, program);
+		}
+
 		return program;
+	}
+
+	public static void bindDefaultAttributes(int program) {
+		GlStateManager._glBindAttribLocation(program, 11, "iris_Entity");
+		GlStateManager._glBindAttribLocation(program, 11, "mc_Entity");
+		GlStateManager._glBindAttribLocation(program, 12, "mc_midTexCoord");
+		GlStateManager._glBindAttribLocation(program, 13, "at_tangent");
+		GlStateManager._glBindAttribLocation(program, 14, "at_midBlock");
+
+		GlStateManager._glBindAttribLocation(program, 0, "Position");
+		GlStateManager._glBindAttribLocation(program, 1, "UV0");
 	}
 }

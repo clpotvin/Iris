@@ -6,6 +6,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.api.v0.IrisApi;
+import net.irisshaders.iris.ambience.AmbienceRuntime;
 import net.irisshaders.iris.gui.screen.ShaderPackScreen;
 import net.irisshaders.iris.pathways.HandRenderer;
 import net.irisshaders.iris.pipeline.ShaderRenderingPipeline;
@@ -84,5 +85,6 @@ public class MixinGameRenderer {
 	@Inject(method = "renderLevel", at = @At("TAIL"))
 	private void iris$runColorSpace(DeltaTracker deltaTracker, CallbackInfo ci) {
 		Iris.getPipelineManager().getPipeline().ifPresent(WorldRenderingPipeline::finalizeGameRendering);
+		AmbienceRuntime.afterFrameRendered();
 	}
 }

@@ -596,6 +596,22 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			this, renderTargets, flippedAfterPrepare);
 	}
 
+	public void applyWorldRenderingSettings() {
+		WorldRenderingSettings.INSTANCE.setEntityIds(pack.getIdMap().getEntityIdMap());
+		WorldRenderingSettings.INSTANCE.setItemIds(pack.getIdMap().getItemIdMap());
+		WorldRenderingSettings.INSTANCE.setAmbientOcclusionLevel(packDirectives.getAmbientOcclusionLevel());
+		WorldRenderingSettings.INSTANCE.setDisableDirectionalShading(shouldDisableDirectionalShading());
+		WorldRenderingSettings.INSTANCE.setUseSeparateAo(packDirectives.shouldUseSeparateAo());
+		WorldRenderingSettings.INSTANCE.setBreaksAnisotropy(packDirectives.breaksAnisotropy());
+		WorldRenderingSettings.INSTANCE.setVoxelizeLightBlocks(packDirectives.shouldVoxelizeLightBlocks());
+		WorldRenderingSettings.INSTANCE.setSeparateEntityDraws(packDirectives.shouldUseSeparateEntityDraws());
+		WorldRenderingSettings.INSTANCE.setBlockStateIds(
+			BlockMaterialMapping.createBlockStateIdMap(pack.getIdMap().getBlockProperties(), pack.getIdMap().getTagEntries()));
+		WorldRenderingSettings.INSTANCE.setBlockTypeIds(BlockMaterialMapping.createBlockTypeMap(pack.getIdMap().getBlockRenderTypeMap()));
+		initializedBlockIds = true;
+		sodiumPrograms.applyWorldRenderingSettings();
+	}
+
 	private ComputeProgram[] createShadowComputes(ComputeSource[] compute, ProgramSet programSet) {
 		ComputeProgram[] programs = new ComputeProgram[compute.length];
 		for (int i = 0; i < programs.length; i++) {

@@ -13,6 +13,7 @@ import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gl.GLDebug;
 import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.shader.ShaderCompileException;
+import net.irisshaders.iris.gl.shader.ProgramBinaryCache;
 import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.platform.IrisPlatformHelpers;
 import net.irisshaders.iris.gl.blending.AlphaTest;
@@ -58,6 +59,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -170,10 +172,18 @@ public class ShaderCreator {
 
 
 	public static PartialShader link(String name, String vertex, String geometry, String tessControl, String tessEval, String fragment, VertexFormat vertexFormat, boolean isFallback) throws ShaderCompileException {
+		String cacheKey = ProgramBinaryCache.key("iris-partial", name, Boolean.toString(isFallback), vertexFormat.toString(),
+			vertex, geometry, tessControl, tessEval, fragment);
+		OptionalInt cachedProgram = ProgramBinaryCache.tryCreateProgram(cacheKey, name);
+		if (cachedProgram.isPresent()) {
+			return new PartialShader(cachedProgram.getAsInt(), -1, -1, -1, -1, -1);
+		}
+
 		int i = GlStateManager.glCreateProgram();
 		if (i <= 0) {
 			throw new RuntimeException("Could not create shader program (returned program ID " + i + ")");
 		} else {
+			ProgramBinaryCache.markRetrievable(i);
 			int vertexS = createShader(name, ShaderType.VERTEX, vertex);
 			int geometryS = createShader(name, ShaderType.GEOMETRY, geometry);
 			int tessContS = createShader(name, ShaderType.TESSELATION_CONTROL, tessControl);
@@ -189,6 +199,7 @@ public class ShaderCreator {
 			((VertexFormatExtension) vertexFormat).bindAttributesIris(isFallback, i);
 
 			GlStateManager.glLinkProgram(i);
+			ProgramBinaryCache.store(cacheKey, name, i);
 
 			return new PartialShader(i, vertexS, fragS, geometryS, tessContS, tessEvalS);
 		}
