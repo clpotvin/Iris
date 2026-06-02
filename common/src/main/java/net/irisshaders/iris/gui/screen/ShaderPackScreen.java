@@ -9,6 +9,7 @@ import net.irisshaders.iris.gui.OldImageButton;
 import net.irisshaders.iris.gui.element.ShaderPackOptionList;
 import net.irisshaders.iris.gui.element.ShaderPackSelectionList;
 import net.irisshaders.iris.gui.element.screen.IrisButton;
+import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.gui.element.widget.AbstractElementWidget;
 import net.irisshaders.iris.gui.element.widget.CommentedElementWidget;
 import net.irisshaders.iris.mixin.GameRendererAccessor;
@@ -40,6 +41,7 @@ import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -54,7 +56,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
-public class ShaderPackScreen extends Screen implements HudHideable {
+public class ShaderPackScreen extends Screen implements HudHideable, ShaderPackOptionScreen {
 	/**
 	 * Queue rendering to happen on top of all elements. Useful for tooltips or dialogs.
 	 */
@@ -207,11 +209,7 @@ public class ShaderPackScreen extends Screen implements HudHideable {
 			}
 		}
 
-		// Render everything queued to render last
-		for (Runnable render : TOP_LAYER_RENDER_QUEUE) {
-			render.run();
-		}
-		TOP_LAYER_RENDER_QUEUE.clear();
+		ShaderPackOptionScreen.renderTopLayerQueue();
 
 		if (this.developmentComponent != null) {
 			guiGraphics.drawString(font, developmentComponent, 2, this.height - 10, 0xFFFFFFFF);
@@ -572,6 +570,32 @@ public class ShaderPackScreen extends Screen implements HudHideable {
 	}
 
 	@Override
+	public void exportPackOptions(Path settingFile) {
+		Properties toSave = new Properties();
+		Path sourceTxtPath = getDefaultShaderPackOptionsPath();
+		if (sourceTxtPath != null && Files.exists(sourceTxtPath)) {
+			try (InputStream in = Files.newInputStream(sourceTxtPath)) {
+				toSave.load(in);
+			} catch (IOException ignored) {
+			}
+		}
+
+		try (OutputStream out = Files.newOutputStream(settingFile)) {
+			toSave.store(out, null);
+		} catch (IOException e) {
+			Iris.logger.error("Error saving properties to \"" + settingFile + "\"", e);
+		}
+	}
+
+	@Override
+	public Path getDefaultShaderPackOptionsPath() {
+		if (Iris.getCurrentPack().isEmpty()) {
+			return null;
+		}
+		return Iris.getShaderpacksDirectory().resolve(Iris.getCurrentPackName() + ".txt");
+	}
+
+	@Override
 	public void onClose() {
 		if (!dropChanges) {
 			applyChanges();
@@ -597,18 +621,22 @@ public class ShaderPackScreen extends Screen implements HudHideable {
 		ShaderPackSelectionList.BaseEntry base = this.shaderPackList.getSelected();
 		boolean enabled = this.shaderPackList.getTopButtonRow().shadersEnabled;
 		boolean previousShadersEnabled = Iris.getIrisConfig().areShadersEnabled();
-
-		if (enabled != previousShadersEnabled) {
-			IrisApi.getInstance().getConfig().setShadersEnabledAndApply(enabled);
-		}
+		boolean shadersEnabledChanged = enabled != previousShadersEnabled;
 
 		if (!(base instanceof ShaderPackSelectionList.ShaderPackEntry entry)) {
+			if (shadersEnabledChanged) {
+				IrisApi.getInstance().getConfig().setShadersEnabledAndApply(enabled);
+			}
 			return;
 		}
 
 		this.shaderPackList.setApplied(entry);
 
 		String name = entry.getPackName();
+		boolean disablingAmbiencePack = IrisVideoSettings.wynncraftAmbienceEnabled;
+		if (disablingAmbiencePack) {
+			IrisVideoSettings.wynncraftAmbienceEnabled = false;
+		}
 
 		// If the pack is being changed, clear pending options from the previous pack to
 		// avoid possible undefined behavior from applying one pack's options to another pack
@@ -619,12 +647,28 @@ public class ShaderPackScreen extends Screen implements HudHideable {
 		String previousPackName = Iris.getIrisConfig().getShaderPackName().orElse(null);
 
 		// Only reload if the pack would be different from before, or shaders were toggled, or options were changed, or if we're about to reset options.
-		if (!name.equals(previousPackName) || !Iris.getShaderPackOptionQueue().isEmpty() || Iris.shouldResetShaderPackOptionsOnNextReload()) {
+		if (!name.equals(previousPackName) || shadersEnabledChanged || !Iris.getShaderPackOptionQueue().isEmpty() || Iris.shouldResetShaderPackOptionsOnNextReload() || disablingAmbiencePack) {
 			Iris.getIrisConfig().setShaderPackName(name);
 			IrisApi.getInstance().getConfig().setShadersEnabledAndApply(enabled);
 		}
 
 		refreshForChangedPack();
+	}
+
+	@Override
+	public float iris$getListTransition() {
+		return listTransition.getAsFloat();
+	}
+
+	@Override
+	public Component iris$getOptionMenuTitle() {
+		return Component.literal(Iris.getCurrentPackName()).append(Iris.isFallback() ? " (fallback)" : "");
+	}
+
+	@Override
+	public void resetShaderPackOptions() {
+		Iris.resetShaderPackOptionsOnNextReload();
+		this.applyChanges();
 	}
 
 	private void discardChanges() {

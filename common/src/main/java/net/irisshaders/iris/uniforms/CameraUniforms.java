@@ -15,8 +15,13 @@ import static net.irisshaders.iris.gl.uniform.UniformUpdateFrequency.PER_FRAME;
  */
 public class CameraUniforms {
 	private static final Minecraft client = Minecraft.getInstance();
+	private static int previousCameraResetGeneration;
 
 	private CameraUniforms() {
+	}
+
+	public static void resetPreviousCameraPositions() {
+		previousCameraResetGeneration++;
 	}
 
 	public static void addCameraUniforms(UniformHolder uniforms, FrameUpdateNotifier notifier) {
@@ -73,6 +78,7 @@ public class CameraUniforms {
 		private Vector3d currentCameraPosition = new Vector3d();
 		private Vector3d previousCameraPositionUnshifted = new Vector3d();
 		private Vector3d currentCameraPositionUnshifted = new Vector3d();
+		private int observedResetGeneration = previousCameraResetGeneration;
 
 		CameraPositionTracker(FrameUpdateNotifier notifier) {
 			notifier.addListener(this::update);
@@ -88,10 +94,19 @@ public class CameraUniforms {
 		}
 
 		private void update() {
+			boolean resetPrevious = observedResetGeneration != previousCameraResetGeneration;
+			if (resetPrevious) {
+				observedResetGeneration = previousCameraResetGeneration;
+			}
+
 			previousCameraPosition = currentCameraPosition;
 			previousCameraPositionUnshifted = currentCameraPositionUnshifted;
 			currentCameraPosition = getUnshiftedCameraPosition().add(shift);
 			currentCameraPositionUnshifted = getUnshiftedCameraPosition();
+			if (resetPrevious) {
+				previousCameraPosition = new Vector3d(currentCameraPosition);
+				previousCameraPositionUnshifted = new Vector3d(currentCameraPositionUnshifted);
+			}
 
 			updateShift();
 		}

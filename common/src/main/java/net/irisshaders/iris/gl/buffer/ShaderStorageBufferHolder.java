@@ -82,6 +82,23 @@ public class ShaderStorageBufferHolder {
 		}
 	}
 
+	public ResetStats resetBuffers() {
+		if (destroyed) {
+			throw new IllegalStateException("Tried to reset destroyed buffer objects");
+		}
+
+		int count = 0;
+		long bytes = 0;
+		for (ShaderStorageBuffer buffer : buffers) {
+			if (buffer != null) {
+				count++;
+				bytes += buffer.resetContents();
+			}
+		}
+		GlStateManager._glBindBuffer(GL43C.GL_SHADER_STORAGE_BUFFER, 0);
+		return new ResetStats(count, bytes);
+	}
+
 	public int getBufferIndex(int index) {
 		if (buffers.length < index || buffers[index] == null)
 			throw new RuntimeException("Tried to query a buffer for indirect dispatch that doesn't exist!");
@@ -98,6 +115,9 @@ public class ShaderStorageBufferHolder {
 		}
 		buffers = null;
 		destroyed = true;
+	}
+
+	public record ResetStats(int count, long bytes) {
 	}
 
 	private static class OutOfVideoMemoryError extends RuntimeException {

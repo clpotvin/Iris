@@ -49,6 +49,7 @@ import net.irisshaders.iris.helpers.OptionalBoolean;
 import net.irisshaders.iris.helpers.Tri;
 import net.irisshaders.iris.mixin.GlStateManagerAccessor;
 import net.irisshaders.iris.mixin.LevelRendererAccessor;
+import net.irisshaders.iris.mixinterface.RenderTargetInterface;
 import net.irisshaders.iris.pathways.CenterDepthSampler;
 import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pathways.HorizonRenderer;
@@ -101,9 +102,11 @@ import net.irisshaders.iris.targets.ClearPass;
 import net.irisshaders.iris.targets.ClearPassCreator;
 import net.irisshaders.iris.targets.RenderTargets;
 import net.irisshaders.iris.targets.backed.NativeImageBackedSingleColorTexture;
+import net.irisshaders.iris.uniforms.CameraUniforms;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
 import net.irisshaders.iris.uniforms.CommonUniforms;
 import net.irisshaders.iris.uniforms.FrameUpdateNotifier;
+import net.irisshaders.iris.uniforms.MatrixUniforms;
 import net.irisshaders.iris.uniforms.custom.CustomUniforms;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -235,6 +238,14 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private boolean isRenderingWorld;
 	private boolean isMainBound;
 	private boolean shouldBindPBR;
+	private boolean runSetupComputesOnNextFrame;
+	private static int ambiencePresentationMaskFrames;
+	private static int ambiencePreviousFrameTexture;
+	private static int ambiencePreviousFrameWidth;
+	private static int ambiencePreviousFrameHeight;
+	private static boolean ambiencePreviousFrameReady;
+	@Nullable
+	private static GlFramebuffer ambiencePreviousFrameFramebuffer;
 	private AbstractTexture currentNormalTexture;
 	private AbstractTexture currentSpecularTexture;
 	private ColorSpace currentColorSpace;
@@ -671,6 +682,17 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			return;
 		}
 
+		runSetupComputesOnNextFrame = true;
+		CameraUniforms.resetPreviousCameraPositions();
+		MatrixUniforms.resetPreviousMatrices();
+		ShaderStorageBufferHolder.ResetStats ssboResetStats = shaderStorageBufferHolder == null ? new ShaderStorageBufferHolder.ResetStats(0, 0) : shaderStorageBufferHolder.resetBuffers();
+		ambiencePresentationMaskFrames = Math.max(ambiencePresentationMaskFrames, 1);
+		String mainTargetsBeforeClear = renderTargets.describeCreatedTargets();
+		String cloudTargetsBeforeClear = renderTargets.describeTargetPresence(8, 9, 10, 11, 12);
+		int createdTargetsBeforeClear = renderTargets.getCreatedTargetCount();
+		int fullClearPassesBeforeRebuild = clearPassesFull.size();
+		int clearPassesBeforeRebuild = clearPasses.size();
+
 		long phaseStartNanos = System.nanoTime();
 		renderTargets.forceFullClear();
 		if (timing != null) {
@@ -682,6 +704,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (timing != null) {
 			timing.addRebuildMainClearPassesNanos(System.nanoTime() - phaseStartNanos);
 		}
+		String mainTargetsAfterClearPassRebuild = renderTargets.describeCreatedTargets();
+		String cloudTargetsAfterClearPassRebuild = renderTargets.describeTargetPresence(8, 9, 10, 11, 12);
+		int createdTargetsAfterClearPassRebuild = renderTargets.getCreatedTargetCount();
 
 		if (shadowRenderTargets != null) {
 			phaseStartNanos = System.nanoTime();
@@ -699,19 +724,39 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		}
 
 		phaseStartNanos = System.nanoTime();
-		for (GlImage image : customImages) {
-			if (image.isPooledView()) {
-				image.clearTexture();
-			}
-		}
+		CustomImageReseedStats customImageReseedStats = clearCustomImagesForAmbienceReseed();
 		if (timing != null) {
 			timing.addCustomImageClearNanos(System.nanoTime() - phaseStartNanos);
 		}
 
 		WynncraftDebugLog.info("ambience-profile-activate-pool",
-			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} profilePressure={}",
+			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} sameShaderPack={} presentationMaskFrames={} renderSun={} renderMoon={} renderStars={} renderSkyDisc={} sunPathRotation={} cloudSetting={} dhCloudSetting={} renderWeather={} renderWeatherParticles={} pack={} activeKey={} createdTargetsBeforeClear={} createdTargetsAfterClearPassRebuild={} clearPassesBeforeRebuild={}/{} clearPassesAfterRebuild={}/{} cloudTargetsBeforeClear={} cloudTargetsAfterClearPassRebuild={} mainTargetsBeforeClear={} mainTargetsAfterClearPassRebuild={} customImagesCleared={} customImagesSkipped={} ssboResetCount={} ssboResetBytes={} profilePressure={}",
 			ambiencePool.getResourceCount(), ambiencePool.getEstimatedBytes(), ambiencePool.getHits(), ambiencePool.getMisses(),
-			ambiencePool.getReleases(), ambiencePool.getDestroyedResources(), getAmbienceProfilePressure());
+			ambiencePool.getReleases(), ambiencePool.getDestroyedResources(), timing != null && timing.sameShaderPackAsPrevious(),
+			ambiencePresentationMaskFrames, shouldRenderSun, shouldRenderMoon, shouldRenderStars, shouldRenderSkyDisc, sunPathRotation,
+			cloudSetting, dhCloudSetting, shouldRenderWeather, shouldRenderWeatherParticles,
+			Iris.getCurrentPackName(), Iris.getActiveTransientShaderPackContextKey(),
+			createdTargetsBeforeClear, createdTargetsAfterClearPassRebuild, fullClearPassesBeforeRebuild, clearPassesBeforeRebuild,
+			clearPassesFull.size(), clearPasses.size(), cloudTargetsBeforeClear, cloudTargetsAfterClearPassRebuild,
+			mainTargetsBeforeClear, mainTargetsAfterClearPassRebuild, customImageReseedStats.cleared(), customImageReseedStats.skipped(),
+			ssboResetStats.count(), ssboResetStats.bytes(), getAmbienceProfilePressure());
+	}
+
+	private CustomImageReseedStats clearCustomImagesForAmbienceReseed() {
+		int cleared = 0;
+		int skipped = 0;
+		for (GlImage image : customImages) {
+			if (image.isPooledView()) {
+				image.clearTexture();
+				cleared++;
+			} else {
+				skipped++;
+			}
+		}
+		return new CustomImageReseedStats(cleared, skipped);
+	}
+
+	private record CustomImageReseedStats(int cleared, int skipped) {
 	}
 
 	@Nullable
@@ -1245,25 +1290,39 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		Minecraft.getInstance().getMainRenderTarget().iris$bindFramebuffer();
 		isMainBound = true;
 
-		if (changed) {
-			boolean hasRun = false;
-
-			for (ComputeProgram program : setup) {
-				if (program != null) {
-					hasRun = true;
-					program.use();
-					program.dispatch(1, 1);
-				}
-			}
-
-			if (hasRun) {
-				ComputeProgram.unbind();
-			}
+		boolean shouldRunSetupComputes = changed || runSetupComputesOnNextFrame;
+		if (shouldRunSetupComputes) {
+			String setupReason = changed
+				? (runSetupComputesOnNextFrame ? "resize+ambience-activation" : "resize")
+				: "ambience-activation";
+			runSetupComputesOnNextFrame = false;
+			runSetupComputes(setupReason);
 		}
 
 		beginRenderer.renderAll();
 
 		isBeforeTranslucent = true;
+	}
+
+	private void runSetupComputes(String reason) {
+		boolean hasRun = false;
+		long setupStartNanos = System.nanoTime();
+
+		for (ComputeProgram program : setup) {
+			if (program != null) {
+				hasRun = true;
+				program.use();
+				program.dispatch(1, 1);
+			}
+		}
+
+		if (hasRun) {
+			ComputeProgram.unbind();
+			if (WynncraftDebugLog.shouldLog("ambience-setup-computes")) {
+				WynncraftDebugLog.info("ambience-setup-computes",
+					"Ran setup computes for {} in {}us", reason, (System.nanoTime() - setupStartNanos) / 1_000L);
+			}
+		}
 	}
 
 	@Override
@@ -1569,7 +1628,87 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 	@Override
 	public void finalizeGameRendering() {
-		colorSpaceConverter.process((GlTexture) Minecraft.getInstance().getMainRenderTarget().getColorTexture());
+		RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+		colorSpaceConverter.process((GlTexture) main.getColorTexture());
+
+		boolean restoredPreviousFrame = false;
+		if (ambiencePresentationMaskFrames > 0) {
+			restoredPreviousFrame = restoreAmbiencePreviousFrame(main);
+			ambiencePresentationMaskFrames--;
+				if (WynncraftDebugLog.shouldLog("ambience-presentation-mask")) {
+					WynncraftDebugLog.info("ambience-presentation-mask",
+						"Ambience presentation mask: restoredPreviousFrame={} remainingFrames={} ready={} size={}x{} pack={} activeKey={}",
+						restoredPreviousFrame, ambiencePresentationMaskFrames, ambiencePreviousFrameReady, main.width, main.height,
+						Iris.getCurrentPackName(), Iris.getActiveTransientShaderPackContextKey());
+				}
+			}
+
+		if (!restoredPreviousFrame || ambiencePreviousFrameReady) {
+			captureAmbiencePreviousFrame(main);
+		}
+	}
+
+	private boolean restoreAmbiencePreviousFrame(RenderTarget main) {
+		if (!ambiencePreviousFrameReady || ambiencePreviousFrameFramebuffer == null
+			|| ambiencePreviousFrameWidth != main.width || ambiencePreviousFrameHeight != main.height) {
+			return false;
+		}
+
+		int mainFramebuffer = ((RenderTargetInterface) main).iris$getFramebufferId();
+		IrisRenderSystem.blitFramebuffer(ambiencePreviousFrameFramebuffer.getId(), mainFramebuffer,
+			0, 0, main.width, main.height,
+			0, 0, main.width, main.height,
+			GL30C.GL_COLOR_BUFFER_BIT, GL30C.GL_NEAREST);
+		return true;
+	}
+
+	private void captureAmbiencePreviousFrame(RenderTarget main) {
+		if (!ensureAmbiencePreviousFrameResources(main.width, main.height)) {
+			return;
+		}
+
+		((RenderTargetInterface) main).iris$bindFramebuffer();
+		IrisRenderSystem.copyTexSubImage2D(ambiencePreviousFrameTexture, GL30C.GL_TEXTURE_2D, 0, 0, 0, 0, 0, main.width, main.height);
+		ambiencePreviousFrameReady = true;
+	}
+
+	private boolean ensureAmbiencePreviousFrameResources(int width, int height) {
+		if (width <= 0 || height <= 0) {
+			return false;
+		}
+
+		if (ambiencePreviousFrameTexture != 0 && ambiencePreviousFrameWidth == width && ambiencePreviousFrameHeight == height) {
+			return true;
+		}
+
+		destroyAmbiencePreviousFrameResources();
+		ambiencePreviousFrameTexture = GlStateManager._genTexture();
+		IrisRenderSystem.texImage2D(ambiencePreviousFrameTexture, GL30C.GL_TEXTURE_2D, 0, GL30C.GL_RGBA8, width, height, 0, GL30C.GL_RGBA, GL30C.GL_UNSIGNED_BYTE, null);
+		IrisRenderSystem.texParameteri(ambiencePreviousFrameTexture, GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MIN_FILTER, GL30C.GL_NEAREST);
+		IrisRenderSystem.texParameteri(ambiencePreviousFrameTexture, GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MAG_FILTER, GL30C.GL_NEAREST);
+		IrisRenderSystem.texParameteri(ambiencePreviousFrameTexture, GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_WRAP_S, GL30C.GL_CLAMP_TO_EDGE);
+		IrisRenderSystem.texParameteri(ambiencePreviousFrameTexture, GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_WRAP_T, GL30C.GL_CLAMP_TO_EDGE);
+
+		ambiencePreviousFrameFramebuffer = new GlFramebuffer();
+		ambiencePreviousFrameFramebuffer.addColorAttachment(0, ambiencePreviousFrameTexture);
+		ambiencePreviousFrameFramebuffer.readBuffer(0);
+		ambiencePreviousFrameWidth = width;
+		ambiencePreviousFrameHeight = height;
+		return true;
+	}
+
+	private void destroyAmbiencePreviousFrameResources() {
+		ambiencePreviousFrameReady = false;
+		ambiencePreviousFrameWidth = 0;
+		ambiencePreviousFrameHeight = 0;
+		if (ambiencePreviousFrameFramebuffer != null) {
+			ambiencePreviousFrameFramebuffer.destroy();
+			ambiencePreviousFrameFramebuffer = null;
+		}
+		if (ambiencePreviousFrameTexture != 0) {
+			GlStateManager._deleteTexture(ambiencePreviousFrameTexture);
+			ambiencePreviousFrameTexture = 0;
+		}
 	}
 
 	@Override
@@ -1723,6 +1862,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			wynncraftTransitionRenderer.destroy();
 			wynncraftTransitionRenderer = null;
 		}
+		destroyAmbiencePreviousFrameResources();
 		// Clear fog override on pipeline destroy (prevents cross-world ghosting)
 		skyboxFogColor = null;
 		skyboxFogBlendFactor = 0.0f;

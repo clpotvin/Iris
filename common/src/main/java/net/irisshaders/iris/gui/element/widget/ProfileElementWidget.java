@@ -3,7 +3,7 @@ package net.irisshaders.iris.gui.element.widget;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.GuiUtil;
 import net.irisshaders.iris.gui.NavigationController;
-import net.irisshaders.iris.gui.screen.ShaderPackScreen;
+import net.irisshaders.iris.gui.screen.ShaderPackOptionScreen;
 import net.irisshaders.iris.shaderpack.option.OptionSet;
 import net.irisshaders.iris.shaderpack.option.Profile;
 import net.irisshaders.iris.shaderpack.option.ProfileSet;
@@ -30,7 +30,7 @@ public class ProfileElementWidget extends BaseOptionElementWidget<OptionMenuProf
 	}
 
 	@Override
-	public void init(ShaderPackScreen screen, NavigationController navigation) {
+	public void init(ShaderPackOptionScreen screen, NavigationController navigation) {
 		super.init(screen, navigation);
 		this.setLabel(PROFILE_LABEL);
 

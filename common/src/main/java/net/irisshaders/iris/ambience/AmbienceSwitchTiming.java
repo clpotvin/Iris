@@ -7,6 +7,7 @@ public final class AmbienceSwitchTiming {
 	private long preparePipelineNanos;
 	private long reapplySettingsNanos;
 	private long levelRendererReloadNanos;
+	private long renderStateRefreshNanos;
 	private long profileActivationNanos;
 	private long forceMainClearNanos;
 	private long rebuildMainClearPassesNanos;
@@ -14,6 +15,7 @@ public final class AmbienceSwitchTiming {
 	private long shadowSamplerRefreshNanos;
 	private long customImageClearNanos;
 	private long totalNanos;
+	private boolean sameShaderPackAsPrevious;
 
 	public AmbienceSwitchTiming(String action, String profileKey) {
 		this.action = action == null || action.isBlank() ? "unknown" : action;
@@ -29,6 +31,14 @@ public final class AmbienceSwitchTiming {
 		return profileKey;
 	}
 
+	public boolean sameShaderPackAsPrevious() {
+		return sameShaderPackAsPrevious;
+	}
+
+	public void setSameShaderPackAsPrevious(boolean sameShaderPackAsPrevious) {
+		this.sameShaderPackAsPrevious = sameShaderPackAsPrevious;
+	}
+
 	public void addPreparePipelineNanos(long nanos) {
 		preparePipelineNanos += Math.max(0L, nanos);
 	}
@@ -39,6 +49,10 @@ public final class AmbienceSwitchTiming {
 
 	public void addLevelRendererReloadNanos(long nanos) {
 		levelRendererReloadNanos += Math.max(0L, nanos);
+	}
+
+	public void addRenderStateRefreshNanos(long nanos) {
+		renderStateRefreshNanos += Math.max(0L, nanos);
 	}
 
 	public void addProfileActivationNanos(long nanos) {
@@ -80,7 +94,9 @@ public final class AmbienceSwitchTiming {
 			+ " preparePipeline=" + micros(preparePipelineNanos) + "us"
 			+ " reapplySettings=" + micros(reapplySettingsNanos) + "us"
 			+ " levelRendererReload=" + micros(levelRendererReloadNanos) + "us"
+			+ " renderStateRefresh=" + micros(renderStateRefreshNanos) + "us"
 			+ " profileActivation=" + micros(profileActivationNanos) + "us"
+			+ " sameShaderPack=" + sameShaderPackAsPrevious
 			+ " forceMainClear=" + micros(forceMainClearNanos) + "us"
 			+ " rebuildMainClearPasses=" + micros(rebuildMainClearPassesNanos) + "us"
 			+ " forceShadowClear=" + micros(forceShadowClearNanos) + "us"

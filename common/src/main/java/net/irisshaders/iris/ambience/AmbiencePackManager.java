@@ -1,6 +1,7 @@
 package net.irisshaders.iris.ambience;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.option.WynncraftDebugLog;
@@ -10,23 +11,35 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Reader;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 public final class AmbiencePackManager {
 	private static final Gson GSON = new Gson();
+	private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final AmbiencePackManager INSTANCE = new AmbiencePackManager();
+	private static final String MANIFEST_FILE = "manifest.json";
+	private static final String PROFILES_FILE = "profiles.json";
+	private static final String REGIONS_FILE = "regions.json";
+	private static final String OVERRIDES_DIRECTORY = "overrides";
+	private static final String PACK_ZIP_EXTENSION = ".wynnambience.zip";
 
 	private final Map<String, LoadedAmbiencePack> packs = new LinkedHashMap<>();
 	private volatile Map<String, String> installedShaderPacks = Map.of();
@@ -56,9 +69,9 @@ public final class AmbiencePackManager {
 			Files.createDirectories(directory);
 			try (var files = Files.list(directory)) {
 				files
-					.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".json"))
+					.filter(this::isAmbiencePackSource)
 					.sorted()
-					.forEach(this::loadFile);
+					.forEach(this::loadSource);
 			}
 		} catch (IOException e) {
 			Iris.logger.error("Failed to load WynnIris ambience packs from {}", directory, e);
@@ -73,21 +86,79 @@ public final class AmbiencePackManager {
 		}
 	}
 
-	private void loadFile(Path path) {
+	private boolean isAmbiencePackSource(Path path) {
+		String fileName = path.getFileName().toString();
+		if (Files.isDirectory(path)) {
+			return !OVERRIDES_DIRECTORY.equals(fileName) && Files.isRegularFile(path.resolve(MANIFEST_FILE));
+		}
+		if (!Files.isRegularFile(path)) {
+			return false;
+		}
+		return fileName.endsWith(PACK_ZIP_EXTENSION)
+			|| (fileName.endsWith(".json") && !MANIFEST_FILE.equals(fileName) && !PROFILES_FILE.equals(fileName) && !REGIONS_FILE.equals(fileName));
+	}
+
+	private void loadSource(Path path) {
+		if (Files.isDirectory(path)) {
+			loadDirectoryPack(path);
+			return;
+		}
+
+		String fileName = path.getFileName().toString();
+		if (fileName.endsWith(PACK_ZIP_EXTENSION)) {
+			loadZipPack(path);
+			return;
+		}
+
+		loadLegacyFile(path);
+	}
+
+	private void loadLegacyFile(Path path) {
 		try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
 			AmbiencePack pack = GSON.fromJson(reader, AmbiencePack.class);
-			List<String> errors = validate(pack, path);
-			if (!errors.isEmpty()) {
-				Iris.logger.warn("Skipping ambience pack {}: {}", path.getFileName(), String.join("; ", errors));
-				return;
-			}
-			packs.put(pack.id, new LoadedAmbiencePack(pack, path, pack.profilesById(), pack.dependenciesById()));
+			normalizePackId(pack, stripJsonExtension(path.getFileName().toString()));
+			loadValidatedPack(pack, path, PackStorage.legacy(path));
 		} catch (JsonSyntaxException | IOException e) {
 			Iris.logger.warn("Failed to load ambience pack {}", path, e);
 		}
 	}
 
-	private List<String> validate(AmbiencePack pack, Path path) {
+	private void loadDirectoryPack(Path path) {
+		try {
+			AmbiencePack pack = readDirectoryPack(path);
+			normalizePackId(pack, path.getFileName().toString());
+			loadValidatedPack(pack, path, PackStorage.directory(path));
+		} catch (JsonSyntaxException | IOException e) {
+			Iris.logger.warn("Failed to load ambience pack directory {}", path, e);
+		}
+	}
+
+	private void loadZipPack(Path path) {
+		try (ZipFile zip = new ZipFile(path.toFile())) {
+			String fallbackId = stripPackZipExtension(path.getFileName().toString());
+			AmbiencePack pack = readZipPack(zip);
+			normalizePackId(pack, fallbackId);
+			String overrideId = pack == null || pack.id == null || pack.id.isBlank() ? fallbackId : pack.id;
+			Path overrideDirectory = overrideDirectory(overrideId);
+			if (pack != null && pack.id != null && !pack.id.isBlank()) {
+				applyZipOverrides(pack, overrideDirectory);
+			}
+			loadValidatedPack(pack, path, PackStorage.zip(path, overrideDirectory));
+		} catch (JsonSyntaxException | IOException e) {
+			Iris.logger.warn("Failed to load ambience pack zip {}", path, e);
+		}
+	}
+
+	private void loadValidatedPack(AmbiencePack pack, Path path, PackStorage storage) {
+		List<String> errors = validate(pack);
+		if (!errors.isEmpty()) {
+			Iris.logger.warn("Skipping ambience pack {}: {}", path.getFileName(), String.join("; ", errors));
+			return;
+		}
+		packs.put(pack.id, new LoadedAmbiencePack(pack, storage, pack.profilesById(), pack.dependenciesById()));
+	}
+
+	private List<String> validate(AmbiencePack pack) {
 		List<String> errors = new ArrayList<>();
 		if (pack == null) {
 			errors.add("file did not contain a JSON object");
@@ -97,7 +168,7 @@ public final class AmbiencePackManager {
 			errors.add("unsupported schema " + pack.schema);
 		}
 		if (pack.id == null || pack.id.isBlank()) {
-			pack.id = stripJsonExtension(path.getFileName().toString());
+			errors.add("missing pack id");
 		}
 		if (pack.dependencies == null) {
 			pack.dependencies = new ArrayList<>();
@@ -127,9 +198,6 @@ public final class AmbiencePackManager {
 			}
 		}
 		Map<String, AmbienceProfile> profiles = pack.profilesById();
-		if (profiles.isEmpty()) {
-			errors.add("no profiles");
-		}
 		if (pack.defaultProfile == null || pack.defaultProfile.isBlank()) {
 			if (!profiles.isEmpty()) {
 				pack.defaultProfile = profiles.keySet().iterator().next();
@@ -144,12 +212,159 @@ public final class AmbiencePackManager {
 			if (region.profile == null || !profiles.containsKey(region.profile)) {
 				errors.add("region " + region.id + " references unknown profile " + region.profile);
 			}
+			validateRegionShape(errors, region);
 		}
 		return errors;
 	}
 
+	private void validateRegionShape(List<String> errors, AmbienceRegion region) {
+		if (region.shape == null) {
+			errors.add("region " + regionId(region) + " is missing a shape");
+			return;
+		}
+		String shapeType = region.shape.type == null ? "box" : region.shape.type.toLowerCase(java.util.Locale.ROOT);
+		if ("sphere".equals(shapeType)) {
+			validateXzArray(errors, region, "center", region.shape.center, true);
+			return;
+		}
+		if ("polygon".equals(shapeType)) {
+			validateXzArray(errors, region, "min", region.shape.min, false);
+			validateXzArray(errors, region, "max", region.shape.max, false);
+			return;
+		}
+		validateXzArray(errors, region, "min", region.shape.min, true);
+		validateXzArray(errors, region, "max", region.shape.max, true);
+	}
+
+	private void validateXzArray(List<String> errors, AmbienceRegion region, String field, double[] values, boolean required) {
+		if (values == null) {
+			if (required) {
+				errors.add("region " + regionId(region) + " shape." + field + " must be [x,z]");
+			}
+			return;
+		}
+		if (values.length != 2) {
+			errors.add("region " + regionId(region) + " shape." + field + " must be [x,z], not legacy [x,y,z]");
+		}
+	}
+
+	private String regionId(AmbienceRegion region) {
+		return region.id == null || region.id.isBlank() ? "<unnamed>" : region.id;
+	}
+
 	private static String stripJsonExtension(String name) {
 		return name.endsWith(".json") ? name.substring(0, name.length() - 5) : name;
+	}
+
+	private static String stripPackZipExtension(String name) {
+		return name.endsWith(PACK_ZIP_EXTENSION) ? name.substring(0, name.length() - PACK_ZIP_EXTENSION.length()) : name;
+	}
+
+	private static void normalizePackId(AmbiencePack pack, String fallbackId) {
+		if (pack != null && (pack.id == null || pack.id.isBlank())) {
+			pack.id = fallbackId;
+		}
+	}
+
+	private AmbiencePack readDirectoryPack(Path path) throws IOException {
+		AmbiencePackManifest manifest = readJson(path.resolve(MANIFEST_FILE), AmbiencePackManifest.class);
+		AmbienceProfilesFile profiles = readOptionalJson(path.resolve(PROFILES_FILE), AmbienceProfilesFile.class, new AmbienceProfilesFile());
+		AmbienceRegionsFile regions = readOptionalJson(path.resolve(REGIONS_FILE), AmbienceRegionsFile.class, new AmbienceRegionsFile());
+		return assemblePack(manifest, profiles, regions);
+	}
+
+	private AmbiencePack readZipPack(ZipFile zip) throws IOException {
+		AmbiencePackManifest manifest = readZipJson(zip, MANIFEST_FILE, AmbiencePackManifest.class);
+		AmbienceProfilesFile profiles = readOptionalZipJson(zip, PROFILES_FILE, AmbienceProfilesFile.class, new AmbienceProfilesFile());
+		AmbienceRegionsFile regions = readOptionalZipJson(zip, REGIONS_FILE, AmbienceRegionsFile.class, new AmbienceRegionsFile());
+		return assemblePack(manifest, profiles, regions);
+	}
+
+	private AmbiencePack assemblePack(AmbiencePackManifest manifest, AmbienceProfilesFile profiles, AmbienceRegionsFile regions) {
+		AmbiencePack pack = manifest == null ? null : manifest.toPack();
+		if (pack == null) {
+			return null;
+		}
+		pack.profiles = profiles == null || profiles.profiles == null ? new ArrayList<>() : profiles.profiles;
+		pack.regions = regions == null || regions.regions == null ? new ArrayList<>() : regions.regions;
+		return pack;
+	}
+
+	private void applyZipOverrides(AmbiencePack pack, Path overrideDirectory) throws IOException {
+		AmbienceProfilesFile profileOverrides = readOptionalJson(overrideDirectory.resolve(PROFILES_FILE), AmbienceProfilesFile.class, null);
+		if (profileOverrides != null && profileOverrides.profiles != null) {
+			mergeProfileOverrides(pack, profileOverrides.profiles);
+		}
+
+		AmbienceRegionsFile regionOverrides = readOptionalJson(overrideDirectory.resolve(REGIONS_FILE), AmbienceRegionsFile.class, null);
+		if (regionOverrides != null && regionOverrides.regions != null) {
+			pack.regions = regionOverrides.regions;
+		}
+	}
+
+	private void mergeProfileOverrides(AmbiencePack pack, List<AmbienceProfile> profileOverrides) {
+		Map<String, AmbienceProfile> merged = new LinkedHashMap<>();
+		for (AmbienceProfile profile : pack.profiles) {
+			if (profile != null && profile.id != null && !profile.id.isBlank()) {
+				merged.put(profile.id, profile);
+			}
+		}
+		for (AmbienceProfile override : profileOverrides) {
+			if (override == null || override.id == null || override.id.isBlank()) {
+				continue;
+			}
+			AmbienceProfile profile = merged.get(override.id);
+			if (profile == null) {
+				profile = new AmbienceProfile();
+				profile.id = override.id;
+			} else {
+				profile = profile.copy();
+			}
+			if (override.shaderPack != null && !override.shaderPack.isBlank()) {
+				profile.shaderPack = override.shaderPack;
+			}
+			profile.options = override.options == null ? new LinkedHashMap<>() : new LinkedHashMap<>(override.options);
+			merged.put(profile.id, profile);
+		}
+		pack.profiles = new ArrayList<>(merged.values());
+	}
+
+	private <T> T readJson(Path path, Class<T> type) throws IOException {
+		try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+			return GSON.fromJson(reader, type);
+		}
+	}
+
+	private <T> T readOptionalJson(Path path, Class<T> type, T fallback) throws IOException {
+		if (!Files.isRegularFile(path)) {
+			return fallback;
+		}
+		return readJson(path, type);
+	}
+
+	private <T> T readZipJson(ZipFile zip, String name, Class<T> type) throws IOException {
+		ZipEntry entry = zip.getEntry(name);
+		if (entry == null) {
+			throw new IOException("Missing required " + name);
+		}
+		try (Reader reader = new InputStreamReader(zip.getInputStream(entry), StandardCharsets.UTF_8)) {
+			return GSON.fromJson(reader, type);
+		}
+	}
+
+	private <T> T readOptionalZipJson(ZipFile zip, String name, Class<T> type, T fallback) throws IOException {
+		ZipEntry entry = zip.getEntry(name);
+		if (entry == null) {
+			return fallback;
+		}
+		try (Reader reader = new InputStreamReader(zip.getInputStream(entry), StandardCharsets.UTF_8)) {
+			return GSON.fromJson(reader, type);
+		}
+	}
+
+	private Path overrideDirectory(String packId) {
+		String encodedId = URLEncoder.encode(packId, StandardCharsets.UTF_8).replace("+", "%20");
+		return getDirectory().resolve(OVERRIDES_DIRECTORY).resolve(encodedId);
 	}
 
 	public synchronized Collection<LoadedAmbiencePack> getPacks() {
@@ -222,6 +437,220 @@ public final class AmbiencePackManager {
 			}
 		});
 		return List.copyOf(resolved);
+	}
+
+	public synchronized Optional<ResolvedProfile> resolveProfile(String selectedPackId, String profileId) {
+		Optional<LoadedAmbiencePack> loadedPack = getPack(selectedPackId);
+		if (loadedPack.isEmpty() || profileId == null || profileId.isBlank()) {
+			return Optional.empty();
+		}
+
+		LoadedAmbiencePack loaded = loadedPack.get();
+		AmbienceProfile profile = loaded.profilesById().get(profileId);
+		if (profile == null) {
+			return Optional.empty();
+		}
+
+		String shaderPack = resolveShaderPackName(loaded, profile);
+		if (shaderPack == null || shaderPack.isBlank()) {
+			return Optional.empty();
+		}
+
+		return Optional.of(new ResolvedProfile(loaded, profileId, profile, shaderPack, null));
+	}
+
+	public synchronized LoadedAmbiencePack createEmptyPack(String displayName) throws IOException {
+		reloadIfNeeded();
+
+		String name = displayName == null || displayName.isBlank() ? "New Ambience Pack" : displayName.trim();
+		String id = uniquePackId(slugify(name));
+		Path packDirectory = getDirectory().resolve(id);
+
+		AmbiencePack pack = new AmbiencePack();
+		pack.id = id;
+		pack.name = name;
+		pack.version = "1.0.0";
+
+		Files.createDirectories(packDirectory);
+		writeJsonAtomic(packDirectory.resolve(MANIFEST_FILE), AmbiencePackManifest.fromPack(pack));
+		writeJsonAtomic(packDirectory.resolve(PROFILES_FILE), AmbienceProfilesFile.fromPack(pack));
+		writeJsonAtomic(packDirectory.resolve(REGIONS_FILE), AmbienceRegionsFile.fromPack(pack));
+
+		LoadedAmbiencePack loaded = new LoadedAmbiencePack(pack, PackStorage.directory(packDirectory), pack.profilesById(), pack.dependenciesById());
+		packs.put(pack.id, loaded);
+		lastLoadMillis = System.currentTimeMillis();
+		this.loaded = true;
+		return loaded;
+	}
+
+	public synchronized AmbienceProfile addProfile(String selectedPackId, String profileId, String shaderPackName) throws IOException {
+		Optional<LoadedAmbiencePack> loadedPack = getPack(selectedPackId);
+		if (loadedPack.isEmpty()) {
+			throw new IOException("Ambience pack is not installed: " + selectedPackId);
+		}
+		if (profileId == null || profileId.isBlank()) {
+			throw new IOException("Preset name is required");
+		}
+		if (shaderPackName == null || shaderPackName.isBlank()) {
+			throw new IOException("Shader pack is required");
+		}
+
+		LoadedAmbiencePack loaded = loadedPack.get();
+		if (loaded.storage() == null || !loaded.storage().canWriteProfiles()) {
+			throw new IOException("Ambience pack does not have a writable profiles file: " + selectedPackId);
+		}
+
+		String id = sanitizeProfileId(profileId);
+		if (id.isBlank()) {
+			throw new IOException("Preset name must contain letters, numbers, dashes, underscores, or periods");
+		}
+		if (loaded.profilesById().containsKey(id)) {
+			throw new IOException("Ambience preset already exists: " + id);
+		}
+
+		AmbienceProfile profile = new AmbienceProfile();
+		profile.id = id;
+		profile.shaderPack = shaderPackName;
+		profile.options = new LinkedHashMap<>();
+
+		if (loaded.pack().profiles == null) {
+			loaded.pack().profiles = new ArrayList<>();
+		}
+		loaded.pack().profiles.add(profile);
+		loaded.profilesById().put(id, profile);
+		if (loaded.pack().defaultProfile == null || loaded.pack().defaultProfile.isBlank()) {
+			loaded.pack().defaultProfile = id;
+		}
+
+		writeProfile(loaded, id);
+		lastLoadMillis = System.currentTimeMillis();
+		return profile;
+	}
+
+	public synchronized void saveProfileOptions(String selectedPackId, String profileId, Map<String, String> options) throws IOException {
+		Optional<LoadedAmbiencePack> loadedPack = getPack(selectedPackId);
+		if (loadedPack.isEmpty()) {
+			throw new IOException("Ambience pack is not installed: " + selectedPackId);
+		}
+
+		LoadedAmbiencePack loaded = loadedPack.get();
+		if (loaded.storage() == null || !loaded.storage().canWriteProfiles()) {
+			throw new IOException("Ambience pack does not have a writable profiles file: " + selectedPackId);
+		}
+
+		AmbienceProfile profile = loaded.profilesById().get(profileId);
+		if (profile == null) {
+			throw new IOException("Ambience profile is not present: " + profileId);
+		}
+
+		profile.options = new LinkedHashMap<>();
+		if (options != null) {
+			options.entrySet().stream()
+				.filter(entry -> entry.getKey() != null && !entry.getKey().isBlank() && entry.getValue() != null)
+				.sorted(Map.Entry.comparingByKey())
+				.forEach(entry -> profile.options.put(entry.getKey(), entry.getValue()));
+		}
+
+		writeProfile(loaded, profileId);
+		lastLoadMillis = System.currentTimeMillis();
+	}
+
+	public synchronized void saveRegions(String selectedPackId, List<AmbienceRegion> regions) throws IOException {
+		Optional<LoadedAmbiencePack> loadedPack = getPack(selectedPackId);
+		if (loadedPack.isEmpty()) {
+			throw new IOException("Ambience pack is not installed: " + selectedPackId);
+		}
+
+		LoadedAmbiencePack loaded = loadedPack.get();
+		if (loaded.storage() == null || !loaded.storage().canWriteRegions()) {
+			throw new IOException("Ambience pack does not have a writable regions file: " + selectedPackId);
+		}
+
+		List<AmbienceRegion> savedRegions = new ArrayList<>();
+		if (regions != null) {
+			for (AmbienceRegion region : regions) {
+				if (region != null) {
+					savedRegions.add(region.copy());
+				}
+			}
+		}
+		loaded.pack().regions = savedRegions;
+
+		writeRegions(loaded);
+		lastLoadMillis = System.currentTimeMillis();
+		lastResolvedRegionCount = savedRegions.size();
+	}
+
+	private void writeProfile(LoadedAmbiencePack loaded, String profileId) throws IOException {
+		PackStorage storage = loaded.storage();
+		if (storage.kind() == PackSourceKind.LEGACY_JSON) {
+			writeJsonAtomic(storage.sourcePath(), loaded.pack());
+			return;
+		}
+		if (storage.kind() == PackSourceKind.ZIP) {
+			AmbienceProfile profile = loaded.profilesById().get(profileId);
+			if (profile == null) {
+				throw new IOException("Ambience profile is not present: " + profileId);
+			}
+			AmbienceProfilesFile overrides = readOptionalJson(storage.profilesWritePath(), AmbienceProfilesFile.class, new AmbienceProfilesFile());
+			if (overrides.profiles == null) {
+				overrides.profiles = new ArrayList<>();
+			}
+			overrides.profiles.removeIf(existing -> existing == null || profileId.equals(existing.id));
+			overrides.profiles.add(profile.copy());
+			writeJsonAtomic(storage.profilesWritePath(), overrides);
+			return;
+		}
+
+		writeJsonAtomic(storage.profilesWritePath(), AmbienceProfilesFile.fromPack(loaded.pack()));
+	}
+
+	private String uniquePackId(String requestedId) {
+		String base = requestedId == null || requestedId.isBlank() ? "new-ambience-pack" : requestedId;
+		String candidate = base;
+		int suffix = 2;
+		while (packs.containsKey(candidate) || Files.exists(getDirectory().resolve(candidate)) || Files.exists(getDirectory().resolve(candidate + PACK_ZIP_EXTENSION))) {
+			candidate = base + "-" + suffix++;
+		}
+		return candidate;
+	}
+
+	private String slugify(String value) {
+		String slug = value.toLowerCase(Locale.ROOT)
+			.replaceAll("[^a-z0-9._-]+", "-")
+			.replaceAll("^-+|-+$", "");
+		return slug.isBlank() ? "new-ambience-pack" : slug;
+	}
+
+	private String sanitizeProfileId(String value) {
+		return value.trim()
+			.replaceAll("\\s+", "_")
+			.replaceAll("[^A-Za-z0-9._-]", "_");
+	}
+
+	private void writeRegions(LoadedAmbiencePack loaded) throws IOException {
+		PackStorage storage = loaded.storage();
+		if (storage.kind() == PackSourceKind.LEGACY_JSON) {
+			writeJsonAtomic(storage.sourcePath(), loaded.pack());
+			return;
+		}
+
+		writeJsonAtomic(storage.regionsWritePath(), AmbienceRegionsFile.fromPack(loaded.pack()));
+	}
+
+	private void writeJsonAtomic(Path target, Object value) throws IOException {
+		Files.createDirectories(target.getParent());
+		Path temp = Files.createTempFile(target.getParent(), target.getFileName().toString(), ".tmp");
+		try {
+			Files.writeString(temp, PRETTY_GSON.toJson(value) + System.lineSeparator(), StandardCharsets.UTF_8);
+			try {
+				Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			} catch (IOException atomicMoveFailure) {
+				Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+			}
+		} finally {
+			Files.deleteIfExists(temp);
+		}
 	}
 
 	public AmbienceDependencyStatus dependencyStatus(AmbiencePack pack) {
@@ -333,8 +762,39 @@ public final class AmbiencePackManager {
 			pack.id, profileId, chosen == null ? "default" : chosen.id, lastResolvedRegionCount, elapsedMicros);
 	}
 
-	public record LoadedAmbiencePack(AmbiencePack pack, Path path, Map<String, AmbienceProfile> profilesById,
+	public enum PackSourceKind {
+		LEGACY_JSON,
+		DIRECTORY,
+		ZIP
+	}
+
+	public record PackStorage(PackSourceKind kind, Path sourcePath, Path profilesWritePath, Path regionsWritePath) {
+		private static PackStorage legacy(Path path) {
+			return new PackStorage(PackSourceKind.LEGACY_JSON, path, path, path);
+		}
+
+		private static PackStorage directory(Path path) {
+			return new PackStorage(PackSourceKind.DIRECTORY, path, path.resolve(PROFILES_FILE), path.resolve(REGIONS_FILE));
+		}
+
+		private static PackStorage zip(Path path, Path overrideDirectory) {
+			return new PackStorage(PackSourceKind.ZIP, path, overrideDirectory.resolve(PROFILES_FILE), overrideDirectory.resolve(REGIONS_FILE));
+		}
+
+		public boolean canWriteProfiles() {
+			return profilesWritePath != null;
+		}
+
+		public boolean canWriteRegions() {
+			return regionsWritePath != null;
+		}
+	}
+
+	public record LoadedAmbiencePack(AmbiencePack pack, PackStorage storage, Map<String, AmbienceProfile> profilesById,
 									 Map<String, AmbienceDependency> dependenciesById) {
+		public Path path() {
+			return storage == null ? null : storage.sourcePath();
+		}
 	}
 
 	public record ResolvedProfile(LoadedAmbiencePack loadedPack, String profileId, AmbienceProfile profile,

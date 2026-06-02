@@ -25,7 +25,7 @@ public class MixinSodiumGameOptions {
 
 		if (identifier.getNamespace().equals("iris")) {
 			if (Iris.getCurrentPack().isPresent()) {
-				newIdentifier = IrisConfig.COLOR;
+				newIdentifier = IrisConfig.WYNNIRIS_LOGO;
 				changed = true;
 			}
 		}

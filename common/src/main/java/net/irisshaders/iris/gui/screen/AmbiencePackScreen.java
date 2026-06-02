@@ -6,7 +6,11 @@ import net.irisshaders.iris.ambience.AmbienceDependencyStatus;
 import net.irisshaders.iris.ambience.AmbiencePack;
 import net.irisshaders.iris.ambience.AmbiencePackManager;
 import net.irisshaders.iris.ambience.AmbienceRuntime;
+import net.irisshaders.iris.gui.element.AmbiencePackSelectionList;
+import net.irisshaders.iris.gui.element.screen.IrisButton;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
+import net.irisshaders.iris.uniforms.FrameUpdateNotifier;
+import net.irisshaders.iris.uniforms.transforms.SmoothedFloat;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -17,93 +21,141 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public class AmbiencePackScreen extends Screen {
+	private static final Component SELECT_TITLE = Component.translatable("pack.iris.ambience.select.title").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC);
+
 	private final Screen parent;
 	private final AmbiencePackManager manager = AmbiencePackManager.getInstance();
+	private final FrameUpdateNotifier notifier = new FrameUpdateNotifier();
 	private List<AmbiencePackManager.LoadedAmbiencePack> packs = new ArrayList<>();
 	private int selectedIndex;
 	private Component status = Component.empty();
+	private AmbiencePackSelectionList ambiencePackList;
 	private Button installButton;
 	private Button warmButton;
+	private Button settingsButton;
+	private Button regionsButton;
+	private float backgroundInit = 0.0f;
+
+	public final SmoothedFloat listTransition = new SmoothedFloat(1, 1, () -> backgroundInit, notifier);
+	public final SmoothedFloat buttonTransition = new SmoothedFloat(1, 1, () -> backgroundInit, notifier);
 
 	public AmbiencePackScreen(Screen parent) {
-		super(Component.translatable("options.iris.wynncraftAmbiencePacks"));
+		super(Component.translatable("options.iris.wynncraftAmbiencePackSelection.title"));
 		this.parent = parent;
 	}
 
 	@Override
 	protected void init() {
+		super.init();
 		manager.reloadIfNeeded();
 		refreshPacks();
-		int center = this.width / 2;
-		int y = this.height - 110;
 
-		this.addRenderableWidget(Button.builder(Component.literal("<"), button -> select(selectedIndex - 1))
-			.bounds(center - 154, y, 48, 20)
+		this.removeWidget(this.ambiencePackList);
+		this.ambiencePackList = new AmbiencePackSelectionList(this, this.minecraft, this.width, this.height, 32, this.height - 58 - 36, 0, this.width);
+
+		this.clearWidgets();
+		this.addRenderableWidget(ambiencePackList);
+
+		int bottomCenter = this.width / 2 - 50;
+		int topRowWidth = 100;
+		int topRowGap = 4;
+		int topLeft = this.width / 2 - ((topRowWidth * 5) + (topRowGap * 4)) / 2;
+
+		installButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceInstallMissingShort"), button -> installMissing(), buttonTransition)
+			.bounds(bottomCenter - 104, this.height - 27, 100, 20)
 			.build());
-		this.addRenderableWidget(Button.builder(Component.literal(">"), button -> select(selectedIndex + 1))
-			.bounds(center - 102, y, 48, 20)
+		warmButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceWarmCache"), button -> warmCache(), buttonTransition)
+			.bounds(bottomCenter, this.height - 27, 100, 20)
 			.build());
-		this.addRenderableWidget(Button.builder(Component.translatable("options.iris.refresh"), button -> {
-			manager.reload();
-			refreshPacks();
-			status = Component.translatable("options.iris.wynncraftAmbienceReloaded");
-		}).bounds(center - 50, y, 100, 20).build());
-		this.addRenderableWidget(Button.builder(Component.translatable("options.iris.openAmbiencePackFolder"), button ->
-			CompletableFuture.runAsync(() -> Util.getPlatform().openUri(manager.getDirectory().toUri())))
-			.bounds(center + 54, y, 152, 20)
+		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_DONE, button -> this.minecraft.setScreen(parent), buttonTransition)
+			.bounds(bottomCenter + 104, this.height - 27, 100, 20)
 			.build());
 
-		installButton = this.addRenderableWidget(Button.builder(Component.translatable("options.iris.wynncraftAmbienceInstallMissing"), button -> installMissing())
-			.bounds(center - 154, y + 26, 204, 20)
+		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.openAmbiencePackFolderShort"), button -> openAmbiencePackFolder(), buttonTransition)
+			.bounds(topLeft, this.height - 51, 100, 20)
 			.build());
-		warmButton = this.addRenderableWidget(Button.builder(Component.translatable("options.iris.wynncraftAmbienceWarmCache"), button -> warmCache())
-			.bounds(center + 54, y + 26, 152, 20)
+		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.refresh"), button -> reloadPacks(), buttonTransition)
+			.bounds(topLeft + 104, this.height - 51, 100, 20)
 			.build());
-		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> this.minecraft.setScreen(parent))
-			.bounds(center + 54, y + 52, 152, 20)
+		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceCreatePack"), button -> createNewPack(), buttonTransition)
+			.bounds(topLeft + 208, this.height - 51, 100, 20)
 			.build());
+		settingsButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceProfileSettings"), button -> openProfileSettings(), buttonTransition)
+			.bounds(topLeft + 312, this.height - 51, 100, 20)
+			.build());
+		regionsButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceRegionEditor"), button -> openRegionEditor(), buttonTransition)
+			.bounds(topLeft + 416, this.height - 51, 100, 20)
+			.build());
+
 		updateButtons();
 	}
 
 	@Override
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float delta) {
-		super.render(guiGraphics, mouseX, mouseY, delta);
-		guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 16, 0xFFFFFFFF);
+		notifier.onNewFrame();
+		backgroundInit = 1.0f;
 
+		super.render(guiGraphics, mouseX, mouseY, delta);
+
+		drawCenteredTruncated(guiGraphics, this.title, 8, 0xFFFFFFFF);
+		if (status != null && !status.getString().isBlank()) {
+			drawCenteredTruncated(guiGraphics, status, 21, 0xFFFFFFFF);
+		} else {
+			drawCenteredTruncated(guiGraphics, SELECT_TITLE, 21, 0xFFFFFFFF);
+		}
+	}
+
+	private void drawCenteredTruncated(GuiGraphics guiGraphics, Component component, int y, int color) {
+		Component rendered = component;
+		if (this.font.width(component) > this.width - 20) {
+			rendered = Component.literal(this.font.plainSubstrByWidth(component.getString(), this.width - 32) + "...").setStyle(component.getStyle());
+		}
+		guiGraphics.drawCenteredString(this.font, rendered, (int) (this.width * 0.5), y, color);
+	}
+
+	public List<AmbiencePackManager.LoadedAmbiencePack> getPacks() {
+		return packs;
+	}
+
+	public Path getAmbiencePackDirectory() {
+		return manager.getDirectory();
+	}
+
+	public void selectPack(int index) {
 		if (packs.isEmpty()) {
-			guiGraphics.drawCenteredString(this.font, Component.translatable("options.iris.wynncraftAmbienceNoPacks"), this.width / 2, 52, 0xFFFFAAAA);
-			guiGraphics.drawCenteredString(this.font, manager.getDirectory().toString(), this.width / 2, 66, 0xFFAAAAAA);
 			return;
 		}
-
+		selectedIndex = Math.max(0, Math.min(index, packs.size() - 1));
+		saveSelectedPack();
 		AmbiencePack pack = selected().pack();
-		int x = this.width / 2 - 154;
-		int y = 48;
-		guiGraphics.drawString(this.font, Component.literal(pack.displayName()).withStyle(ChatFormatting.BOLD), x, y, 0xFFFFFFFF);
-		guiGraphics.drawString(this.font, Component.literal(pack.id + (pack.version == null || pack.version.isBlank() ? "" : " " + pack.version)), x, y + 14, 0xFFAAAAAA);
-		guiGraphics.drawString(this.font, Component.translatable("options.iris.wynncraftAmbienceSelected", selectedIndex + 1, packs.size()), x, y + 28, 0xFFCCCCCC);
-		guiGraphics.drawString(this.font, Component.literal(selected().path().getFileName().toString()), x, y + 42, 0xFF888888);
+		status = Component.translatable("options.iris.wynncraftAmbienceSelectedPack", pack.displayName());
+		updateButtons();
+	}
 
-		AmbienceDependencyStatus dependencyStatus = manager.dependencyStatus(pack);
-		if (dependencyStatus.hasMissing()) {
-			guiGraphics.drawString(this.font, Component.translatable("options.iris.wynncraftAmbienceMissing", dependencyStatus.missing().size()).withStyle(ChatFormatting.RED), x, y + 64, 0xFFFF7777);
-			int offset = 78;
-			for (int i = 0; i < Math.min(5, dependencyStatus.missing().size()); i++) {
-				guiGraphics.drawString(this.font, Component.literal("- " + dependencyStatus.missing().get(i).id), x, y + offset, 0xFFFFAAAA);
-				offset += 12;
-			}
-		} else {
-			guiGraphics.drawString(this.font, Component.translatable("options.iris.wynncraftAmbienceReady").withStyle(ChatFormatting.GREEN), x, y + 64, 0xFFAAFFAA);
+	public void setAmbienceEnabled(boolean enabled) {
+		IrisVideoSettings.wynncraftAmbienceEnabled = enabled;
+		status = Component.translatable(enabled ? "options.iris.wynncraftAmbienceEnabledStatus" : "options.iris.wynncraftAmbienceDisabledStatus");
+		try {
+			Iris.getIrisConfig().save();
+		} catch (IOException e) {
+			Iris.logger.warn("Failed to save ambience pack setting", e);
 		}
+		updateButtons();
+	}
 
-		if (status != null && !status.getString().isBlank()) {
-			guiGraphics.drawCenteredString(this.font, status, this.width / 2, this.height - 136, 0xFFFFFFFF);
+	private void reloadPacks() {
+		manager.reload();
+		refreshPacks();
+		if (ambiencePackList != null) {
+			ambiencePackList.refresh(packs);
 		}
+		status = Component.translatable("options.iris.wynncraftAmbienceReloaded");
 	}
 
 	private void refreshPacks() {
@@ -122,24 +174,13 @@ public class AmbiencePackScreen extends Screen {
 			updateButtons();
 			return;
 		}
-		if (selectedFound) {
-			updateButtons();
-			return;
+		if (!selectedFound) {
+			if (selectedId == null || selectedId.isBlank()) {
+				saveSelectedPack();
+			} else {
+				status = Component.translatable("options.iris.wynncraftAmbienceSelectedMissing", selectedId).withStyle(ChatFormatting.YELLOW);
+			}
 		}
-		if (selectedId == null || selectedId.isBlank()) {
-			saveSelectedPack();
-		} else {
-			status = Component.translatable("options.iris.wynncraftAmbienceSelectedMissing", selectedId).withStyle(ChatFormatting.YELLOW);
-		}
-		updateButtons();
-	}
-
-	private void select(int index) {
-		if (packs.isEmpty()) {
-			return;
-		}
-		selectedIndex = Math.floorMod(index, packs.size());
-		saveSelectedPack();
 		updateButtons();
 	}
 
@@ -158,12 +199,53 @@ public class AmbiencePackScreen extends Screen {
 
 	private void updateButtons() {
 		AmbienceDependencyStatus dependencyStatus = packs.isEmpty() ? null : manager.dependencyStatus(selected().pack());
-		if (installButton == null) {
-			return;
+		if (installButton != null) {
+			installButton.active = dependencyStatus != null && dependencyStatus.hasInstallableMissing();
 		}
-		installButton.active = dependencyStatus != null && dependencyStatus.hasInstallableMissing();
 		if (warmButton != null) {
 			warmButton.active = dependencyStatus != null && !dependencyStatus.hasMissing();
+		}
+		if (settingsButton != null) {
+			settingsButton.active = dependencyStatus != null;
+		}
+		if (regionsButton != null) {
+			regionsButton.active = dependencyStatus != null;
+		}
+	}
+
+	private void openProfileSettings() {
+		if (packs.isEmpty()) {
+			return;
+		}
+		this.minecraft.setScreen(new AmbienceProfileSelectionScreen(this, selected().pack().id));
+	}
+
+	private void openRegionEditor() {
+		if (packs.isEmpty()) {
+			return;
+		}
+		this.minecraft.setScreen(new AmbienceRegionEditorScreen(this, selected().pack().id));
+	}
+
+	private void openAmbiencePackFolder() {
+		CompletableFuture.runAsync(() -> Util.getPlatform().openUri(manager.getDirectory().toUri()));
+	}
+
+	private void createNewPack() {
+		try {
+			AmbiencePackManager.LoadedAmbiencePack loaded = manager.createEmptyPack("New Ambience Pack");
+			IrisVideoSettings.wynncraftSelectedAmbiencePack = loaded.pack().id;
+			refreshPacks();
+			saveSelectedPack();
+			if (ambiencePackList != null) {
+				ambiencePackList.refresh(packs);
+				ambiencePackList.selectPackId(loaded.pack().id);
+			}
+			status = Component.translatable("options.iris.wynncraftAmbiencePackCreated", loaded.pack().displayName());
+			updateButtons();
+		} catch (IOException e) {
+			Iris.logger.warn("Failed to create ambience pack", e);
+			status = Component.literal(e.getMessage() == null ? "Create failed" : e.getMessage()).withStyle(ChatFormatting.RED);
 		}
 	}
 
@@ -181,6 +263,9 @@ public class AmbiencePackScreen extends Screen {
 					status = Component.translatable("options.iris.wynncraftAmbienceInstalled");
 					manager.reload();
 					refreshPacks();
+					if (ambiencePackList != null) {
+						ambiencePackList.refresh(packs);
+					}
 				});
 			} catch (Exception e) {
 				Iris.logger.warn("Failed to install ambience dependencies", e);

@@ -14,7 +14,13 @@ import java.util.function.Supplier;
 import static net.irisshaders.iris.gl.uniform.UniformUpdateFrequency.PER_FRAME;
 
 public final class MatrixUniforms {
+	private static int previousMatrixResetGeneration;
+
 	private MatrixUniforms() {
+	}
+
+	public static void resetPreviousMatrices() {
+		previousMatrixResetGeneration++;
 	}
 
 	public static void addMatrixUniforms(UniformHolder uniforms, PackDirectives directives) {
@@ -66,16 +72,23 @@ public final class MatrixUniforms {
 	private static class Previous implements Supplier<Matrix4fc> {
 		private final Supplier<Matrix4fc> parent;
 		private Matrix4f previous;
+		private int observedResetGeneration;
 
 		Previous(Supplier<Matrix4fc> parent) {
 			this.parent = parent;
 			this.previous = new Matrix4f();
+			this.observedResetGeneration = previousMatrixResetGeneration;
 		}
 
 		@Override
 		public Matrix4fc get() {
 			// PERF: Don't copy + allocate these matrices every time?
 			Matrix4f copy = new Matrix4f(parent.get());
+			if (observedResetGeneration != previousMatrixResetGeneration) {
+				observedResetGeneration = previousMatrixResetGeneration;
+				this.previous = copy;
+				return new Matrix4f(copy);
+			}
 			Matrix4f previous = new Matrix4f(this.previous);
 
 			this.previous = copy;

@@ -28,8 +28,7 @@ import java.util.Locale;
 import java.util.Set;
 
 public class IrisConfig implements ConfigEntryPoint {
-	public static final Identifier MONO = Identifier.fromNamespaceAndPath("iris", "textures/gui/config-icon-mono.png");
-	public static final Identifier COLOR = Identifier.fromNamespaceAndPath("iris", "textures/gui/config-icon.png");
+	public static final Identifier WYNNIRIS_LOGO = Identifier.fromNamespaceAndPath("iris", "textures/gui/iris-logo.png");
 
 	private static final StorageEventHandler SAVE_HANDLER = () -> {
 		try {
@@ -227,11 +226,6 @@ public class IrisConfig implements ConfigEntryPoint {
 				.setTooltip(Component.translatable("options.iris.wynncraftAmbienceEnabled.tooltip"))
 				.setStorageHandler(SAVE_HANDLER)
 				.setImpact(OptionImpact.MEDIUM)
-			)
-			.addOption(builder.createExternalButtonOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_ambience_packs"))
-				.setName(Component.translatable("options.iris.wynncraftAmbiencePacks"))
-				.setTooltip(Component.translatable("options.iris.wynncraftAmbiencePacks.tooltip"))
-				.setScreenConsumer(screen -> Minecraft.getInstance().setScreen(new AmbiencePackScreen(screen)))
 			);
 		settingsPage.addOptionGroup(ambienceGroup);
 
@@ -261,9 +255,10 @@ public class IrisConfig implements ConfigEntryPoint {
 			settingsPage.addOptionGroup(debugGroup);
 		}
 
-		builder.registerOwnModOptions().setName(Iris.MODNAME).setIcon(MONO).setColorTheme(builder.createColorTheme().setBaseThemeRGB(0xFFf556e2))
+		builder.registerOwnModOptions().setName(Iris.MODNAME).setIcon(WYNNIRIS_LOGO).setColorTheme(builder.createColorTheme().setBaseThemeRGB(0xFFf556e2))
 			.setVersion(Iris.getVersionSimple())
 			.addPage(builder.createExternalPage().setName(Component.translatable("options.iris.shaderPackSelection.title")).setScreenConsumer(i -> Minecraft.getInstance().setScreen(new ShaderPackScreen(i))))
+			.addPage(builder.createExternalPage().setName(Component.translatable("options.iris.wynncraftAmbiencePackSelection.title")).setScreenConsumer(i -> Minecraft.getInstance().setScreen(new AmbiencePackScreen(i))))
 			.addPage(settingsPage)
 			.registerOptionOverlay(Identifier.parse("sodium:quality.filtering_mode"), builder.createEnumOption(Identifier.parse("sodium:quality.filtering_mode"), TextureFilteringMethod.class)
 				.setTooltip(i -> {

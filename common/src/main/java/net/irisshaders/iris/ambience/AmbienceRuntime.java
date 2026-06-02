@@ -162,7 +162,7 @@ public final class AmbienceRuntime {
 		for (AmbiencePackManager.ResolvedProfile profile : profiles) {
 			try {
 				Map<String, String> options = profile.profile().options == null ? Map.of() : profile.profile().options;
-				if (Iris.applyCachedTransientShaderPack(profile.key(), profile.resolvedShaderPack(), options)) {
+				if (Iris.applyCachedTransientShaderPackForRuntimeSwitch(profile.key(), profile.resolvedShaderPack(), options)) {
 					warmed++;
 				} else {
 					failed++;
@@ -175,10 +175,10 @@ public final class AmbienceRuntime {
 
 		try {
 			if (restoreProfile == null) {
-				Iris.restoreConfiguredShaderPack();
+				Iris.restoreConfiguredShaderPackForRuntimeSwitch();
 			} else {
 				Map<String, String> restoreOptions = restoreProfile.profile().options == null ? Map.of() : restoreProfile.profile().options;
-				Iris.applyCachedTransientShaderPack(restoreProfile.key(), restoreProfile.resolvedShaderPack(), restoreOptions);
+				Iris.applyCachedTransientShaderPackForRuntimeSwitch(restoreProfile.key(), restoreProfile.resolvedShaderPack(), restoreOptions);
 			}
 		} catch (IOException | RuntimeException e) {
 			failed++;
@@ -210,7 +210,7 @@ public final class AmbienceRuntime {
 	private static void applyDeferredRestore(long now) {
 		deferredRestore = false;
 		try {
-			Iris.restoreConfiguredShaderPack();
+			Iris.restoreConfiguredShaderPackForRuntimeSwitch();
 		} catch (IOException e) {
 			Iris.logger.warn("Failed to restore configured shader pack after ambience was disabled", e);
 		}
@@ -233,7 +233,7 @@ public final class AmbienceRuntime {
 		boolean loaded = false;
 		try {
 			Map<String, String> options = target.profile().options == null ? Map.of() : target.profile().options;
-			loaded = Iris.applyCachedTransientShaderPack(target.key(), target.resolvedShaderPack(), options);
+			loaded = Iris.applyCachedTransientShaderPackForRuntimeSwitch(target.key(), target.resolvedShaderPack(), options);
 		} catch (IOException e) {
 			Iris.logger.warn("Failed to apply ambience profile {}", target.profileId(), e);
 		}

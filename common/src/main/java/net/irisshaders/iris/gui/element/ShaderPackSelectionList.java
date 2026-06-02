@@ -3,6 +3,7 @@ package net.irisshaders.iris.gui.element;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.GuiUtil;
+import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.gui.screen.ShaderPackScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.util.Util;
@@ -44,7 +45,7 @@ public class ShaderPackSelectionList extends IrisObjectSelectionList<ShaderPackS
 	private final WatchKey key;
 	private final PinnedEntry downloadButton;
 	private boolean keyValid;
-	private ShaderPackEntry applied = null;
+	private BaseEntry applied = null;
 
 	public ShaderPackSelectionList(ShaderPackScreen screen, Minecraft client, int width, int height, int top, int bottom, int left, int right) {
 		super(client, width, bottom, top + 4, bottom, left, right, 20);
@@ -196,11 +197,17 @@ public class ShaderPackSelectionList extends IrisObjectSelectionList<ShaderPackS
 		// added a shader pack. Otherwise, the button will be disabled.
 		topButtonRow.allowEnableShadersButton = !names.isEmpty();
 
-		int index = 0;
+		if (IrisVideoSettings.wynncraftAmbienceEnabled) {
+			AmbiencePackShaderEntry ambienceEntry = new AmbiencePackShaderEntry(this.children().size(), this);
+			setSelected(ambienceEntry);
+			setFocused(ambienceEntry);
+			centerScrollOn(ambienceEntry);
+			setApplied(ambienceEntry);
+			this.addEntry(ambienceEntry);
+		}
 
 		for (String name : names) {
-			index++;
-			addPackEntry(index, name);
+			addPackEntry(this.children().size(), name);
 		}
 
 		this.addLabelEntries(PACK_LIST_LABEL);
@@ -210,7 +217,7 @@ public class ShaderPackSelectionList extends IrisObjectSelectionList<ShaderPackS
 		ShaderPackEntry entry = new ShaderPackEntry(index, this, name);
 
 		Iris.getIrisConfig().getShaderPackName().ifPresent(currentPackName -> {
-			if (name.equals(currentPackName)) {
+			if (!IrisVideoSettings.wynncraftAmbienceEnabled && name.equals(currentPackName)) {
 				setSelected(entry);
 				setFocused(entry);
 				centerScrollOn(entry);
@@ -239,11 +246,11 @@ public class ShaderPackSelectionList extends IrisObjectSelectionList<ShaderPackS
 		}
 	}
 
-	public ShaderPackEntry getApplied() {
+	public BaseEntry getApplied() {
 		return this.applied;
 	}
 
-	public void setApplied(ShaderPackEntry entry) {
+	public void setApplied(BaseEntry entry) {
 		this.applied = entry;
 	}
 
@@ -410,6 +417,98 @@ public class ShaderPackSelectionList extends IrisObjectSelectionList<ShaderPackS
 			}
 
 			return false;
+		}
+	}
+
+	public static class AmbiencePackShaderEntry extends BaseEntry {
+		private final ShaderPackSelectionList list;
+		private final int index;
+		private ScreenRectangle bounds;
+
+		public AmbiencePackShaderEntry(int index, ShaderPackSelectionList list) {
+			this.index = index;
+			this.list = list;
+			this.bounds = ScreenRectangle.empty();
+		}
+
+		@Override
+		public ScreenRectangle getRectangle() {
+			return bounds;
+		}
+
+		public boolean isApplied() {
+			return list.getApplied() == this;
+		}
+
+		public boolean isSelected() {
+			return list.getSelected() == this;
+		}
+
+		@Override
+		public void renderContent(GuiGraphics guiGraphics, int mouseX, int mouseY, boolean isHovered, float tickDelta) {
+			int x = getContentX();
+			int y = getContentY();
+			int entryWidth = getContentWidth();
+			int entryHeight = getContentHeight();
+
+			this.bounds = new ScreenRectangle(x, y, entryWidth, entryHeight);
+			Font font = Minecraft.getInstance().font;
+
+			if (isHovered || isSelected()) {
+				GuiUtil.bindIrisWidgetsTexture();
+				GuiUtil.drawButton(guiGraphics, x - 2, y - 2, entryWidth, entryHeight + 2, isHovered, false);
+			}
+
+			MutableComponent title = Component.translatable("options.iris.shaderPackSelection.ambienceShader");
+			if (this.isMouseOver(mouseX, mouseY)) {
+				title = title.withStyle(ChatFormatting.BOLD);
+			}
+
+			int titleColor = list.getTopButtonRow().shadersEnabled && isApplied() ? 0xFFFFF263 : 0xFFFFFFFF;
+			if (!list.getTopButtonRow().shadersEnabled && !this.isMouseOver(mouseX, mouseY)) {
+				titleColor = 0xFFA2A2A2;
+			}
+
+			Component renderedTitle = title;
+			if (font.width(renderedTitle) > entryWidth - 8) {
+				renderedTitle = Component.literal(font.plainSubstrByWidth(renderedTitle.getString(), entryWidth - 20) + "...").setStyle(title.getStyle());
+			}
+
+			guiGraphics.drawCenteredString(font, renderedTitle, (x + entryWidth / 2) - 2, y + (entryHeight - 11) / 2, titleColor);
+		}
+
+		@Override
+		public boolean mouseClicked(MouseButtonEvent event, boolean repeat) {
+			if (event.button() != 0) {
+				return false;
+			}
+			return select();
+		}
+
+		@Override
+		public boolean keyPressed(KeyEvent event) {
+			if (!event.isConfirmation()) {
+				return false;
+			}
+			return select();
+		}
+
+		private boolean select() {
+			if (!isSelected()) {
+				list.select(index);
+				return true;
+			}
+			return false;
+		}
+
+		@Nullable
+		@Override
+		public ComponentPath nextFocusPath(FocusNavigationEvent pGuiEventListener0) {
+			return (!isFocused()) ? ComponentPath.leaf(this) : null;
+		}
+
+		public boolean isFocused() {
+			return this.list.getFocused() == this;
 		}
 	}
 

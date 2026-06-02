@@ -5,7 +5,7 @@ import net.irisshaders.iris.gui.GuiUtil;
 import net.irisshaders.iris.gui.NavigationController;
 import net.irisshaders.iris.gui.element.ShaderPackOptionList;
 import net.irisshaders.iris.gui.element.screen.ElementWidgetScreenData;
-import net.irisshaders.iris.gui.screen.ShaderPackScreen;
+import net.irisshaders.iris.gui.screen.ShaderPackOptionScreen;
 import net.irisshaders.iris.shaderpack.option.menu.OptionMenuBooleanOptionElement;
 import net.irisshaders.iris.shaderpack.option.menu.OptionMenuContainer;
 import net.irisshaders.iris.shaderpack.option.menu.OptionMenuElement;
@@ -27,10 +27,10 @@ public final class OptionMenuConstructor {
 	private static final Map<Class<? extends OptionMenuElementScreen>, ScreenDataProvider<OptionMenuElementScreen>> SCREEN_DATA_CREATORS = new HashMap<>();
 
 	static {
-		registerScreen(OptionMenuMainElementScreen.class, screen ->
-			new ElementWidgetScreenData(Component.literal(Iris.getCurrentPackName()).append(Iris.isFallback() ? " (fallback)" : "").withStyle(ChatFormatting.BOLD), false));
+		registerScreen(OptionMenuMainElementScreen.class, (screen, host) ->
+			new ElementWidgetScreenData(host.iris$getOptionMenuTitle().copy().withStyle(ChatFormatting.BOLD), false));
 
-		registerScreen(OptionMenuSubElementScreen.class, screen ->
+		registerScreen(OptionMenuSubElementScreen.class, (screen, host) ->
 			new ElementWidgetScreenData(GuiUtil.translateOrDefault(Component.literal(screen.screenId), "screen." + screen.screenId), true));
 
 		registerWidget(OptionMenuBooleanOptionElement.class, BooleanElementWidget::new);
@@ -58,19 +58,19 @@ public final class OptionMenuConstructor {
 		return WIDGET_CREATORS.getOrDefault(element.getClass(), e -> AbstractElementWidget.EMPTY).create(element);
 	}
 
-	public static ElementWidgetScreenData createScreenData(OptionMenuElementScreen screen) {
-		return SCREEN_DATA_CREATORS.getOrDefault(screen.getClass(), s -> ElementWidgetScreenData.EMPTY).create(screen);
+	public static ElementWidgetScreenData createScreenData(OptionMenuElementScreen screen, ShaderPackOptionScreen host) {
+		return SCREEN_DATA_CREATORS.getOrDefault(screen.getClass(), (s, h) -> ElementWidgetScreenData.EMPTY).create(screen, host);
 	}
 
 	@SuppressWarnings("unchecked")
-	public static void constructAndApplyToScreen(OptionMenuContainer container, ShaderPackScreen packScreen, ShaderPackOptionList optionList, NavigationController navigation) {
+	public static void constructAndApplyToScreen(OptionMenuContainer container, ShaderPackOptionScreen packScreen, ShaderPackOptionList optionList, NavigationController navigation) {
 		OptionMenuElementScreen screen = container.mainScreen;
 
 		if (navigation.getCurrentScreen() != null && container.subScreens.containsKey(navigation.getCurrentScreen())) {
 			screen = container.subScreens.get(navigation.getCurrentScreen());
 		}
 
-		ElementWidgetScreenData data = createScreenData(screen);
+		ElementWidgetScreenData data = createScreenData(screen, packScreen);
 
 		optionList.addHeader(data.heading(), data.backButton());
 		optionList.addWidgets(screen.getColumnCount(), screen.elements.stream().map(element -> {
@@ -85,6 +85,6 @@ public final class OptionMenuConstructor {
 	}
 
 	public interface ScreenDataProvider<T extends OptionMenuElementScreen> {
-		ElementWidgetScreenData create(T screen);
+		ElementWidgetScreenData create(T screen, ShaderPackOptionScreen host);
 	}
 }

@@ -136,6 +136,73 @@ public class RenderTargets {
 		return targets.length;
 	}
 
+	public int getCreatedTargetCount() {
+		int count = 0;
+
+		for (RenderTarget target : targets) {
+			if (target != null) {
+				count++;
+			}
+		}
+
+		return count;
+	}
+
+	public String describeCreatedTargets() {
+		StringBuilder builder = new StringBuilder();
+
+		for (int i = 0; i < targets.length; i++) {
+			RenderTarget target = targets[i];
+			if (target == null) {
+				continue;
+			}
+
+			if (!builder.isEmpty()) {
+				builder.append(',');
+			}
+
+			builder.append(i)
+				.append('=')
+				.append(target.getWidth())
+				.append('x')
+				.append(target.getHeight())
+				.append('/')
+				.append(target.getInternalFormat());
+		}
+
+		return builder.isEmpty() ? "none" : builder.toString();
+	}
+
+	public String describeTargetPresence(int... indices) {
+		StringBuilder builder = new StringBuilder();
+
+		for (int index : indices) {
+			if (!builder.isEmpty()) {
+				builder.append(',');
+			}
+
+			boolean inRange = index >= 0 && index < targets.length;
+			RenderTarget target = inRange ? targets[index] : null;
+
+			builder.append(index).append('=');
+			if (target != null) {
+				builder.append(target.getWidth())
+					.append('x')
+					.append(target.getHeight())
+					.append('/')
+					.append(target.getInternalFormat());
+			} else if (targetSettingsMap.containsKey(index)) {
+				builder.append("declared");
+			} else if (!inRange) {
+				builder.append("out-of-range");
+			} else {
+				builder.append("absent");
+			}
+		}
+
+		return builder.toString();
+	}
+
 	public RenderTarget get(int index) {
 		if (destroyed) {
 			throw new IllegalStateException("Tried to use destroyed RenderTargets");

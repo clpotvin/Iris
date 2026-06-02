@@ -22,4 +22,12 @@ public class AmbienceProfile {
 				.append(';'));
 		return builder.toString();
 	}
+
+	public AmbienceProfile copy() {
+		AmbienceProfile copy = new AmbienceProfile();
+		copy.id = id;
+		copy.shaderPack = shaderPack;
+		copy.options = options == null ? new LinkedHashMap<>() : new LinkedHashMap<>(options);
+		return copy;
+	}
 }

@@ -3,6 +3,7 @@ package net.irisshaders.iris.gui.element.widget;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.irisshaders.iris.gui.GuiUtil;
 import net.irisshaders.iris.gui.NavigationController;
+import net.irisshaders.iris.gui.screen.ShaderPackOptionScreen;
 import net.irisshaders.iris.gui.screen.ShaderPackScreen;
 import net.irisshaders.iris.shaderpack.option.menu.OptionMenuLinkElement;
 import net.minecraft.client.Minecraft;
@@ -37,7 +38,7 @@ public class LinkElementWidget extends CommentedElementWidget<OptionMenuLinkElem
 	}
 
 	@Override
-	public void init(ShaderPackScreen screen, NavigationController navigation) {
+	public void init(ShaderPackOptionScreen screen, NavigationController navigation) {
 		this.navigation = navigation;
 	}
 

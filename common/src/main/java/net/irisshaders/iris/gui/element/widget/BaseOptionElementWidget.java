@@ -3,6 +3,7 @@ package net.irisshaders.iris.gui.element.widget;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.irisshaders.iris.gui.GuiUtil;
 import net.irisshaders.iris.gui.NavigationController;
+import net.irisshaders.iris.gui.screen.ShaderPackOptionScreen;
 import net.irisshaders.iris.gui.screen.ShaderPackScreen;
 import net.irisshaders.iris.shaderpack.option.menu.OptionMenuElement;
 import net.minecraft.ChatFormatting;
@@ -27,7 +28,7 @@ public abstract class BaseOptionElementWidget<T extends OptionMenuElement> exten
 	protected static final Component DIVIDER = Component.literal(": ");
 
 	protected MutableComponent unmodifiedLabel;
-	protected ShaderPackScreen screen;
+	protected ShaderPackOptionScreen screen;
 	protected NavigationController navigation;
 	protected Component trimmedLabel;
 	protected Component valueLabel;
@@ -42,7 +43,7 @@ public abstract class BaseOptionElementWidget<T extends OptionMenuElement> exten
 	}
 
 	@Override
-	public void init(ShaderPackScreen screen, NavigationController navigation) {
+	public void init(ShaderPackOptionScreen screen, NavigationController navigation) {
 		this.screen = screen;
 		this.navigation = navigation;
 		this.valueLabel = null;

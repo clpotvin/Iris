@@ -4,4 +4,8 @@ public interface RenderTargetInterface {
 	default void iris$bindFramebuffer() {
 		throw new AssertionError("Impossible to access.");
 	}
+
+	default int iris$getFramebufferId() {
+		throw new AssertionError("Impossible to access.");
+	}
 }

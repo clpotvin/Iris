@@ -15,6 +15,7 @@ public class ShaderStorageBuffer {
 	protected final BuiltShaderStorageInfo info;
 	protected final ByteBuffer content;
 	protected int id;
+	private long allocatedSize;
 
 	public ShaderStorageBuffer(int index, BuiltShaderStorageInfo info) {
 		this.id = IrisRenderSystem.createBuffers();
@@ -64,6 +65,7 @@ public class ShaderStorageBuffer {
 		IrisRenderSystem.clearBufferSubData(GL43C.GL_SHADER_STORAGE_BUFFER, GL43C.GL_R8, 0, finalSize, GL43C.GL_RED, GL43C.GL_BYTE, new int[]{0});
 		IrisRenderSystem.bindBufferBase(GL43C.GL_SHADER_STORAGE_BUFFER, index, newId);
 		id = newId;
+		allocatedSize = finalSize;
 	}
 
 	public int getId() {
@@ -73,11 +75,30 @@ public class ShaderStorageBuffer {
 	public void createStatic() {
 		GlStateManager._glBindBuffer(GL43C.GL_SHADER_STORAGE_BUFFER, getId());
 		IrisRenderSystem.bufferStorage(GL43C.GL_SHADER_STORAGE_BUFFER, info.size(), content == null ? 0 : GL46C.GL_DYNAMIC_STORAGE_BIT);
+		allocatedSize = info.size();
 		if (content != null) {
-			GlStateManager._glBufferSubData(GL43C.GL_SHADER_STORAGE_BUFFER, 0, content);
+			ByteBuffer initialContents = content.duplicate();
+			initialContents.rewind();
+			GlStateManager._glBufferSubData(GL43C.GL_SHADER_STORAGE_BUFFER, 0, initialContents);
 		} else {
 			IrisRenderSystem.clearBufferSubData(GL43C.GL_SHADER_STORAGE_BUFFER, GL43C.GL_R8, 0, info.size(), GL43C.GL_RED, GL43C.GL_BYTE, new int[]{0});
 		}
 		bind();
+	}
+
+	public long resetContents() {
+		if (allocatedSize <= 0) {
+			return 0;
+		}
+
+		GlStateManager._glBindBuffer(GL43C.GL_SHADER_STORAGE_BUFFER, getId());
+		IrisRenderSystem.clearBufferSubData(GL43C.GL_SHADER_STORAGE_BUFFER, GL43C.GL_R8, 0, allocatedSize, GL43C.GL_RED, GL43C.GL_BYTE, new int[]{0});
+		if (content != null) {
+			ByteBuffer initialContents = content.duplicate();
+			initialContents.rewind();
+			GlStateManager._glBufferSubData(GL43C.GL_SHADER_STORAGE_BUFFER, 0, initialContents);
+		}
+		bind();
+		return allocatedSize;
 	}
 }

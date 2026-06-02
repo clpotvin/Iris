@@ -58,6 +58,11 @@ public class MixinRenderTarget implements Blaze3dRenderTargetExt, RenderTargetIn
 
 	@Override
 	public void iris$bindFramebuffer() {
-		GlStateManager._glBindFramebuffer(GlConst.GL_FRAMEBUFFER, ((GlTexture) this.colorTexture).getFbo(((GlDevice) RenderSystem.getDevice()).directStateAccess(), this.depthTexture));
+		GlStateManager._glBindFramebuffer(GlConst.GL_FRAMEBUFFER, iris$getFramebufferId());
+	}
+
+	@Override
+	public int iris$getFramebufferId() {
+		return ((GlTexture) this.colorTexture).getFbo(((GlDevice) RenderSystem.getDevice()).directStateAccess(), this.depthTexture);
 	}
 }

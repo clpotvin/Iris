@@ -3,7 +3,7 @@ package net.irisshaders.iris.gui.element.widget;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.gui.GuiUtil;
 import net.irisshaders.iris.gui.NavigationController;
-import net.irisshaders.iris.gui.screen.ShaderPackScreen;
+import net.irisshaders.iris.gui.screen.ShaderPackOptionScreen;
 import net.irisshaders.iris.shaderpack.option.BooleanOption;
 import net.irisshaders.iris.shaderpack.option.menu.OptionMenuBooleanOptionElement;
 import net.minecraft.ChatFormatting;
@@ -29,7 +29,7 @@ public class BooleanElementWidget extends BaseOptionElementWidget<OptionMenuBool
 	}
 
 	@Override
-	public void init(ShaderPackScreen screen, NavigationController navigation) {
+	public void init(ShaderPackOptionScreen screen, NavigationController navigation) {
 		super.init(screen, navigation);
 
 		// The value currently in use by the shader pack
