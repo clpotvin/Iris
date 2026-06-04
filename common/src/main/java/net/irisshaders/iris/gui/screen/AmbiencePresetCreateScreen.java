@@ -1,6 +1,9 @@
 package net.irisshaders.iris.gui.screen;
 
 import net.irisshaders.iris.Iris;
+import net.irisshaders.iris.ambience.AmbienceDependency;
+import net.irisshaders.iris.ambience.AmbienceDependencyCandidate;
+import net.irisshaders.iris.ambience.AmbienceDependencyResolver;
 import net.irisshaders.iris.ambience.AmbiencePackManager;
 import net.irisshaders.iris.ambience.AmbienceProfile;
 import net.irisshaders.iris.gui.GuiUtil;
@@ -30,8 +33,12 @@ import net.minecraft.util.ARGB;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public class AmbiencePresetCreateScreen extends Screen {
 	private static final Identifier MENU_LIST_BACKGROUND = Identifier.withDefaultNamespace("textures/gui/menu_background.png");
@@ -39,6 +46,7 @@ public class AmbiencePresetCreateScreen extends Screen {
 
 	private final AmbienceProfileSelectionScreen parent;
 	private final String packId;
+	private final String profileIdToChange;
 	private final AmbiencePackManager manager = AmbiencePackManager.getInstance();
 	private final FrameUpdateNotifier notifier = new FrameUpdateNotifier();
 	private final List<String> shaderPacks = new ArrayList<>();
@@ -53,9 +61,14 @@ public class AmbiencePresetCreateScreen extends Screen {
 	public final SmoothedFloat buttonTransition = new SmoothedFloat(1, 1, () -> backgroundInit, notifier);
 
 	public AmbiencePresetCreateScreen(AmbienceProfileSelectionScreen parent, String packId) {
-		super(Component.translatable("options.iris.wynncraftAmbienceProfileCreateTitle"));
+		this(parent, packId, null);
+	}
+
+	public AmbiencePresetCreateScreen(AmbienceProfileSelectionScreen parent, String packId, String profileIdToChange) {
+		super(Component.translatable(profileIdToChange == null ? "options.iris.wynncraftAmbienceProfileCreateTitle" : "options.iris.wynncraftAmbienceProfileChangeShaderTitle"));
 		this.parent = parent;
 		this.packId = packId;
+		this.profileIdToChange = profileIdToChange;
 	}
 
 	@Override
@@ -66,22 +79,25 @@ public class AmbiencePresetCreateScreen extends Screen {
 
 		int fieldWidth = Math.min(308, this.width - 50);
 		int fieldLeft = this.width / 2 - fieldWidth / 2;
-		this.nameBox = new EditBox(this.font, fieldLeft, 54, fieldWidth, 20, Component.translatable("options.iris.wynncraftAmbienceProfileName"));
-		this.nameBox.setMaxLength(64);
-		if (this.nameBox.getValue().isBlank()) {
-			this.nameBox.setValue(uniqueDefaultName());
+		if (!isChangingShader()) {
+			this.nameBox = new EditBox(this.font, fieldLeft, 54, fieldWidth, 20, Component.translatable("options.iris.wynncraftAmbienceProfileName"));
+			this.nameBox.setMaxLength(64);
+			if (this.nameBox.getValue().isBlank()) {
+				this.nameBox.setValue(uniqueDefaultName());
+			}
+			this.addRenderableWidget(this.nameBox);
+			this.setInitialFocus(this.nameBox);
 		}
-		this.addRenderableWidget(this.nameBox);
-		this.setInitialFocus(this.nameBox);
 
-		this.shaderPackList = new ShaderPackList(this.minecraft, this.width, this.height, 84, this.height - 70, 0, this.width);
+		int listTop = isChangingShader() ? 48 : 84;
+		this.shaderPackList = new ShaderPackList(this.minecraft, this.width, this.height, listTop, this.height - 70, 0, this.width);
 		this.addRenderableWidget(this.shaderPackList);
 
 		int bottomCenter = this.width / 2 - 50;
 		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_CANCEL, button -> this.minecraft.setScreen(parent), buttonTransition)
 			.bounds(bottomCenter - 52, this.height - 31, 100, 20)
 			.build());
-		this.createButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.create"), button -> createPreset(), buttonTransition)
+		this.createButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable(isChangingShader() ? "options.iris.apply" : "options.iris.create"), button -> createPreset(), buttonTransition)
 			.bounds(bottomCenter + 52, this.height - 31, 100, 20)
 			.build());
 		updateCreateButton();
@@ -96,7 +112,9 @@ public class AmbiencePresetCreateScreen extends Screen {
 
 		drawCenteredTruncated(guiGraphics, this.title, 8, 0xFFFFFFFF);
 		drawCenteredTruncated(guiGraphics, status == null || status.getString().isBlank() ? SUBTITLE : status, 21, 0xFFFFFFFF);
-		guiGraphics.drawString(this.font, Component.translatable("options.iris.wynncraftAmbienceProfileName"), this.nameBox.getX(), 42, 0xFFCCCCCC);
+		if (!isChangingShader() && this.nameBox != null) {
+			guiGraphics.drawString(this.font, Component.translatable("options.iris.wynncraftAmbienceProfileName"), this.nameBox.getX(), 42, 0xFFCCCCCC);
+		}
 	}
 
 	@Override
@@ -125,26 +143,66 @@ public class AmbiencePresetCreateScreen extends Screen {
 	}
 
 	private void createPreset() {
-		String presetId = nameBox.getValue().trim();
+		String presetId = isChangingShader() ? profileIdToChange : nameBox.getValue().trim();
 		if (presetId.isBlank() || selectedShaderPack.isBlank()) {
 			updateCreateButton();
 			return;
 		}
+		String shaderPack = selectedShaderPack;
+		createButton.active = false;
+		status = Component.translatable("options.iris.wynncraftAmbienceDependencyResolving", shaderPack).withStyle(ChatFormatting.GRAY);
+		CompletableFuture.runAsync(() -> {
+			AmbienceDependencyResolver resolver = new AmbienceDependencyResolver();
+			try {
+				Path shaderPackPath = Iris.getShaderpacksDirectory().resolve(shaderPack);
+				Optional<AmbienceDependencyCandidate> exact = Files.isRegularFile(shaderPackPath)
+					? resolver.findExactDependency(shaderPackPath, shaderPack)
+					: Optional.empty();
+				if (exact.isPresent()) {
+					Minecraft.getInstance().execute(() -> finishWithDependency(presetId, shaderPack, resolver.dependencyFromCandidate(exact.get())));
+					return;
+				}
+				List<AmbienceDependencyCandidate> candidates = resolver.searchDependencies(shaderPack, shaderPack);
+				Minecraft.getInstance().execute(() -> {
+					if (candidates.isEmpty()) {
+						finishWithDependency(presetId, shaderPack, AmbienceDependencyResolver.localDependency(shaderPack));
+					} else {
+						this.minecraft.setScreen(new AmbienceDependencySelectionScreen(this, shaderPack, candidates, dependency -> finishWithDependency(presetId, shaderPack, dependency)));
+					}
+				});
+			} catch (Exception e) {
+				Iris.logger.warn("Failed to resolve ambience shader dependency for {}", shaderPack, e);
+				Minecraft.getInstance().execute(() -> finishWithDependency(presetId, shaderPack, AmbienceDependencyResolver.localDependency(shaderPack)));
+			}
+		});
+	}
+
+	private void finishWithDependency(String presetId, String shaderPack, AmbienceDependency dependency) {
 		try {
-			AmbienceProfile profile = manager.addProfile(packId, presetId, selectedShaderPack);
-			parent.onPresetCreated(profile.id);
+			AmbienceProfile profile = isChangingShader()
+				? manager.changeProfileShader(packId, presetId, shaderPack, dependency)
+				: manager.addProfile(packId, presetId, shaderPack, dependency);
+			if (isChangingShader()) {
+				parent.onPresetChanged(profile.id, Component.translatable("options.iris.wynncraftAmbienceProfileShaderChanged", profile.id).withStyle(ChatFormatting.YELLOW));
+			} else {
+				parent.onPresetCreated(profile.id);
+			}
 			this.minecraft.setScreen(parent);
 		} catch (IOException e) {
 			Iris.logger.warn("Failed to create ambience preset", e);
-			status = Component.literal(e.getMessage() == null ? "Create failed" : e.getMessage()).withStyle(ChatFormatting.RED);
+			status = Component.literal(e.getMessage() == null ? "Save failed" : e.getMessage()).withStyle(ChatFormatting.RED);
 			updateCreateButton();
 		}
 	}
 
 	private void updateCreateButton() {
 		if (createButton != null) {
-			createButton.active = nameBox != null && !nameBox.getValue().trim().isBlank() && selectedShaderPack != null && !selectedShaderPack.isBlank();
+			createButton.active = (isChangingShader() || (nameBox != null && !nameBox.getValue().trim().isBlank())) && selectedShaderPack != null && !selectedShaderPack.isBlank();
 		}
+	}
+
+	private boolean isChangingShader() {
+		return profileIdToChange != null && !profileIdToChange.isBlank();
 	}
 
 	private String uniqueDefaultName() {

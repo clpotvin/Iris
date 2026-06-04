@@ -9,7 +9,10 @@ import net.irisshaders.iris.gui.element.ShaderPackOptionList;
 import net.irisshaders.iris.gui.element.screen.IrisButton;
 import net.irisshaders.iris.gui.element.widget.AbstractElementWidget;
 import net.irisshaders.iris.gui.element.widget.CommentedElementWidget;
+import net.irisshaders.iris.helpers.OptionalBoolean;
+import net.irisshaders.iris.shaderpack.option.OptionSet;
 import net.irisshaders.iris.shaderpack.option.values.MutableOptionValues;
+import net.irisshaders.iris.shaderpack.option.values.OptionValues;
 import net.irisshaders.iris.uniforms.FrameUpdateNotifier;
 import net.irisshaders.iris.uniforms.transforms.SmoothedFloat;
 import net.minecraft.ChatFormatting;
@@ -241,7 +244,7 @@ public class AmbienceProfileSettingsScreen extends Screen implements ShaderPackO
 			Properties properties = new Properties();
 			properties.load(in);
 
-			Iris.clearShaderPackOptionQueue();
+			queueDefaultEditingOptions();
 			properties.stringPropertyNames().forEach(key -> Iris.getShaderPackOptionQueue().put(key, properties.getProperty(key)));
 
 			displayNotification(Component.translatable("options.iris.shaderPackOptions.importedSettings", settingFile.getFileName().toString()).withStyle(ChatFormatting.ITALIC, ChatFormatting.YELLOW));
@@ -347,6 +350,25 @@ public class AmbienceProfileSettingsScreen extends Screen implements ShaderPackO
 				return copied;
 			})
 			.orElse(Map.of());
+	}
+
+	private void queueDefaultEditingOptions() {
+		Iris.clearShaderPackOptionQueue();
+		if (loadedShaderPack == null) {
+			return;
+		}
+		OptionSet options = loadedShaderPack.pack().getShaderPackOptions().getOptionSet();
+		OptionValues values = loadedShaderPack.pack().getShaderPackOptions().getOptionValues();
+		options.getStringOptions().forEach((key, option) -> {
+			if (values.getStringValue(key).isPresent()) {
+				Iris.getShaderPackOptionQueue().put(key, option.getOption().getDefaultValue());
+			}
+		});
+		options.getBooleanOptions().forEach((key, option) -> {
+			if (values.getBooleanValue(key) != OptionalBoolean.DEFAULT) {
+				Iris.getShaderPackOptionQueue().put(key, Boolean.toString(option.getOption().getDefaultValue()));
+			}
+		});
 	}
 
 	private Optional<String> resolvedShaderPackName() {

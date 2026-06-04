@@ -65,6 +65,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 	private AmbienceRegion.Point boxEnd;
 	private Button undoButton;
 	private Button redoButton;
+	private final List<Button> toolButtons = new ArrayList<>();
 	private boolean loadedInitialPack;
 	private float backgroundInit = 0.0f;
 
@@ -94,6 +95,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 	}
 
 	private void layoutButtons() {
+		toolButtons.clear();
 		MapViewport viewport = viewport();
 		int buttonCount = 8;
 		int spacing = 4;
@@ -125,12 +127,20 @@ public class AmbienceRegionEditorScreen extends Screen {
 		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_CANCEL, button -> cancelAndClose(), buttonTransition)
 			.bounds(x, y, buttonWidth, 20)
 			.build());
+		if (profiles.isEmpty()) {
+			int sidebarButtonWidth = Math.max(80, sidebarWidth() - 12);
+			this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceProfileCreate"), button -> openAddPreset(), buttonTransition)
+				.bounds(sidebarX() + 6, this.height - 27, sidebarButtonWidth, 20)
+				.build());
+		}
 	}
 
 	private void addToolButton(Component label, Tool targetTool, int x, int y, int width) {
-		this.addRenderableWidget(IrisButton.iris$builder(label, button -> setTool(targetTool), buttonTransition)
+		Button toolButton = this.addRenderableWidget(IrisButton.iris$builder(label, button -> setTool(targetTool), buttonTransition)
 			.bounds(x, y, width, 20)
 			.build());
+		toolButton.active = !profiles.isEmpty();
+		toolButtons.add(toolButton);
 	}
 
 	@Override
@@ -158,6 +168,10 @@ public class AmbienceRegionEditorScreen extends Screen {
 			return true;
 		}
 		if (mapAreaContains(mouseX, mouseY)) {
+			if (profiles.isEmpty() || selectedProfileId.isBlank()) {
+				status = Component.translatable("options.iris.wynncraftAmbienceRegionNoProfiles").withStyle(ChatFormatting.YELLOW);
+				return false;
+			}
 			if (event.button() == GLFW.GLFW_MOUSE_BUTTON_2) {
 				panning = true;
 				return true;
@@ -202,6 +216,11 @@ public class AmbienceRegionEditorScreen extends Screen {
 			return eraseAt(mouseX, mouseY);
 		}
 		return super.mouseDragged(event, dragX, dragY);
+	}
+
+	private void openAddPreset() {
+		AmbienceProfileSelectionScreen profileScreen = new AmbienceProfileSelectionScreen(parent, packId);
+		this.minecraft.setScreen(new AmbiencePresetCreateScreen(profileScreen, packId));
 	}
 
 	@Override

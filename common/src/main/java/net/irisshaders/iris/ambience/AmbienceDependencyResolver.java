@@ -20,9 +20,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 public class AmbienceDependencyResolver {
 	private static final Gson GSON = new Gson();
@@ -87,6 +89,88 @@ public class AmbienceDependencyResolver {
 		}
 	}
 
+	public Optional<AmbienceDependencyCandidate> findExactDependency(Path shaderPackPath, String localName) throws IOException, InterruptedException {
+		String sha512 = digest(shaderPackPath, "SHA-512");
+		ModrinthVersion version = getOptional("/version_file/" + urlEncode(sha512) + "?algorithm=sha512", ModrinthVersion.class);
+		if (version == null || version.project_id == null || version.project_id.isBlank()) {
+			return Optional.empty();
+		}
+
+		ModrinthProject project = getOptional("/project/" + urlEncode(version.project_id), ModrinthProject.class);
+		AmbienceDependencyCandidate candidate = new AmbienceDependencyCandidate();
+		candidate.id = project == null || project.slug == null || project.slug.isBlank() ? version.project_id : project.slug;
+		candidate.title = project == null || project.title == null || project.title.isBlank() ? candidate.id : project.title;
+		candidate.description = project == null ? "" : project.description;
+		candidate.projectId = version.project_id;
+		candidate.versionId = version.id;
+		candidate.fileSha512 = sha512;
+		candidate.localName = localName;
+		candidate.exactHashMatch = true;
+		return Optional.of(candidate);
+	}
+
+	public List<AmbienceDependencyCandidate> searchDependencies(String query, String localName) throws IOException, InterruptedException {
+		String cleaned = cleanSearchQuery(query);
+		if (cleaned.isBlank()) {
+			return List.of();
+		}
+		String facets = URLEncoder.encode("[[\"project_type:shader\"]]", StandardCharsets.UTF_8);
+		ModrinthSearchResults results = getOptional("/search?query=" + urlEncode(cleaned) + "&facets=" + facets + "&limit=8", ModrinthSearchResults.class);
+		if (results == null || results.hits == null || results.hits.length == 0) {
+			return List.of();
+		}
+
+		List<AmbienceDependencyCandidate> candidates = new ArrayList<>();
+		for (ModrinthSearchHit hit : results.hits) {
+			if (hit == null || hit.project_id == null || hit.project_id.isBlank()) {
+				continue;
+			}
+			AmbienceDependencyCandidate candidate = new AmbienceDependencyCandidate();
+			candidate.id = hit.slug == null || hit.slug.isBlank() ? hit.project_id : hit.slug;
+			candidate.title = hit.title == null || hit.title.isBlank() ? candidate.id : hit.title;
+			candidate.description = hit.description == null ? "" : hit.description;
+			candidate.projectId = hit.project_id;
+			candidate.localName = localName;
+			candidates.add(candidate);
+		}
+		return candidates;
+	}
+
+	public AmbienceDependency dependencyFromCandidate(AmbienceDependencyCandidate candidate) {
+		AmbienceDependency dependency = new AmbienceDependency();
+		dependency.id = candidate.id == null || candidate.id.isBlank() ? candidate.projectId : candidate.id;
+		dependency.type = "modrinth";
+		dependency.projectId = candidate.projectId;
+		dependency.versionId = candidate.versionId == null ? "" : candidate.versionId;
+		dependency.fileSha512 = candidate.fileSha512 == null ? "" : candidate.fileSha512;
+		if (candidate.localName != null && !candidate.localName.isBlank()) {
+			dependency.localNames.add(candidate.localName);
+		}
+		return dependency;
+	}
+
+	public static AmbienceDependency localDependency(String localName) {
+		AmbienceDependency dependency = new AmbienceDependency();
+		dependency.id = localName == null ? "" : localName;
+		dependency.type = "local";
+		if (localName != null && !localName.isBlank()) {
+			dependency.localNames.add(localName);
+		}
+		return dependency;
+	}
+
+	public static String cleanSearchQuery(String value) {
+		if (value == null) {
+			return "";
+		}
+		return value
+			.replaceAll("(?i)\\.zip$", "")
+			.replaceAll("(?i)[_-]?r?\\d+(\\.\\d+)*([a-z])?", " ")
+			.replaceAll("[_+.-]+", " ")
+			.replaceAll("\\s+", " ")
+			.trim();
+	}
+
 	private ModrinthVersion resolveVersion(AmbienceDependency dependency) throws IOException, InterruptedException {
 		if (dependency.versionId != null && !dependency.versionId.isBlank()) {
 			return get("/version/" + urlEncode(dependency.versionId), ModrinthVersion.class);
@@ -122,6 +206,22 @@ public class AmbienceDependencyResolver {
 			.GET()
 			.build();
 		HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+		if (response.statusCode() < 200 || response.statusCode() >= 300) {
+			throw new IOException("Modrinth request failed with HTTP " + response.statusCode() + " for " + path);
+		}
+		return GSON.fromJson(response.body(), type);
+	}
+
+	private <T> T getOptional(String path, Class<T> type) throws IOException, InterruptedException {
+		HttpRequest request = HttpRequest.newBuilder(URI.create(API + path))
+			.timeout(Duration.ofSeconds(30))
+			.header("User-Agent", USER_AGENT)
+			.GET()
+			.build();
+		HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+		if (response.statusCode() == 404) {
+			return null;
+		}
 		if (response.statusCode() < 200 || response.statusCode() >= 300) {
 			throw new IOException("Modrinth request failed with HTTP " + response.statusCode() + " for " + path);
 		}
@@ -168,6 +268,8 @@ public class AmbienceDependencyResolver {
 	}
 
 	private static class ModrinthVersion {
+		String id;
+		String project_id;
 		String date_published;
 		ModrinthFile[] files;
 
@@ -192,6 +294,20 @@ public class AmbienceDependencyResolver {
 	}
 
 	private static class ModrinthProject {
+		String slug;
+		String title;
+		String description;
 		String project_type;
+	}
+
+	private static class ModrinthSearchResults {
+		ModrinthSearchHit[] hits;
+	}
+
+	private static class ModrinthSearchHit {
+		String project_id;
+		String slug;
+		String title;
+		String description;
 	}
 }

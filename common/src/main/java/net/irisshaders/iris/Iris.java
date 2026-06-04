@@ -642,6 +642,10 @@ public class Iris {
 		return transientShaderPackContexts.size();
 	}
 
+	public static boolean hasTransientShaderPackContext(String cacheKey) {
+		return cacheKey != null && !cacheKey.isBlank() && (cacheKey.equals(activeTransientShaderPackContextKey) || transientShaderPackContexts.containsKey(cacheKey));
+	}
+
 	public static int getRetainedShaderRuntimeContextCount() {
 		return transientShaderPackContexts.size() + (configuredShaderPackContext == null ? 0 : 1);
 	}

@@ -192,6 +192,7 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = Math.max(0, Math.min(100, Integer.parseInt(properties.getProperty("wynncraftMistWoodsFogSunTintAmount", "50"))));
 			IrisVideoSettings.wynncraftMountArmorOverlay = "true".equals(properties.getProperty("wynncraftMountArmorOverlay", "false"));
 			IrisVideoSettings.wynncraftAmbienceEnabled = "true".equals(properties.getProperty("wynncraftAmbienceEnabled", "false"));
+			IrisVideoSettings.wynncraftAmbienceAutoWarmCache = !"false".equals(properties.getProperty("wynncraftAmbienceAutoWarmCache", "true"));
 			IrisVideoSettings.wynncraftSelectedAmbiencePack = properties.getProperty("wynncraftSelectedAmbiencePack", "");
 		} catch (IllegalArgumentException e) {
 			Iris.logger.error("Shadow distance setting reset; value is invalid.");
@@ -212,6 +213,7 @@ public class IrisConfig {
 			IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount = 50;
 			IrisVideoSettings.wynncraftMountArmorOverlay = false;
 			IrisVideoSettings.wynncraftAmbienceEnabled = false;
+			IrisVideoSettings.wynncraftAmbienceAutoWarmCache = true;
 			IrisVideoSettings.wynncraftSelectedAmbiencePack = "";
 			save();
 		}
@@ -253,6 +255,7 @@ public class IrisConfig {
 		properties.setProperty("wynncraftMistWoodsFogSunTintAmount", String.valueOf(IrisVideoSettings.wynncraftMistWoodsFogSunTintAmount));
 		properties.setProperty("wynncraftMountArmorOverlay", String.valueOf(IrisVideoSettings.wynncraftMountArmorOverlay));
 		properties.setProperty("wynncraftAmbienceEnabled", String.valueOf(IrisVideoSettings.wynncraftAmbienceEnabled));
+		properties.setProperty("wynncraftAmbienceAutoWarmCache", String.valueOf(IrisVideoSettings.wynncraftAmbienceAutoWarmCache));
 		properties.setProperty("wynncraftSelectedAmbiencePack", IrisVideoSettings.wynncraftSelectedAmbiencePack == null ? "" : IrisVideoSettings.wynncraftSelectedAmbiencePack);
 		// NB: This uses ISO-8859-1 with unicode escapes as the encoding
 		try (OutputStream os = Files.newOutputStream(propertiesPath)) {

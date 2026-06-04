@@ -54,7 +54,13 @@ public class AmbienceProfileSelectionList extends IrisObjectSelectionList<Ambien
 		for (int i = 0; i < profiles.size(); i++) {
 			AmbienceProfile profile = profiles.get(i);
 			if (profile != null && profile.id != null && !profile.id.isBlank()) {
-				addEntry(new ProfileEntry(this.children().size(), this, profile));
+				ProfileEntry entry = new ProfileEntry(this.children().size(), this, profile);
+				addEntry(entry);
+				if (profile.id.equals(screen.getSelectedProfileId())) {
+					setSelected(entry);
+					setFocused(entry);
+					centerScrollOn(entry);
+				}
 			}
 		}
 
@@ -206,7 +212,7 @@ public class AmbienceProfileSelectionList extends IrisObjectSelectionList<Ambien
 			if (!isSelected()) {
 				list.select(index);
 			}
-			list.screen.openProfile(profile.id);
+			list.screen.selectProfile(profile.id);
 			return true;
 		}
 

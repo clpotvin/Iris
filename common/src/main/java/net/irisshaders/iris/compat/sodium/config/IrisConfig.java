@@ -226,6 +226,14 @@ public class IrisConfig implements ConfigEntryPoint {
 				.setTooltip(Component.translatable("options.iris.wynncraftAmbienceEnabled.tooltip"))
 				.setStorageHandler(SAVE_HANDLER)
 				.setImpact(OptionImpact.MEDIUM)
+			)
+			.addOption(builder.createBooleanOption(Identifier.fromNamespaceAndPath("iris", "wynncraft_ambience_auto_warm_cache"))
+				.setDefaultValue(true)
+				.setBinding(value -> IrisVideoSettings.wynncraftAmbienceAutoWarmCache = value, () -> IrisVideoSettings.wynncraftAmbienceAutoWarmCache)
+				.setName(Component.translatable("options.iris.wynncraftAmbienceAutoWarmCache"))
+				.setTooltip(Component.translatable("options.iris.wynncraftAmbienceAutoWarmCache.tooltip"))
+				.setStorageHandler(SAVE_HANDLER)
+				.setImpact(OptionImpact.HIGH)
 			);
 		settingsPage.addOptionGroup(ambienceGroup);
 
