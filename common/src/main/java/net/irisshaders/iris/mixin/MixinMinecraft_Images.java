@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.io.IOException;
+import java.io.InputStream;
 
 /**
  * This Mixin is responsible for registering the "widgets" texture used in Iris' GUI's.
@@ -26,10 +27,23 @@ public class MixinMinecraft_Images {
 	private void iris$setupImages(GameConfig arg, CallbackInfo ci) {
 		if (!IrisPlatformHelpers.getInstance().isModLoaded("fabric-resource-loader-v0")) {
 			try {
-				Minecraft.getInstance().getTextureManager().register(Identifier.fromNamespaceAndPath("iris", "textures/gui/widgets.png"), new NativeImageBackedCustomTexture(new CustomTextureData.PngData(new TextureFilteringData(false, false), IOUtils.toByteArray(Iris.class.getResourceAsStream("/assets/iris/textures/gui/widgets.png")))));
+				iris$registerGuiTexture("widgets.png");
+				iris$registerGuiTexture("config-icon.png");
+				iris$registerGuiTexture("config-icon-mono.png");
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
+		}
+	}
+
+	private static void iris$registerGuiTexture(String filename) throws IOException {
+		String path = "/assets/iris/textures/gui/" + filename;
+		try (InputStream stream = Iris.class.getResourceAsStream(path)) {
+			if (stream == null) {
+				throw new IOException("Missing bundled Iris GUI texture: " + path);
+			}
+			Minecraft.getInstance().getTextureManager().register(Identifier.fromNamespaceAndPath("iris", "textures/gui/" + filename),
+				new NativeImageBackedCustomTexture(new CustomTextureData.PngData(new TextureFilteringData(false, false), IOUtils.toByteArray(stream))));
 		}
 	}
 }

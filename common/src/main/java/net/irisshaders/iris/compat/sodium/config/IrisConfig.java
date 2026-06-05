@@ -28,7 +28,8 @@ import java.util.Locale;
 import java.util.Set;
 
 public class IrisConfig implements ConfigEntryPoint {
-	public static final Identifier WYNNIRIS_LOGO = Identifier.fromNamespaceAndPath("iris", "textures/gui/iris-logo.png");
+	public static final Identifier WYNNIRIS_CONFIG_ICON = Identifier.fromNamespaceAndPath("iris", "textures/gui/config-icon.png");
+	public static final Identifier WYNNIRIS_CONFIG_ICON_MONO = Identifier.fromNamespaceAndPath("iris", "textures/gui/config-icon-mono.png");
 
 	private static final StorageEventHandler SAVE_HANDLER = () -> {
 		try {
@@ -263,7 +264,7 @@ public class IrisConfig implements ConfigEntryPoint {
 			settingsPage.addOptionGroup(debugGroup);
 		}
 
-		builder.registerOwnModOptions().setName(Iris.MODNAME).setIcon(WYNNIRIS_LOGO).setColorTheme(builder.createColorTheme().setBaseThemeRGB(0xFFf556e2))
+		builder.registerOwnModOptions().setName(Iris.MODNAME).setNonTintedIcon(WYNNIRIS_CONFIG_ICON).setColorTheme(builder.createColorTheme().setBaseThemeRGB(0xFFf556e2))
 			.setVersion(Iris.getVersionSimple())
 			.addPage(builder.createExternalPage().setName(Component.translatable("options.iris.shaderPackSelection.title")).setScreenConsumer(i -> Minecraft.getInstance().setScreen(new ShaderPackScreen(i))))
 			.addPage(builder.createExternalPage().setName(Component.translatable("options.iris.wynncraftAmbiencePackSelection.title")).setScreenConsumer(i -> Minecraft.getInstance().setScreen(new AmbiencePackScreen(i))))
