@@ -16,7 +16,9 @@ import net.irisshaders.iris.platform.IrisPlatformHelpers;
 import net.irisshaders.iris.shaderpack.properties.PackDirectives;
 import net.irisshaders.iris.shaderpack.properties.PackRenderTargetDirectives;
 import org.joml.Vector2i;
+import org.joml.Vector4f;
 import org.lwjgl.opengl.GL20C;
+import org.lwjgl.opengl.GL21C;
 import org.lwjgl.opengl.GL30C;
 
 import java.util.ArrayList;
@@ -394,6 +396,46 @@ public class RenderTargets {
 		fullClearRequired = true;
 		translucentDepthDirty = true;
 		handDepthDirty = true;
+	}
+
+	public int clearTargetPairIfPresent(int index, Vector4f clearColor) {
+		if (destroyed) {
+			throw new IllegalStateException("Tried to use destroyed RenderTargets");
+		}
+
+		if (index < 0 || index >= targets.length) {
+			return 0;
+		}
+
+		RenderTarget target = targets[index];
+		if (target == null) {
+			return 0;
+		}
+
+		clearTexture(target.getMainTexture(), target.getWidth(), target.getHeight(), clearColor);
+		clearTexture(target.getAltTexture(), target.getWidth(), target.getHeight(), clearColor);
+		return 2;
+	}
+
+	private void clearTexture(int texture, int width, int height, Vector4f clearColor) {
+		GlFramebuffer framebuffer = new GlFramebuffer();
+
+		try {
+			framebuffer.addColorAttachment(0, texture);
+			framebuffer.drawBuffers(new int[]{0});
+			framebuffer.readBuffer(0);
+
+			int status = framebuffer.getStatus();
+			if (status != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+				throw new IllegalStateException("Unexpected error while clearing render target texture: Status: " + status);
+			}
+
+			GlStateManager._viewport(0, 0, width, height);
+			IrisRenderSystem.clearColor(clearColor.x, clearColor.y, clearColor.z, clearColor.w);
+			GlStateManager._clear(GL21C.GL_COLOR_BUFFER_BIT);
+		} finally {
+			framebuffer.destroy();
+		}
 	}
 
 	private void refreshDepthCopyFramebufferColorAttachments() {

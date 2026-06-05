@@ -140,6 +140,10 @@ import java.util.function.Supplier;
 
 public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRenderingPipeline {
 	private static final int WYNNCRAFT_PHOTON_VFX_TRANSLUCENT_BUFFER = 13;
+	private static final int PHOTON_CLOUD_HISTORY_TARGET = 11;
+	private static final int PHOTON_CLOUD_DATA_TARGET = 12;
+	private static final Vector4f PHOTON_CLOUD_HISTORY_NO_OCCLUSION_CLEAR = new Vector4f(0.0F, 0.0F, 0.0F, 1.0F);
+	private static final Vector4f PHOTON_CLOUD_DATA_FAR_CLEAR = new Vector4f(65504.0F, 0.0F, 0.0F, 0.0F);
 	private static final int[] MAIN_COLOR_DRAW_BUFFER = new int[]{0};
 	private static final int[] WYNNCRAFT_PHOTON_VFX_DRAW_BUFFER = new int[]{WYNNCRAFT_PHOTON_VFX_TRANSLUCENT_BUFFER};
 	private static final BlendModeOverride WYNNCRAFT_PHOTON_VFX_BLEND = new BlendModeOverride(new BlendMode(
@@ -161,6 +165,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final ComputeProgram[] setup;
 	private final boolean separateHardwareSamplers;
 	private final ProgramFallbackResolver resolver;
+	private final boolean wynncraftPhotonShaderPack;
 	private final boolean wynncraftFallbackVfxTranslucency;
 	private final Supplier<ShadowRenderTargets> shadowTargetsSupplier;
 	private final Set<GlProgram> loadedShaders;
@@ -239,6 +244,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private boolean isMainBound;
 	private boolean shouldBindPBR;
 	private boolean runSetupComputesOnNextFrame;
+	private int ambiencePhotonCloudHistoryReseedFrames;
 	private static int ambiencePresentationMaskFrames;
 	private static int ambiencePreviousFrameTexture;
 	private static int ambiencePreviousFrameWidth;
@@ -298,9 +304,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		this.resolver = new ProgramFallbackResolver(programSet);
 		String packName = Iris.getCurrentPackName();
 		boolean hasEntitiesTrans = programSet.get(ProgramId.EntitiesTrans).isPresent();
-		this.wynncraftFallbackVfxTranslucency = packName != null
-			&& packName.toLowerCase(Locale.ROOT).contains("photon")
-			&& !hasEntitiesTrans;
+		this.wynncraftPhotonShaderPack = packName != null && packName.toLowerCase(Locale.ROOT).contains("photon");
+		this.wynncraftFallbackVfxTranslucency = wynncraftPhotonShaderPack && !hasEntitiesTrans;
 		this.pack = programSet.getPack();
 
 		RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
@@ -687,6 +692,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		MatrixUniforms.resetPreviousMatrices();
 		ShaderStorageBufferHolder.ResetStats ssboResetStats = shaderStorageBufferHolder == null ? new ShaderStorageBufferHolder.ResetStats(0, 0) : shaderStorageBufferHolder.resetBuffers();
 		ambiencePresentationMaskFrames = Math.max(ambiencePresentationMaskFrames, 1);
+		if (wynncraftPhotonShaderPack) {
+			ambiencePhotonCloudHistoryReseedFrames = Math.max(ambiencePhotonCloudHistoryReseedFrames, 1);
+		}
 		String mainTargetsBeforeClear = renderTargets.describeCreatedTargets();
 		String cloudTargetsBeforeClear = renderTargets.describeTargetPresence(8, 9, 10, 11, 12);
 		int createdTargetsBeforeClear = renderTargets.getCreatedTargetCount();
@@ -730,10 +738,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		}
 
 		WynncraftDebugLog.info("ambience-profile-activate-pool",
-			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} sameShaderPack={} presentationMaskFrames={} renderSun={} renderMoon={} renderStars={} renderSkyDisc={} sunPathRotation={} cloudSetting={} dhCloudSetting={} renderWeather={} renderWeatherParticles={} pack={} activeKey={} createdTargetsBeforeClear={} createdTargetsAfterClearPassRebuild={} clearPassesBeforeRebuild={}/{} clearPassesAfterRebuild={}/{} cloudTargetsBeforeClear={} cloudTargetsAfterClearPassRebuild={} mainTargetsBeforeClear={} mainTargetsAfterClearPassRebuild={} customImagesCleared={} customImagesSkipped={} ssboResetCount={} ssboResetBytes={} profilePressure={}",
+			"Activated ambience pooled pipeline: poolResources={} poolBytes={} poolHits={} poolMisses={} poolReleases={} poolDestroyed={} sameShaderPack={} presentationMaskFrames={} photonCloudHistoryReseedFrames={} renderSun={} renderMoon={} renderStars={} renderSkyDisc={} sunPathRotation={} cloudSetting={} dhCloudSetting={} renderWeather={} renderWeatherParticles={} pack={} activeKey={} createdTargetsBeforeClear={} createdTargetsAfterClearPassRebuild={} clearPassesBeforeRebuild={}/{} clearPassesAfterRebuild={}/{} cloudTargetsBeforeClear={} cloudTargetsAfterClearPassRebuild={} mainTargetsBeforeClear={} mainTargetsAfterClearPassRebuild={} customImagesCleared={} customImagesSkipped={} ssboResetCount={} ssboResetBytes={} profilePressure={}",
 			ambiencePool.getResourceCount(), ambiencePool.getEstimatedBytes(), ambiencePool.getHits(), ambiencePool.getMisses(),
 			ambiencePool.getReleases(), ambiencePool.getDestroyedResources(), timing != null && timing.sameShaderPackAsPrevious(),
-			ambiencePresentationMaskFrames, shouldRenderSun, shouldRenderMoon, shouldRenderStars, shouldRenderSkyDisc, sunPathRotation,
+			ambiencePresentationMaskFrames, ambiencePhotonCloudHistoryReseedFrames, shouldRenderSun, shouldRenderMoon, shouldRenderStars, shouldRenderSkyDisc, sunPathRotation,
 			cloudSetting, dhCloudSetting, shouldRenderWeather, shouldRenderWeatherParticles,
 			Iris.getCurrentPackName(), Iris.getActiveTransientShaderPackContextKey(),
 			createdTargetsBeforeClear, createdTargetsAfterClearPassRebuild, fullClearPassesBeforeRebuild, clearPassesBeforeRebuild,
@@ -754,6 +762,22 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			}
 		}
 		return new CustomImageReseedStats(cleared, skipped);
+	}
+
+	private void reseedPhotonCloudHistoryAfterAmbienceClear() {
+		if (ambiencePhotonCloudHistoryReseedFrames <= 0) {
+			return;
+		}
+
+		ambiencePhotonCloudHistoryReseedFrames--;
+		int clearedTextures = 0;
+		clearedTextures += renderTargets.clearTargetPairIfPresent(PHOTON_CLOUD_HISTORY_TARGET, PHOTON_CLOUD_HISTORY_NO_OCCLUSION_CLEAR);
+		clearedTextures += renderTargets.clearTargetPairIfPresent(PHOTON_CLOUD_DATA_TARGET, PHOTON_CLOUD_DATA_FAR_CLEAR);
+
+		WynncraftDebugLog.info("ambience-photon-cloud-history-reseed",
+			"Reseeded Photon ambience cloud history: clearedTextures={} remainingFrames={} cloudTargets={} pack={} activeKey={}",
+			clearedTextures, ambiencePhotonCloudHistoryReseedFrames, renderTargets.describeTargetPresence(11, 12),
+			Iris.getCurrentPackName(), Iris.getActiveTransientShaderPackContextKey());
 	}
 
 	private record CustomImageReseedStats(int cleared, int skipped) {
@@ -1279,6 +1303,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		for (ClearPass clearPass : passes) {
 			clearPass.execute(fogColor);
 		}
+
+		reseedPhotonCloudHistoryAfterAmbienceClear();
 
 		GLDebug.popGroup();
 

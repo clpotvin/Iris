@@ -18,6 +18,7 @@ public class AmbienceWarmupScreen extends Screen {
 	private final boolean autoStarted;
 	private final FrameUpdateNotifier notifier = new FrameUpdateNotifier();
 	private Button closeButton;
+	private boolean autoClosed;
 	private float backgroundInit = 0.0f;
 
 	public final SmoothedFloat buttonTransition = new SmoothedFloat(1, 1, () -> backgroundInit, notifier);
@@ -41,7 +42,9 @@ public class AmbienceWarmupScreen extends Screen {
 	@Override
 	public void tick() {
 		super.tick();
-		updateButton();
+		AmbienceRuntime.WarmupProgress progress = AmbienceRuntime.getWarmupProgress();
+		updateButton(progress);
+		autoCloseIfFinished(progress);
 	}
 
 	@Override
@@ -127,11 +130,23 @@ public class AmbienceWarmupScreen extends Screen {
 	}
 
 	private void updateButton() {
+		updateButton(AmbienceRuntime.getWarmupProgress());
+	}
+
+	private void updateButton(AmbienceRuntime.WarmupProgress progress) {
 		if (closeButton == null) {
 			return;
 		}
-		AmbienceRuntime.WarmupProgress progress = AmbienceRuntime.getWarmupProgress();
 		closeButton.setMessage(progress.running() ? CommonComponents.GUI_CANCEL : CommonComponents.GUI_DONE);
+	}
+
+	private void autoCloseIfFinished(AmbienceRuntime.WarmupProgress progress) {
+		if (autoClosed || progress.running() || !progress.complete() || progress.cancelled() || progress.failedProfiles() > 0) {
+			return;
+		}
+
+		autoClosed = true;
+		this.minecraft.setScreen(parent);
 	}
 
 	private Component statusText(AmbienceRuntime.WarmupProgress progress) {

@@ -9,19 +9,24 @@ import net.irisshaders.iris.ambience.AmbiencePack;
 import net.irisshaders.iris.ambience.AmbiencePackManager;
 import net.irisshaders.iris.ambience.AmbienceRuntime;
 import net.irisshaders.iris.gui.FileDialogUtil;
+import net.irisshaders.iris.gui.GuiUtil;
 import net.irisshaders.iris.gui.element.AmbiencePackSelectionList;
 import net.irisshaders.iris.gui.element.screen.IrisButton;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
+import net.irisshaders.iris.gl.uniform.FloatSupplier;
 import net.irisshaders.iris.uniforms.FrameUpdateNotifier;
 import net.irisshaders.iris.uniforms.transforms.SmoothedFloat;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Util;
 
 import java.io.IOException;
@@ -34,6 +39,11 @@ import java.util.concurrent.CompletableFuture;
 
 public class AmbiencePackScreen extends Screen {
 	private static final Component SELECT_TITLE = Component.translatable("pack.iris.ambience.select.title").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC);
+	private static final Identifier IMPORT_ICON = Identifier.fromNamespaceAndPath("iris", "textures/gui/ambience_import_button.png");
+	private static final Identifier EXPORT_ICON = Identifier.fromNamespaceAndPath("iris", "textures/gui/ambience_export_button.png");
+	private static final int ICON_BUTTON_SIZE = 20;
+	private static final int ICON_DRAW_SIZE = 16;
+	private static final int ICON_TEXTURE_SIZE = 32;
 
 	private final Screen parent;
 	private final AmbiencePackManager manager = AmbiencePackManager.getInstance();
@@ -69,50 +79,65 @@ public class AmbiencePackScreen extends Screen {
 		this.clearWidgets();
 		this.addRenderableWidget(ambiencePackList);
 
-		int topButtonCount = 7;
-		int topRowGap = 4;
-		int topRowWidth = Math.max(74, Math.min(100, (this.width - 40 - topRowGap * (topButtonCount - 1)) / topButtonCount));
-		int topLeft = this.width / 2 - ((topRowWidth * topButtonCount) + (topRowGap * (topButtonCount - 1))) / 2;
+		int rowGap = 4;
+		int topTextButtonCount = 3;
+		int topTextButtonWidth = Math.max(74, Math.min(100, (this.width - 40 - ICON_BUTTON_SIZE * 2 - rowGap * 4) / topTextButtonCount));
+		int topRowTotalWidth = topTextButtonWidth * topTextButtonCount + ICON_BUTTON_SIZE * 2 + rowGap * 4;
+		int topCursor = this.width / 2 - topRowTotalWidth / 2;
+		int topRowY = this.height - 51;
 
-		int bottomRowWidth = 100;
-		int bottomRowGap = 4;
-		int bottomLeft = this.width / 2 - ((bottomRowWidth * 4) + (bottomRowGap * 3)) / 2;
-		installButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceInstallMissingShort"), button -> installMissing(), buttonTransition)
-			.bounds(bottomLeft, this.height - 27, 100, 20)
-			.build());
-		autoWarmButton = this.addRenderableWidget(IrisButton.iris$builder(autoWarmLabel(), button -> toggleAutoWarm(), buttonTransition)
-			.bounds(bottomLeft + 104, this.height - 27, 100, 20)
-			.build());
-		warmButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbiencePrepareCache"), button -> warmCache(), buttonTransition)
-			.bounds(bottomLeft + 208, this.height - 27, 100, 20)
-			.build());
-		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_DONE, button -> this.minecraft.setScreen(parent), buttonTransition)
-			.bounds(bottomLeft + 312, this.height - 27, 100, 20)
-			.build());
+		int bottomButtonCount = 6;
+		int bottomButtonWidth = Math.max(74, Math.min(100, (this.width - 40 - rowGap * (bottomButtonCount - 1)) / bottomButtonCount));
+		int bottomCursor = this.width / 2 - (bottomButtonWidth * bottomButtonCount + rowGap * (bottomButtonCount - 1)) / 2;
+		int bottomRowY = this.height - 27;
 
 		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.openAmbiencePackFolderShort"), button -> openAmbiencePackFolder(), buttonTransition)
-			.bounds(topLeft, this.height - 51, topRowWidth, 20)
+			.bounds(topCursor, topRowY, topTextButtonWidth, 20)
 			.build());
-		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.import"), button -> importPack(), buttonTransition)
-			.bounds(topLeft + (topRowWidth + topRowGap), this.height - 51, topRowWidth, 20)
-			.build());
-		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.export"), button -> exportPack(), buttonTransition)
-			.bounds(topLeft + (topRowWidth + topRowGap) * 2, this.height - 51, topRowWidth, 20)
-			.build());
+		topCursor += topTextButtonWidth + rowGap;
+		this.addRenderableWidget(iconButton(Component.translatable("options.iris.import"), IMPORT_ICON, topCursor, topRowY, button -> importPack()));
+		topCursor += ICON_BUTTON_SIZE + rowGap;
+		this.addRenderableWidget(iconButton(Component.translatable("options.iris.export"), EXPORT_ICON, topCursor, topRowY, button -> exportPack()));
+		topCursor += ICON_BUTTON_SIZE + rowGap;
 		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.refresh"), button -> reloadPacks(), buttonTransition)
-			.bounds(topLeft + (topRowWidth + topRowGap) * 3, this.height - 51, topRowWidth, 20)
+			.bounds(topCursor, topRowY, topTextButtonWidth, 20)
 			.build());
+		topCursor += topTextButtonWidth + rowGap;
 		this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceCreatePack"), button -> createNewPack(), buttonTransition)
-			.bounds(topLeft + (topRowWidth + topRowGap) * 4, this.height - 51, topRowWidth, 20)
+			.bounds(topCursor, topRowY, topTextButtonWidth, 20)
 			.build());
+
 		settingsButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceProfileSettings"), button -> openProfileSettings(), buttonTransition)
-			.bounds(topLeft + (topRowWidth + topRowGap) * 5, this.height - 51, topRowWidth, 20)
+			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
 			.build());
+		bottomCursor += bottomButtonWidth + rowGap;
 		regionsButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceRegionEditor"), button -> openRegionEditor(), buttonTransition)
-			.bounds(topLeft + (topRowWidth + topRowGap) * 6, this.height - 51, topRowWidth, 20)
+			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
+			.build());
+		bottomCursor += bottomButtonWidth + rowGap;
+		installButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceInstallMissingShort"), button -> installMissing(), buttonTransition)
+			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
+			.build());
+		bottomCursor += bottomButtonWidth + rowGap;
+		warmButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbiencePrepareCache"), button -> warmCache(), buttonTransition)
+			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
+			.build());
+		bottomCursor += bottomButtonWidth + rowGap;
+		autoWarmButton = this.addRenderableWidget(IrisButton.iris$builder(autoWarmLabel(), button -> toggleAutoWarm(), buttonTransition)
+			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
+			.build());
+		bottomCursor += bottomButtonWidth + rowGap;
+		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_DONE, button -> this.minecraft.setScreen(parent), buttonTransition)
+			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
 			.build());
 
 		updateButtons();
+	}
+
+	private IconButton iconButton(Component label, Identifier icon, int x, int y, Button.OnPress onPress) {
+		IconButton button = new IconButton(x, y, ICON_BUTTON_SIZE, ICON_BUTTON_SIZE, label, icon, onPress, buttonTransition);
+		button.setTooltip(Tooltip.create(label));
+		return button;
 	}
 
 	@Override
@@ -538,6 +563,24 @@ public class AmbiencePackScreen extends Screen {
 			this.minecraft.setScreen(new AmbienceWarmupScreen(this, true));
 		} else if (result.alreadyWarm()) {
 			status = Component.translatable("options.iris.wynncraftAmbienceWarmupAlreadyPrepared", result.totalProfiles());
+		}
+	}
+
+	private static class IconButton extends IrisButton {
+		private final Identifier icon;
+
+		private IconButton(int x, int y, int width, int height, Component label, Identifier icon, OnPress onPress, FloatSupplier alpha) {
+			super(x, y, width, height, label, onPress, DEFAULT_NARRATION, alpha);
+			this.icon = icon;
+		}
+
+		@Override
+		protected void renderContents(GuiGraphics guiGraphics, int mouseX, int mouseY, float delta) {
+			GuiUtil.drawButton(guiGraphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), this.isHoveredOrFocused(), !this.isActive());
+			int iconX = this.getX() + (this.getWidth() - ICON_DRAW_SIZE) / 2;
+			int iconY = this.getY() + (this.getHeight() - ICON_DRAW_SIZE) / 2;
+			guiGraphics.blit(RenderPipelines.GUI_TEXTURED, icon, iconX, iconY, 0.0F, 0.0F, ICON_DRAW_SIZE, ICON_DRAW_SIZE,
+				ICON_TEXTURE_SIZE, ICON_TEXTURE_SIZE, ICON_TEXTURE_SIZE, ICON_TEXTURE_SIZE);
 		}
 	}
 }
