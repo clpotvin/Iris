@@ -303,9 +303,8 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		this.occlusionCulling = programSet.getPackDirectives().shouldUseOcclusionCulling();
 		this.resolver = new ProgramFallbackResolver(programSet);
 		String packName = Iris.getCurrentPackName();
-		boolean hasEntitiesTrans = programSet.get(ProgramId.EntitiesTrans).isPresent();
 		this.wynncraftPhotonShaderPack = packName != null && packName.toLowerCase(Locale.ROOT).contains("photon");
-		this.wynncraftFallbackVfxTranslucency = wynncraftPhotonShaderPack && !hasEntitiesTrans;
+		this.wynncraftFallbackVfxTranslucency = false;
 		this.pack = programSet.getPack();
 
 		RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
