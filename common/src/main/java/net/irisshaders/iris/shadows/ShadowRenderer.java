@@ -13,6 +13,7 @@ import net.caffeinemc.mods.sodium.client.util.SodiumChunkSection;
 import net.caffeinemc.mods.sodium.client.world.LevelRendererExtension;
 import net.irisshaders.iris.Iris;
 import net.irisshaders.iris.compat.dh.DHCompat;
+import net.irisshaders.iris.compat.general.WynntilsCompat;
 import net.irisshaders.iris.gl.GLDebug;
 import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gui.option.IrisVideoSettings;
@@ -692,6 +693,11 @@ public class ShadowRenderer {
 
 		for(Entity entity : Minecraft.getInstance().level.entitiesForRendering()) {
 			if (entity instanceof AbstractClientPlayer acp && acp.isSpectator()) continue;
+
+			// WynnIris: don't cast a shadow for entities Wynntils has hidden from rendering
+			// (e.g. disabled beacons). Wynntils gates these out of the main entity pass, but the
+			// shadow pass renders entities through its own path that never hits that gate.
+			if (WynntilsCompat.isHiddenByWynntils(entity)) continue;
 
 			if (Minecraft.getInstance().getEntityRenderDispatcher().shouldRender(entity, frustum, d, e, f) || entity.hasIndirectPassenger(Minecraft.getInstance().player)) {
 				BlockPos blockPos = entity.blockPosition();
