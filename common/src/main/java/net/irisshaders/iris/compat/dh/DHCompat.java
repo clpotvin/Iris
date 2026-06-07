@@ -17,6 +17,7 @@ public class DHCompat {
 	private static boolean dhPresent = true;
 	private static boolean lastIncompatible;
 	private static MethodHandle deletePipeline;
+	private static MethodHandle markDepthAttachmentDirty;
 	private static MethodHandle incompatible;
 	private static MethodHandle getDepthTex;
 	private static MethodHandle getFarPlane;
@@ -58,6 +59,7 @@ public class DHCompat {
 		try {
 			if (IrisPlatformHelpers.getInstance().isModLoaded("distanthorizons")) {
 				deletePipeline = MethodHandles.lookup().findVirtual(Class.forName("net.irisshaders.iris.compat.dh.DHCompatInternal"), "clear", MethodType.methodType(void.class));
+				markDepthAttachmentDirty = MethodHandles.lookup().findVirtual(Class.forName("net.irisshaders.iris.compat.dh.DHCompatInternal"), "markDepthAttachmentDirty", MethodType.methodType(void.class));
 				MethodHandle setupEventHandlers = MethodHandles.lookup().findStatic(Class.forName("net.irisshaders.iris.compat.dh.LodRendererEvents"), "setupEventHandlers", MethodType.methodType(void.class));
 				getDepthTex = MethodHandles.lookup().findVirtual(Class.forName("net.irisshaders.iris.compat.dh.DHCompatInternal"), "getStoredDepthTex", MethodType.methodType(int.class));
 				getRenderDistance = MethodHandles.lookup().findStatic(Class.forName("net.irisshaders.iris.compat.dh.DHCompatInternal"), "getRenderDistance", MethodType.methodType(int.class));
@@ -145,6 +147,16 @@ public class DHCompat {
 
 		try {
 			deletePipeline.invoke(compatInternalInstance);
+		} catch (Throwable e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	public void markDepthAttachmentDirty() {
+		if (compatInternalInstance == null) return;
+
+		try {
+			markDepthAttachmentDirty.invoke(compatInternalInstance);
 		} catch (Throwable e) {
 			throw new RuntimeException(e);
 		}

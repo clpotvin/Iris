@@ -12,6 +12,7 @@ import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.gl.framebuffer.GlFramebuffer;
 import net.irisshaders.iris.gl.texture.DepthBufferFormat;
 import net.irisshaders.iris.gl.texture.DepthCopyStrategy;
+import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
 import net.irisshaders.iris.shaderpack.programs.ProgramSource;
 import net.irisshaders.iris.shaderpack.properties.CloudSetting;
@@ -43,6 +44,10 @@ public class DHCompatInternal {
 	private DepthTexture depthTexNoTranslucent;
 	private boolean translucentDepthDirty;
 	private int storedDepthTex = -1;
+	// Forces reconnectDHTextures to re-bind DH's own depth onto the DH framebuffers even when DH's
+	// depth-texture id is unchanged. Set after the ambience pool swaps the pooled color attachments
+	// (which can leave the DH framebuffers' depth stale) and on ambience profile (re)activation.
+	private boolean dhDepthAttachmentDirty;
 	private boolean incompatible = false;
 	private int cachedVersion;
 
@@ -163,7 +168,9 @@ public class DHCompatInternal {
 			cachedVersion = ((Blaze3dRenderTargetExt) Minecraft.getInstance().getMainRenderTarget()).iris$getDepthBufferVersion();
 			createDepthTex(Minecraft.getInstance().getMainRenderTarget().width, Minecraft.getInstance().getMainRenderTarget().height);
 		}
-		if (storedDepthTex != depthTex && dhTerrainFramebuffer != null) {
+		if ((dhDepthAttachmentDirty || storedDepthTex != depthTex) && dhTerrainFramebuffer != null) {
+			boolean reattachedAfterClobber = dhDepthAttachmentDirty;
+			dhDepthAttachmentDirty = false;
 			storedDepthTex = depthTex;
 			dhTerrainFramebuffer.addDepthAttachmentBypass(depthTex);
 			if (dhWaterFramebuffer != null) {
@@ -172,7 +179,20 @@ public class DHCompatInternal {
 			if (dhGenericFramebuffer != null) {
 				dhGenericFramebuffer.addDepthAttachmentBypass(depthTex);
 			}
+			WynncraftDebugLog.info("dh-depth-reattach",
+				"Re-bound DH depth attachment: tex={} reason={}", depthTex, reattachedAfterClobber ? "dirty" : "changed");
 		}
+	}
+
+	/**
+	 * Marks the DH framebuffers' depth attachment as needing to be re-bound on the next frame. Called
+	 * when the ambience render-target pool swaps the pooled color attachments (resize) and on ambience
+	 * profile (re)activation, since those paths can leave the DH framebuffers pointing at Minecraft's
+	 * depth (or a stale DH depth) which {@link #reconnectDHTextures(int)} would otherwise not fix when
+	 * DH's depth-texture id is unchanged.
+	 */
+	public void markDepthAttachmentDirty() {
+		dhDepthAttachmentDirty = true;
 	}
 
 	public void createDepthTex(int width, int height) {

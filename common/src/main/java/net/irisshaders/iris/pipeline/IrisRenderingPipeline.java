@@ -170,6 +170,10 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	private final Supplier<ShadowRenderTargets> shadowTargetsSupplier;
 	private final Set<GlProgram> loadedShaders;
 	private final List<GbufferFramebufferBinding> gbufferFramebuffers = new ArrayList<>();
+	// Distant Horizons framebuffers are tracked separately from gbufferFramebuffers: they need their
+	// pooled color attachments refreshed on resize, but must NOT have Minecraft's depth re-attached
+	// (DH owns its depth). See refreshPooledFramebufferAttachments / RenderTargets.refreshDHFramebuffer.
+	private final List<GbufferFramebufferBinding> dhFramebuffers = new ArrayList<>();
 	private final CompositeRenderer beginRenderer;
 	private final CompositeRenderer prepareRenderer;
 	private final CompositeRenderer deferredRenderer;
@@ -688,6 +692,12 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		}
 
 		runSetupComputesOnNextFrame = true;
+		// A cache-hit reactivation reuses a cached pipeline whose DH framebuffer may have been left with a
+		// stale/clobbered depth attachment. Force DH to re-bind its own depth next frame even if DH's
+		// depth-texture id is unchanged (otherwise reconnectDHTextures' storedDepthTex guard would skip it).
+		if (dhCompat != null) {
+			dhCompat.markDepthAttachmentDirty();
+		}
 		CameraUniforms.resetPreviousCameraPositions();
 		MatrixUniforms.resetPreviousMatrices();
 		ShaderStorageBufferHolder.ResetStats ssboResetStats = shaderStorageBufferHolder == null ? new ShaderStorageBufferHolder.ResetStats(0, 0) : shaderStorageBufferHolder.resetBuffers();
@@ -989,6 +999,12 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		}
 	}
 
+	private void trackDHFramebuffer(GlFramebuffer framebuffer, ImmutableSet<Integer> stageWritesToAlt, int[] drawBuffers) {
+		if (ambiencePool != null) {
+			dhFramebuffers.add(new GbufferFramebufferBinding(framebuffer, stageWritesToAlt, drawBuffers.clone()));
+		}
+	}
+
 	private void refreshPooledFramebufferAttachments() {
 		for (GbufferFramebufferBinding binding : gbufferFramebuffers) {
 			renderTargets.refreshGbufferFramebuffer(binding.framebuffer(), binding.stageWritesToAlt(), binding.drawBuffers());
@@ -1002,6 +1018,19 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 
 		if (voxyEntityDepthClear != null) {
 			voxyEntityDepthClear.refreshFramebufferAttachments();
+		}
+
+		// DH framebuffers: re-point their pooled color attachments only. Their depth belongs to Distant
+		// Horizons (not Minecraft), so we use the color-only refresh and then ask DH to re-bind its own
+		// depth next frame (reconnectDHTextures) — otherwise the swapped pooled textures would leave DH
+		// drawing into stale color buffers and against the wrong depth.
+		if (!dhFramebuffers.isEmpty()) {
+			for (GbufferFramebufferBinding binding : dhFramebuffers) {
+				renderTargets.refreshDHFramebuffer(binding.framebuffer(), binding.stageWritesToAlt(), binding.drawBuffers());
+			}
+			if (dhCompat != null) {
+				dhCompat.markDepthAttachmentDirty();
+			}
 		}
 	}
 
@@ -2027,7 +2056,7 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		ImmutableSet<Integer> flipped = trans ? flippedAfterTranslucent : flippedAfterPrepare;
 		int[] drawBuffers = sources.getDirectives().getDrawBuffers();
 		GlFramebuffer framebuffer = renderTargets.createDHFramebuffer(flipped, drawBuffers);
-		trackGbufferFramebuffer(framebuffer, flipped, drawBuffers);
+		trackDHFramebuffer(framebuffer, flipped, drawBuffers);
 		return framebuffer;
 	}
 

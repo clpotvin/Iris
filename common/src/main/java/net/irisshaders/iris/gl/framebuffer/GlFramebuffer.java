@@ -16,6 +16,11 @@ public class GlFramebuffer extends GlResource {
 	private final int maxDrawBuffers;
 	private final int maxColorAttachments;
 	private boolean hasDepthAttachment;
+	// True only when the depth attachment is an Iris-managed texture (i.e. attached via
+	// addDepthAttachment). Framebuffers whose depth is owned externally (Distant Horizons attaches
+	// its own depth texture via addDepthAttachmentBypass) must NOT have Minecraft's depth re-attached
+	// to them on resize/refresh, or DH renders against the wrong depth buffer.
+	private boolean irisManagedDepthAttachment;
 
 	public GlFramebuffer() {
 		super(IrisRenderSystem.createFramebuffer());
@@ -24,6 +29,7 @@ public class GlFramebuffer extends GlResource {
 		this.maxDrawBuffers = GlStateManager._getInteger(GL30C.GL_MAX_DRAW_BUFFERS);
 		this.maxColorAttachments = GlStateManager._getInteger(GL30C.GL_MAX_COLOR_ATTACHMENTS);
 		this.hasDepthAttachment = false;
+		this.irisManagedDepthAttachment = false;
 	}
 
 	public void addDepthAttachment(GpuTexture texture) {
@@ -37,6 +43,7 @@ public class GlFramebuffer extends GlResource {
 		//}
 
 		this.hasDepthAttachment = true;
+		this.irisManagedDepthAttachment = true;
 	}
 
 	public void addDepthAttachmentBypass(int texture) {
@@ -45,6 +52,8 @@ public class GlFramebuffer extends GlResource {
 		IrisRenderSystem.framebufferTexture2D(fb, GL30C.GL_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT, GL30C.GL_TEXTURE_2D, texture, 0);
 
 		this.hasDepthAttachment = true;
+		// Externally-owned depth (e.g. Distant Horizons' own depth texture); not Iris-managed.
+		this.irisManagedDepthAttachment = false;
 	}
 
 	public void addColorAttachment(int index, int texture) {
@@ -87,6 +96,16 @@ public class GlFramebuffer extends GlResource {
 
 	public boolean hasDepthAttachment() {
 		return hasDepthAttachment;
+	}
+
+	/**
+	 * True only when this framebuffer's depth attachment is an Iris-managed texture (attached via
+	 * {@link #addDepthAttachment(GpuTexture)}). Returns false for framebuffers whose depth is owned
+	 * externally (attached via {@link #addDepthAttachmentBypass(int)}, e.g. Distant Horizons), so
+	 * callers re-attaching Minecraft's depth on resize can skip them.
+	 */
+	public boolean hasIrisManagedDepthAttachment() {
+		return hasDepthAttachment && irisManagedDepthAttachment;
 	}
 
 	public void bind() {

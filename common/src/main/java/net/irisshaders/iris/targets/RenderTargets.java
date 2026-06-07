@@ -330,7 +330,10 @@ public class RenderTargets {
 			// based on what I've seen of the spec, though - it seems like deleting a texture
 			// automatically detaches it from its framebuffers.
 			for (GlFramebuffer framebuffer : ownedFramebuffers) {
-				if (framebuffer.hasDepthAttachment()) {
+				// Only re-attach Minecraft's depth to framebuffers whose depth WE manage. Distant
+				// Horizons framebuffers own their depth (attached via addDepthAttachmentBypass) and
+				// must not be clobbered here, or DH renders/writes against Minecraft's depth buffer.
+				if (framebuffer.hasIrisManagedDepthAttachment()) {
 					framebuffer.addDepthAttachment(newDepthTextureId);
 				}
 			}
@@ -491,12 +494,39 @@ public class RenderTargets {
 
 	public GlFramebuffer createDHFramebuffer(ImmutableSet<Integer> stageWritesToAlt, int[] drawBuffers) {
 		if (drawBuffers.length == 0) {
-			return createEmptyFramebuffer();
+			return createDHEmptyFramebuffer();
 		}
 
 		ImmutableSet<Integer> stageWritesToMain = invert(stageWritesToAlt, drawBuffers);
 
 		return createColorFramebuffer(stageWritesToMain, drawBuffers);
+	}
+
+	// Distant Horizons framebuffers must never receive Minecraft's depth texture: DH owns its depth
+	// attachment and binds it out-of-band (GlFramebuffer.addDepthAttachmentBypass). createEmptyFramebuffer
+	// attaches the main depth, which would clobber DH's depth, so DH needs its own color-only empty FB.
+	private GlFramebuffer createDHEmptyFramebuffer() {
+		GlFramebuffer framebuffer = new GlFramebuffer();
+		ownedFramebuffers.add(framebuffer);
+
+		// NB: Before OpenGL 3.0, all framebuffers are required to have a color attachment no matter what.
+		framebuffer.addColorAttachment(0, getOrCreate(0).getMainTexture());
+		framebuffer.noDrawBuffers();
+
+		return framebuffer;
+	}
+
+	// Color-only refresh for Distant Horizons framebuffers after the pooled color targets are swapped on
+	// resize. Deliberately does NOT touch the depth attachment (unlike refreshGbufferFramebuffer) — DH
+	// re-binds its own depth each frame in DHCompatInternal.reconnectDHTextures.
+	public void refreshDHFramebuffer(GlFramebuffer framebuffer, ImmutableSet<Integer> stageWritesToAlt, int[] drawBuffers) {
+		if (drawBuffers.length == 0) {
+			framebuffer.addColorAttachment(0, getOrCreate(0).getMainTexture());
+			framebuffer.noDrawBuffers();
+			return;
+		}
+
+		refreshColorFramebuffer(framebuffer, stageWritesToAlt, drawBuffers);
 	}
 
 
