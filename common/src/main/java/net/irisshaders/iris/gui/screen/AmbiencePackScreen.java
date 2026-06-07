@@ -254,7 +254,7 @@ public class AmbiencePackScreen extends Screen {
 	private void updateButtons() {
 		AmbienceDependencyStatus dependencyStatus = packs.isEmpty() ? null : manager.dependencyStatus(selected().pack());
 		if (installButton != null) {
-			installButton.active = dependencyStatus != null && dependencyStatus.hasInstallableMissing();
+			installButton.active = dependencyStatus != null && dependencyStatus.hasMissing();
 		}
 		if (warmButton != null) {
 			warmButton.active = dependencyStatus != null && !dependencyStatus.hasMissing() && !AmbienceRuntime.isWarmupRunning();
@@ -450,6 +450,25 @@ public class AmbiencePackScreen extends Screen {
 		}
 	}
 
+	private void saveLinkedDependencyAndInstall(String oldDependencyId, AmbienceDependency linked) {
+		try {
+			this.minecraft.setScreen(this);
+			manager.replaceDependency(selected().pack().id, oldDependencyId, linked);
+			status = Component.translatable("options.iris.wynncraftAmbienceDependencyLinked", firstLocalName(linked)).withStyle(ChatFormatting.YELLOW);
+			manager.reload();
+			refreshPacks();
+			if (ambiencePackList != null) {
+				ambiencePackList.refresh(packs);
+				ambiencePackList.selectPackId(IrisVideoSettings.wynncraftSelectedAmbiencePack);
+			}
+			installMissing();
+		} catch (IOException e) {
+			Iris.logger.warn("Failed to save linked ambience dependency", e);
+			status = Component.literal(e.getMessage() == null ? "Dependency link failed" : e.getMessage()).withStyle(ChatFormatting.RED);
+			updateButtons();
+		}
+	}
+
 	private String firstLocalName(AmbienceDependency dependency) {
 		if (dependency != null && dependency.localNames != null) {
 			for (String localName : dependency.localNames) {
@@ -476,9 +495,22 @@ public class AmbiencePackScreen extends Screen {
 		if (packs.isEmpty()) {
 			return;
 		}
+		AmbiencePack pack = selected().pack();
+		AmbienceDependencyStatus dependencyStatus = manager.dependencyStatus(pack);
+		if (!dependencyStatus.hasMissing()) {
+			status = Component.translatable("options.iris.wynncraftAmbienceInstalled");
+			updateButtons();
+			maybeOpenAutoWarmScreen();
+			return;
+		}
+		for (AmbienceDependency dependency : dependencyStatus.missing()) {
+			if (!isModrinthDependency(dependency)) {
+				offerDependencyLinkBeforeInstall(dependency);
+				return;
+			}
+		}
 		installButton.active = false;
 		status = Component.translatable("options.iris.wynncraftAmbienceInstalling");
-		AmbiencePack pack = selected().pack();
 		CompletableFuture.runAsync(() -> {
 			try {
 				new AmbienceDependencyResolver().installMissing(pack);
@@ -495,6 +527,67 @@ public class AmbiencePackScreen extends Screen {
 				Iris.logger.warn("Failed to install ambience dependencies", e);
 				Minecraft.getInstance().execute(() -> {
 					status = Component.literal(e.getMessage() == null ? "Install failed" : e.getMessage()).withStyle(ChatFormatting.RED);
+					updateButtons();
+				});
+			}
+		});
+	}
+
+	private boolean isModrinthDependency(AmbienceDependency dependency) {
+		return dependency != null && "modrinth".equalsIgnoreCase(dependency.type);
+	}
+
+	private void offerDependencyLinkBeforeInstall(AmbienceDependency dependency) {
+		String localName = firstLocalName(dependency);
+		this.minecraft.setScreen(new ConfirmScreen(confirmed -> {
+			this.minecraft.setScreen(this);
+			if (confirmed) {
+				linkDependencyBeforeInstall(dependency, localName);
+			} else {
+				status = Component.translatable("options.iris.wynncraftAmbienceDependencyManualRequired", localName).withStyle(ChatFormatting.YELLOW);
+				updateButtons();
+			}
+		}, Component.translatable("options.iris.wynncraftAmbienceInstallLinkTitle"),
+			Component.translatable("options.iris.wynncraftAmbienceInstallLinkMessage", localName),
+			Component.translatable("options.iris.wynncraftAmbienceInstallLink"),
+			CommonComponents.GUI_CANCEL));
+	}
+
+	private void linkDependencyBeforeInstall(AmbienceDependency dependency, String localName) {
+		status = Component.translatable("options.iris.wynncraftAmbienceDependencyResolving", localName).withStyle(ChatFormatting.GRAY);
+		CompletableFuture.runAsync(() -> {
+			AmbienceDependencyResolver resolver = new AmbienceDependencyResolver();
+			try {
+				Path shaderPackPath = Iris.getShaderpacksDirectory().resolve(localName);
+				Optional<AmbienceDependencyCandidate> exact = Files.isRegularFile(shaderPackPath)
+					? resolver.findExactDependency(shaderPackPath, localName)
+					: Optional.empty();
+				if (exact.isPresent()) {
+					AmbienceDependency linked = resolver.dependencyFromCandidate(exact.get());
+					Minecraft.getInstance().execute(() -> saveLinkedDependencyAndInstall(dependency.id, linked));
+					return;
+				}
+				List<AmbienceDependencyCandidate> candidates = resolver.searchDependencies(localName, localName);
+				Minecraft.getInstance().execute(() -> {
+					if (candidates.isEmpty()) {
+						status = Component.translatable("options.iris.wynncraftAmbienceDependencyNoInstallMatches", localName).withStyle(ChatFormatting.YELLOW);
+						updateButtons();
+						return;
+					}
+					this.minecraft.setScreen(new AmbienceDependencySelectionScreen(this, localName, candidates, chosen -> {
+						this.minecraft.setScreen(this);
+						if (isModrinthDependency(chosen)) {
+							saveLinkedDependencyAndInstall(dependency.id, chosen);
+						} else {
+							status = Component.translatable("options.iris.wynncraftAmbienceDependencyManualRequired", localName).withStyle(ChatFormatting.YELLOW);
+							updateButtons();
+						}
+					}));
+				});
+			} catch (Exception e) {
+				Iris.logger.warn("Failed to link ambience dependency before install", e);
+				Minecraft.getInstance().execute(() -> {
+					status = Component.literal(e.getMessage() == null ? "Dependency search failed" : e.getMessage()).withStyle(ChatFormatting.RED);
 					updateButtons();
 				});
 			}

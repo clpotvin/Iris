@@ -96,6 +96,9 @@ public class AmbienceDependencySelectionScreen extends Screen {
 
 	private void select(int index) {
 		selectedIndex = Math.max(0, Math.min(index, candidates.size() - 1));
+		if (candidateList != null && !candidates.isEmpty()) {
+			candidateList.select(selectedIndex);
+		}
 		updateButtons();
 	}
 
@@ -126,7 +129,7 @@ public class AmbienceDependencySelectionScreen extends Screen {
 
 	private class CandidateList extends IrisObjectSelectionList<CandidateEntry> {
 		CandidateList(Minecraft client, int width, int height, int top, int bottom, int left, int right) {
-			super(client, width, bottom, top + 4, bottom, left, right, 36);
+			super(client, width, bottom, top + 4, bottom, left, right, 20);
 			for (int i = 0; i < candidates.size(); i++) {
 				addEntry(new CandidateEntry(i));
 			}
@@ -156,7 +159,12 @@ public class AmbienceDependencySelectionScreen extends Screen {
 
 		@Override
 		public int getRowWidth() {
-			return Math.min(420, width - 50);
+			return Math.min(308, width - 50);
+		}
+
+		@Override
+		protected void renderSelection(GuiGraphics guiGraphics, CandidateEntry entry, int color) {
+			// CandidateEntry draws the selected-row button frame itself.
 		}
 	}
 
@@ -178,25 +186,21 @@ public class AmbienceDependencySelectionScreen extends Screen {
 			int x = getContentX();
 			int y = getContentY();
 			int width = getContentWidth();
-			this.bounds = new ScreenRectangle(x, y, width, getContentHeight());
+			int height = getContentHeight();
+			this.bounds = new ScreenRectangle(x, y, width, height);
 			boolean selected = index == selectedIndex;
 			if (isHovered || selected) {
 				GuiUtil.bindIrisWidgetsTexture();
-				GuiUtil.drawButton(guiGraphics, x - 2, y - 2, width + 4, getContentHeight() + 4, isHovered, false);
+				GuiUtil.drawButton(guiGraphics, x - 2, y - 2, width + 4, height + 4, isHovered, false);
 			}
 
 			Font font = Minecraft.getInstance().font;
 			AmbienceDependencyCandidate candidate = candidates.get(index);
 			Component title = Component.literal(candidate.displayName()).withStyle(selected ? ChatFormatting.YELLOW : ChatFormatting.WHITE);
-			Component subtitle = Component.literal(candidate.description == null ? "" : candidate.description).withStyle(ChatFormatting.GRAY);
 			if (font.width(title) > width - 8) {
 				title = Component.literal(font.plainSubstrByWidth(title.getString(), width - 20) + "...").setStyle(title.getStyle());
 			}
-			if (font.width(subtitle) > width - 8) {
-				subtitle = Component.literal(font.plainSubstrByWidth(subtitle.getString(), width - 20) + "...").setStyle(subtitle.getStyle());
-			}
-			guiGraphics.drawString(font, title, x + 4, y + 4, 0xFFFFFFFF);
-			guiGraphics.drawString(font, subtitle, x + 4, y + 18, 0xFFAAAAAA);
+			guiGraphics.drawCenteredString(font, title, (x + width / 2) - 2, y + (height - 11) / 2, 0xFFFFFFFF);
 		}
 
 		@Override

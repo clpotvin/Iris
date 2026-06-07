@@ -328,6 +328,10 @@ public final class AmbiencePackManager {
 		if (override.defaultProfile != null && !override.defaultProfile.isBlank()) {
 			pack.defaultProfile = override.defaultProfile;
 		}
+		if (override.deletedDependencies != null && !override.deletedDependencies.isEmpty()) {
+			Set<String> deletedDependencies = new LinkedHashSet<>(override.deletedDependencies);
+			pack.dependencies.removeIf(dependency -> dependency != null && deletedDependencies.contains(dependency.id));
+		}
 		if (override.dependencies != null && !override.dependencies.isEmpty()) {
 			Map<String, AmbienceDependency> dependencies = pack.dependenciesById();
 			for (AmbienceDependency dependency : override.dependencies) {
@@ -837,7 +841,8 @@ public final class AmbiencePackManager {
 		if (loaded.pack().dependencies == null) {
 			loaded.pack().dependencies = new ArrayList<>();
 		}
-		if (!oldId.isBlank() && !oldId.equals(replacement.id)) {
+		boolean dependencyIdChanged = !oldId.isBlank() && !oldId.equals(replacement.id);
+		if (dependencyIdChanged) {
 			loaded.pack().dependencies.removeIf(dependency -> dependency != null && oldId.equals(dependency.id));
 		}
 		mergeDependency(loaded.pack(), replacement);
@@ -850,7 +855,7 @@ public final class AmbiencePackManager {
 				writeProfile(loaded, profile.id);
 			}
 		}
-		writeManifest(loaded);
+		writeManifest(loaded, dependencyIdChanged ? List.of(oldId) : List.of());
 		lastLoadMillis = System.currentTimeMillis();
 	}
 
@@ -966,12 +971,30 @@ public final class AmbiencePackManager {
 	}
 
 	private void writeManifest(LoadedAmbiencePack loaded) throws IOException {
+		writeManifest(loaded, List.of());
+	}
+
+	private void writeManifest(LoadedAmbiencePack loaded, Collection<String> deletedDependencyIds) throws IOException {
 		PackStorage storage = loaded.storage();
 		if (storage.kind() == PackSourceKind.LEGACY_JSON) {
 			writeJsonAtomic(storage.sourcePath(), loaded.pack());
 			return;
 		}
-		writeJsonAtomic(storage.manifestWritePath(), AmbiencePackManifest.fromPack(loaded.pack()));
+		AmbiencePackManifest manifest = AmbiencePackManifest.fromPack(loaded.pack());
+		if (storage.kind() == PackSourceKind.ZIP) {
+			Set<String> deletedDependencies = new LinkedHashSet<>();
+			AmbiencePackManifest existing = readOptionalJson(storage.manifestWritePath(), AmbiencePackManifest.class, null);
+			if (existing != null && existing.deletedDependencies != null) {
+				deletedDependencies.addAll(existing.deletedDependencies);
+			}
+			if (deletedDependencyIds != null) {
+				deletedDependencies.addAll(deletedDependencyIds.stream()
+					.filter(id -> id != null && !id.isBlank())
+					.toList());
+			}
+			manifest.deletedDependencies = new ArrayList<>(deletedDependencies);
+		}
+		writeJsonAtomic(storage.manifestWritePath(), manifest);
 	}
 
 	private void writeAll(LoadedAmbiencePack loaded) throws IOException {

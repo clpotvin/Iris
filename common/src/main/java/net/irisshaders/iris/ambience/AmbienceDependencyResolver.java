@@ -21,15 +21,24 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 public class AmbienceDependencyResolver {
 	private static final Gson GSON = new Gson();
 	private static final String API = "https://api.modrinth.com/v2";
 	private static final String USER_AGENT = "WynnIris/" + Iris.getVersionSimple() + " (https://github.com/clptvn/WynnIris)";
+	private static final Pattern ZIP_EXTENSION = Pattern.compile("(?i)\\.zip$");
+	private static final Pattern VERSION_TOKEN = Pattern.compile("(?i)(?:^|[\\s_+.-]+)[vr]?\\d+(?:\\.\\d+)+(?:[a-z]+)?(?=$|[\\s_+.-]+|\\))");
+	private static final Pattern CAMEL_BOUNDARY = Pattern.compile("(?<=[\\p{Ll}\\d])(?=\\p{Lu})|(?<=[\\p{Lu}])(?=\\p{Lu}\\p{Ll})");
+	private static final Pattern WORD_SEPARATOR = Pattern.compile("[\\s_+.-]+");
+	private static final int SEARCH_LIMIT_PER_QUERY = 8;
 
 	private final HttpClient httpClient = HttpClient.newBuilder()
 		.connectTimeout(Duration.ofSeconds(15))
@@ -110,30 +119,33 @@ public class AmbienceDependencyResolver {
 	}
 
 	public List<AmbienceDependencyCandidate> searchDependencies(String query, String localName) throws IOException, InterruptedException {
-		String cleaned = cleanSearchQuery(query);
-		if (cleaned.isBlank()) {
+		List<String> queries = searchQueries(query);
+		if (queries.isEmpty()) {
 			return List.of();
 		}
 		String facets = URLEncoder.encode("[[\"project_type:shader\"]]", StandardCharsets.UTF_8);
-		ModrinthSearchResults results = getOptional("/search?query=" + urlEncode(cleaned) + "&facets=" + facets + "&limit=8", ModrinthSearchResults.class);
-		if (results == null || results.hits == null || results.hits.length == 0) {
-			return List.of();
-		}
-
-		List<AmbienceDependencyCandidate> candidates = new ArrayList<>();
-		for (ModrinthSearchHit hit : results.hits) {
-			if (hit == null || hit.project_id == null || hit.project_id.isBlank()) {
+		Map<String, AmbienceDependencyCandidate> candidates = new LinkedHashMap<>();
+		for (String cleaned : queries) {
+			ModrinthSearchResults results = getOptional("/search?query=" + urlEncode(cleaned) + "&facets=" + facets + "&limit=" + SEARCH_LIMIT_PER_QUERY, ModrinthSearchResults.class);
+			if (results == null || results.hits == null || results.hits.length == 0) {
 				continue;
 			}
-			AmbienceDependencyCandidate candidate = new AmbienceDependencyCandidate();
-			candidate.id = hit.slug == null || hit.slug.isBlank() ? hit.project_id : hit.slug;
-			candidate.title = hit.title == null || hit.title.isBlank() ? candidate.id : hit.title;
-			candidate.description = hit.description == null ? "" : hit.description;
-			candidate.projectId = hit.project_id;
-			candidate.localName = localName;
-			candidates.add(candidate);
+			for (ModrinthSearchHit hit : results.hits) {
+				if (hit == null || hit.project_id == null || hit.project_id.isBlank()) {
+					continue;
+				}
+				candidates.computeIfAbsent(hit.project_id, ignored -> {
+					AmbienceDependencyCandidate candidate = new AmbienceDependencyCandidate();
+					candidate.id = hit.slug == null || hit.slug.isBlank() ? hit.project_id : hit.slug;
+					candidate.title = hit.title == null || hit.title.isBlank() ? candidate.id : hit.title;
+					candidate.description = hit.description == null ? "" : hit.description;
+					candidate.projectId = hit.project_id;
+					candidate.localName = localName;
+					return candidate;
+				});
+			}
 		}
-		return candidates;
+		return new ArrayList<>(candidates.values());
 	}
 
 	public AmbienceDependency dependencyFromCandidate(AmbienceDependencyCandidate candidate) {
@@ -160,12 +172,86 @@ public class AmbienceDependencyResolver {
 	}
 
 	public static String cleanSearchQuery(String value) {
+		List<String> queries = searchQueries(value);
+		return queries.isEmpty() ? "" : queries.getFirst();
+	}
+
+	public static List<String> searchQueries(String value) {
+		if (value == null) {
+			return List.of();
+		}
+
+		String stripped = stripVersionTokens(stripExtension(value));
+		String trimmed = trimBracketedSuffix(stripped);
+		Set<String> queries = new LinkedHashSet<>();
+		if (hasCamelBoundary(trimmed)) {
+			addQueryVariant(queries, insertCamelSpaces(trimmed));
+			addQueryVariant(queries, trimmed);
+		} else if (hasWordSeparator(trimmed)) {
+			addQueryVariant(queries, trimmed);
+			addQueryVariant(queries, insertCamelSpaces(trimmed));
+		} else {
+			addQueryVariant(queries, insertCamelSpaces(trimmed));
+			addQueryVariant(queries, trimmed);
+		}
+		addQueryVariant(queries, compactSeparators(trimmed));
+
+		return new ArrayList<>(queries);
+	}
+
+	private static String stripExtension(String value) {
+		return ZIP_EXTENSION.matcher(value).replaceFirst("");
+	}
+
+	private static String stripVersionTokens(String value) {
+		return VERSION_TOKEN.matcher(value).replaceAll(" ").trim();
+	}
+
+	private static String insertCamelSpaces(String value) {
+		return CAMEL_BOUNDARY.matcher(value).replaceAll(" ");
+	}
+
+	private static String trimBracketedSuffix(String value) {
+		int firstBracket = firstPositiveIndex(value.indexOf('('), value.indexOf('['));
+		return firstBracket < 0 ? value : value.substring(0, firstBracket);
+	}
+
+	private static int firstPositiveIndex(int first, int second) {
+		if (first < 0) {
+			return second;
+		}
+		if (second < 0) {
+			return first;
+		}
+		return Math.min(first, second);
+	}
+
+	private static String compactSeparators(String value) {
+		return value
+			.replaceAll("[\\s_+.-]+", "")
+			.trim();
+	}
+
+	private static boolean hasWordSeparator(String value) {
+		return value != null && WORD_SEPARATOR.matcher(value).find();
+	}
+
+	private static boolean hasCamelBoundary(String value) {
+		return value != null && CAMEL_BOUNDARY.matcher(value).find();
+	}
+
+	private static void addQueryVariant(Set<String> queries, String value) {
+		String normalized = normalizeQuery(value);
+		if (!normalized.isBlank()) {
+			queries.add(normalized);
+		}
+	}
+
+	private static String normalizeQuery(String value) {
 		if (value == null) {
 			return "";
 		}
 		return value
-			.replaceAll("(?i)\\.zip$", "")
-			.replaceAll("(?i)[_-]?r?\\d+(\\.\\d+)*([a-z])?", " ")
 			.replaceAll("[_+.-]+", " ")
 			.replaceAll("\\s+", " ")
 			.trim();

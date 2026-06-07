@@ -11,6 +11,7 @@ public class AmbiencePackManifest {
 	public List<String> authors = new ArrayList<>();
 	public List<String> minecraftVersions = new ArrayList<>();
 	public List<AmbienceDependency> dependencies = new ArrayList<>();
+	public List<String> deletedDependencies = new ArrayList<>();
 	public String defaultProfile = "";
 
 	public static AmbiencePackManifest fromPack(AmbiencePack pack) {
@@ -22,6 +23,7 @@ public class AmbiencePackManifest {
 		manifest.authors = pack.authors == null ? new ArrayList<>() : new ArrayList<>(pack.authors);
 		manifest.minecraftVersions = pack.minecraftVersions == null ? new ArrayList<>() : new ArrayList<>(pack.minecraftVersions);
 		manifest.dependencies = pack.dependencies == null ? new ArrayList<>() : new ArrayList<>(pack.dependencies);
+		manifest.deletedDependencies = new ArrayList<>();
 		manifest.defaultProfile = pack.defaultProfile;
 		return manifest;
 	}
