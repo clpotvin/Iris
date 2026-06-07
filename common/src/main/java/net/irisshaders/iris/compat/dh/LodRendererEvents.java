@@ -44,6 +44,17 @@ public class LodRendererEvents {
 	private static int textureWidth;
 	private static int textureHeight;
 
+	// The DH overrides we actually have bound in DH's OverrideInjector right now. The ambience context
+	// cache keeps multiple DHCompatInternal instances alive at once (one per visited region profile);
+	// unbinding only the *current* instance's objects leaks the previously-active instance's overrides,
+	// and DH's OverrideInjector.bind then throws "An override already exists with the priority [10]" on
+	// the next frame. That throw aborts beforeSetup before the framebuffer override is bound, so DH LODs
+	// render to the wrong target (white, then smearing). Tracking the bound objects by reference lets us
+	// unbind them no matter which instance they came from.
+	private static IDhApiGenericObjectShaderProgram boundGenericShader;
+	private static IDhApiFramebuffer boundFramebuffer;
+	private static boolean boundShadowFrustum;
+
 
 	// constructor //
 
@@ -240,21 +251,25 @@ public class LodRendererEvents {
 			public void beforeSetup(DhApiEventParam<DhApiRenderParam> event) {
 				DHCompatInternal instance = getInstance();
 
-				OverrideInjector.INSTANCE.unbind(IDhApiShadowCullingFrustum.class, (IDhApiOverrideable) ShadowRenderer.FRUSTUM);
-				OverrideInjector.INSTANCE.unbind(IDhApiFramebuffer.class, instance.getShadowFBWrapper());
-				OverrideInjector.INSTANCE.unbind(IDhApiFramebuffer.class, instance.getSolidFBWrapper());
-				OverrideInjector.INSTANCE.unbind(IDhApiGenericObjectShaderProgram.class, instance.getGenericShader());
+				// Unbind whatever WE last bound (which may belong to a now-cached pipeline instance),
+				// not just the current instance's objects. Otherwise the previously-active instance's
+				// override leaks and the bind below throws "already exists with the priority [10]".
+				unbindActiveDhOverrides();
 
 				if (instance.shouldOverride) {
 					if (instance.getGenericShader() != null) {
 						OverrideInjector.INSTANCE.bind(IDhApiGenericObjectShaderProgram.class, instance.getGenericShader());
+						boundGenericShader = instance.getGenericShader();
 					}
 
 					if (ShadowRenderingState.areShadowsCurrentlyBeingRendered() && instance.shouldOverrideShadow) {
 						OverrideInjector.INSTANCE.bind(IDhApiFramebuffer.class, instance.getShadowFBWrapper());
+						boundFramebuffer = instance.getShadowFBWrapper();
 						OverrideInjector.INSTANCE.bind(IDhApiShadowCullingFrustum.class, (IDhApiOverrideable) ShadowRenderer.FRUSTUM);
+						boundShadowFrustum = true;
 					} else {
 						OverrideInjector.INSTANCE.bind(IDhApiFramebuffer.class, instance.getSolidFBWrapper());
+						boundFramebuffer = instance.getSolidFBWrapper();
 					}
 				}
 			}
@@ -365,16 +380,38 @@ public class LodRendererEvents {
 		DhApi.events.bind(DhApiBeforeRenderPassEvent.class, beforeCleanupEvent);
 	}
 
+	// Unbind every DH override we currently have registered, by reference, so a leftover override from a
+	// now-cached pipeline instance can't survive into the next bind (which DH rejects with an exception).
+	private static void unbindActiveDhOverrides() {
+		if (boundGenericShader != null) {
+			OverrideInjector.INSTANCE.unbind(IDhApiGenericObjectShaderProgram.class, boundGenericShader);
+			boundGenericShader = null;
+		}
+		if (boundFramebuffer != null) {
+			OverrideInjector.INSTANCE.unbind(IDhApiFramebuffer.class, boundFramebuffer);
+			boundFramebuffer = null;
+		}
+		if (boundShadowFrustum) {
+			OverrideInjector.INSTANCE.unbind(IDhApiShadowCullingFrustum.class, (IDhApiOverrideable) ShadowRenderer.FRUSTUM);
+			boundShadowFrustum = false;
+		}
+	}
+
 	private static void setupBeforeApplyShaderEvent() {
 		DhApiBeforeApplyShaderRenderEvent beforeApplyShaderEvent = new DhApiBeforeApplyShaderRenderEvent() {
 			@Override
 			public void beforeRender(DhApiCancelableEventParam<DhApiRenderParam> event) {
 				if (Iris.isPackInUseQuick()) {
-					DHCompatInternal instance = getInstance();
-
-					OverrideInjector.INSTANCE.unbind(IDhApiShadowCullingFrustum.class, (IDhApiOverrideable) ShadowRenderer.FRUSTUM);
-					OverrideInjector.INSTANCE.unbind(IDhApiFramebuffer.class, instance.getShadowFBWrapper());
-					OverrideInjector.INSTANCE.unbind(IDhApiFramebuffer.class, instance.getSolidFBWrapper());
+					// Release the framebuffer + shadow-frustum overrides after DH's render (original
+					// timing), unbinding the actually-bound objects so nothing leaks across instances.
+					if (boundFramebuffer != null) {
+						OverrideInjector.INSTANCE.unbind(IDhApiFramebuffer.class, boundFramebuffer);
+						boundFramebuffer = null;
+					}
+					if (boundShadowFrustum) {
+						OverrideInjector.INSTANCE.unbind(IDhApiShadowCullingFrustum.class, (IDhApiOverrideable) ShadowRenderer.FRUSTUM);
+						boundShadowFrustum = false;
+					}
 
 					event.cancelEvent();
 				}
