@@ -96,8 +96,9 @@ public class RenderTarget {
 		this.resize(textureScaleOverride.x, textureScaleOverride.y);
 	}
 
-	// Package private, call CompositeRenderTargets#resizeIfNeeded instead.
-	void resize(int width, int height) {
+	// Normally call CompositeRenderTargets#resizeIfNeeded instead. Public so the ambience render-target pool can
+	// resize a shared pooled target in place (preserving its GL texture ids) on a window resize.
+	public void resize(int width, int height) {
 		requireValid();
 
 		this.width = width;

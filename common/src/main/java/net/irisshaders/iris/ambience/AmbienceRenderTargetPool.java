@@ -43,11 +43,23 @@ public final class AmbienceRenderTargetPool {
 	public AcquiredRenderTarget acquireMainColorTarget(Allocation allocation, int index, int width, int height, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
 		requireOpen();
 		requireAllocation(allocation);
-		ColorTargetKey key = new ColorTargetKey(index, width, height, internalFormat, pixelFormat);
+		// Keyed by (index, format) WITHOUT size: a window resize must reuse the same physical target and resize it
+		// IN PLACE, keeping its GL texture ids stable. Consumers that cache those ids across frames -- framebuffer
+		// attachments, and especially Voxy's LOD draw-target ids -- then stay valid, exactly like a non-pooled
+		// RenderTarget. Putting size in the key instead made a resize allocate a NEW texture id, leaving Voxy bound
+		// to the dead one (white sky + terrain smear that even a profile switch couldn't recover).
+		ColorTargetKey key = new ColorTargetKey(index, internalFormat, pixelFormat);
 		Entry<RenderTarget> entry = mainColorTargets.get(key);
 		if (entry != null) {
+			RenderTarget physical = entry.value;
+			if (physical.getWidth() != width || physical.getHeight() != height) {
+				long newBytes = 2L * width * height * bytesPerPixel(internalFormat);
+				estimatedBytes += newBytes - entry.bytes;
+				entry.bytes = newBytes;
+				physical.resize(width, height);
+			}
 			hits++;
-			return new AcquiredRenderTarget(entry.value.sharedView(), allocation.retain(entry));
+			return new AcquiredRenderTarget(physical.sharedView(), allocation.retain(entry));
 		}
 
 		misses++;
@@ -482,7 +494,8 @@ public final class AmbienceRenderTargetPool {
 	private final class Entry<T> {
 		private final ResourceType type;
 		private final T value;
-		private final long bytes;
+		// Mutable: a pooled main-color target can be resized in place on a window resize, which changes its size.
+		private long bytes;
 		private final Runnable destroy;
 		private final Runnable remove;
 		private int references;
@@ -543,7 +556,7 @@ public final class AmbienceRenderTargetPool {
 		}
 	}
 
-	private record ColorTargetKey(int index, int width, int height, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
+	private record ColorTargetKey(int index, InternalTextureFormat internalFormat, PixelFormat pixelFormat) {
 	}
 
 	private record DepthCopiesKey(int width, int height, TextureFormat format) {

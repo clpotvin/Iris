@@ -1278,6 +1278,16 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (changed) {
 			if (ambiencePool != null) {
 				refreshPooledFramebufferAttachments();
+				// A pooled resize recreates the pooled render targets — including Photon's clear=false temporal
+				// cloud-history buffers (colortex 11/12), which come back uninitialized (→ white sky) — and it
+				// invalidates the previous-frame reprojection history (→ terrain smears as the camera moves). An
+				// ambience *switch* already runs this cleanup after swapping the pooled targets; a plain *resize*
+				// did not. Mirror it: reseed the cloud history next frame and reset the reprojection baseline.
+				if (wynncraftPhotonShaderPack) {
+					ambiencePhotonCloudHistoryReseedFrames = Math.max(ambiencePhotonCloudHistoryReseedFrames, 1);
+				}
+				CameraUniforms.resetPreviousCameraPositions();
+				MatrixUniforms.resetPreviousMatrices();
 			}
 			beginRenderer.recalculateSizes();
 			prepareRenderer.recalculateSizes();
