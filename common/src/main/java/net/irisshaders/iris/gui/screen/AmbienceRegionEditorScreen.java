@@ -38,7 +38,23 @@ public class AmbienceRegionEditorScreen extends Screen {
 	private static final int GAP = 8;
 	private static final int PROFILE_ROW_HEIGHT = 36;
 	private static final int MAX_HISTORY = 50;
-	private static final int MAX_FREEFORM_POINTS = 256;
+	// Vertex budget for a single freeform/polygon region. Runtime point-in-polygon (AmbienceRegion.Shape.containsPoint)
+	// is O(n) but bounding-box gated and runs at most once per client tick, so a few thousand points is negligible.
+	private static final int MAX_FREEFORM_POINTS = 1500;
+	// Freeform drag samples a new vertex roughly every this many *screen* pixels, so capture density tracks zoom
+	// instead of a fixed world distance (which over-samples zoomed out and under-samples zoomed in).
+	private static final double FREEFORM_CAPTURE_SPACING_PX = 2.0;
+	// Ramer-Douglas-Peucker tolerance, expressed in *screen* pixels at draw-time zoom and converted to world units.
+	// Tying it to what the user can actually see preserves the border detail they zoomed in to draw.
+	private static final double FREEFORM_SIMPLIFY_TOLERANCE_PX = 1.5;
+	// Polygon clicks within this many screen pixels of the previous vertex are treated as the same point.
+	private static final double POLYGON_MERGE_TOLERANCE_PX = 1.0;
+	// Clicking within this many screen pixels of the first vertex closes an in-progress freeform shape.
+	private static final double FREEFORM_CLOSE_RADIUS_PX = 12.0;
+	// Outline segments whose WCAG contrast against the map pixels behind them falls below this get a dark casing,
+	// so light/bluish lines stay readable over snow and other light terrain.
+	private static final double LINE_CASING_MIN_CONTRAST = 3.0;
+	private static final int LINE_CASING_COLOR = 0xFF000000;
 	private static final Component EDIT_TITLE = Component.translatable("pack.iris.ambience.region.editor.title").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC);
 
 	private final Screen parent;
@@ -53,6 +69,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 	private List<AmbienceRegion> regions = new ArrayList<>();
 	private AmbienceMapTileLoader mapTiles;
 	private Tool tool = Tool.FREEFORM;
+	private int selectedRegionIndex = -1;
 	private String selectedProfileId = "";
 	private Component status = Component.empty();
 	private double sidebarScroll;
@@ -97,7 +114,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 	private void layoutButtons() {
 		toolButtons.clear();
 		MapViewport viewport = viewport();
-		int buttonCount = 8;
+		int buttonCount = 9;
 		int spacing = 4;
 		int buttonWidth = Math.max(46, Math.min(74, (viewport.width - spacing * (buttonCount - 1)) / buttonCount));
 		int totalWidth = buttonWidth * buttonCount + spacing * (buttonCount - 1);
@@ -109,6 +126,8 @@ public class AmbienceRegionEditorScreen extends Screen {
 		addToolButton(Component.translatable("options.iris.wynncraftAmbienceRegionToolPolygon"), Tool.POLYGON, x, y, buttonWidth);
 		x += buttonWidth + spacing;
 		addToolButton(Component.translatable("options.iris.wynncraftAmbienceRegionToolBox"), Tool.BOX, x, y, buttonWidth);
+		x += buttonWidth + spacing;
+		addToolButton(Component.translatable("options.iris.wynncraftAmbienceRegionToolPriority"), Tool.PRIORITY, x, y, buttonWidth);
 		x += buttonWidth + spacing;
 		undoButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.undo"), button -> undo(), buttonTransition)
 			.bounds(x, y, buttonWidth, 20)
@@ -182,9 +201,10 @@ public class AmbienceRegionEditorScreen extends Screen {
 			MapViewport viewport = viewport();
 			AmbienceRegion.Point point = viewport.toWorld(mouseX, mouseY);
 			return switch (tool) {
-				case FREEFORM -> beginFreeform(point);
+				case FREEFORM -> freeformPress(point, mouseX, mouseY);
 				case POLYGON -> addPolygonPoint(point, mouseX, mouseY);
 				case BOX -> beginBox(point);
+				case PRIORITY -> adjustPriorityAt(mouseX, mouseY);
 				case ERASE -> eraseAt(mouseX, mouseY);
 			};
 		}
@@ -230,11 +250,11 @@ public class AmbienceRegionEditorScreen extends Screen {
 			return true;
 		}
 		if (event.button() == GLFW.GLFW_MOUSE_BUTTON_1 && drawing) {
-			if (tool == Tool.FREEFORM) {
-				finishFreeform(event.x(), event.y());
-			} else if (tool == Tool.BOX) {
+			if (tool == Tool.BOX) {
 				finishBox();
 			}
+			// Releasing only ends the current freeform stroke; the path persists so the next press appends to it
+			// (with a straight connector). The shape is only committed when the user closes or presses Enter.
 			drawing = false;
 			return true;
 		}
@@ -250,7 +270,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 		if (mapAreaContains(mouseX, mouseY)) {
 			MapViewport oldViewport = viewport();
 			AmbienceRegion.Point anchoredPoint = oldViewport.toWorld(mouseX, mouseY);
-			zoom = clamp(zoom * (scrollY > 0 ? 1.15 : 1.0 / 1.15), 1.0, 8.0);
+			zoom = clamp(zoom * (scrollY > 0 ? 1.15 : 1.0 / 1.15), 1.0, 12.0);
 			MapViewport newViewport = viewport();
 			panX += mouseX - newViewport.screenX(anchoredPoint.x);
 			panY += mouseY - newViewport.screenY(anchoredPoint.z);
@@ -264,6 +284,22 @@ public class AmbienceRegionEditorScreen extends Screen {
 		if (event.isEscape() && (!activePoints.isEmpty() || drawing)) {
 			clearActiveDrawing();
 			return true;
+		}
+		if ((event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER)
+			&& tool == Tool.FREEFORM && activePoints.size() >= 3) {
+			finishFreeform();
+			return true;
+		}
+		if (tool == Tool.PRIORITY && selectedRegionIndex >= 0 && selectedRegionIndex < regions.size()) {
+			int key = event.key();
+			if (key == GLFW.GLFW_KEY_UP || key == GLFW.GLFW_KEY_EQUAL || key == GLFW.GLFW_KEY_KP_ADD) {
+				changeRegionPriority(selectedRegionIndex, 1);
+				return true;
+			}
+			if (key == GLFW.GLFW_KEY_DOWN || key == GLFW.GLFW_KEY_MINUS || key == GLFW.GLFW_KEY_KP_SUBTRACT) {
+				changeRegionPriority(selectedRegionIndex, -1);
+				return true;
+			}
 		}
 		return super.keyPressed(event);
 	}
@@ -356,7 +392,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 		renderMapBackground(guiGraphics, viewport);
 		renderMapTiles(guiGraphics, viewport);
 		renderRegions(guiGraphics, viewport);
-		renderActiveDrawing(guiGraphics, viewport);
+		renderActiveDrawing(guiGraphics, viewport, mouseX, mouseY);
 		guiGraphics.disableScissor();
 		guiGraphics.drawString(font, mapStatus(), viewport.x + 6, viewport.y + viewport.height - 14, 0xFFFFFFFF);
 		if (mapAreaContains(mouseX, mouseY)) {
@@ -387,10 +423,15 @@ public class AmbienceRegionEditorScreen extends Screen {
 			if (!tile.ready()) {
 				continue;
 			}
+			// Snap every edge to the rounded screen position of its *shared* world boundary. Because neighbouring
+			// tiles meet at the same world coordinate (one tile's x2+1 is the next tile's x1), both round it to the
+			// identical pixel, so the mosaic has no 1px gaps (the dark background showing through as seams) or overlaps.
 			int x = (int) Math.round(viewport.screenX(tile.x1()));
 			int y = (int) Math.round(viewport.screenY(tile.z1()));
-			int width = Math.max(1, (int) Math.round((tile.x2() - tile.x1() + 1) * viewport.scale));
-			int height = Math.max(1, (int) Math.round((tile.z2() - tile.z1() + 1) * viewport.scale));
+			int x2 = (int) Math.round(viewport.screenX(tile.x2() + 1));
+			int y2 = (int) Math.round(viewport.screenY(tile.z2() + 1));
+			int width = Math.max(1, x2 - x);
+			int height = Math.max(1, y2 - y);
 			guiGraphics.blit(RenderPipelines.GUI_TEXTURED, tile.identifier(), x, y, 0, 0, width, height, tile.textureWidth(), tile.textureHeight(), tile.textureWidth(), tile.textureHeight());
 		}
 	}
@@ -404,19 +445,94 @@ public class AmbienceRegionEditorScreen extends Screen {
 			int color = selected ? 0xFFFFF263 : 0x8899C7FF;
 			drawRegion(guiGraphics, viewport, region, color, selected ? 2 : 1);
 		}
+		if (tool == Tool.PRIORITY) {
+			renderPriorityLabels(guiGraphics, viewport);
+		}
 	}
 
-	private void renderActiveDrawing(GuiGraphics guiGraphics, MapViewport viewport) {
-		if (tool == Tool.POLYGON && !activePoints.isEmpty()) {
-			drawPolyline(guiGraphics, viewport, activePoints, 0xFFFFFFFF, false, 2);
+	private void renderPriorityLabels(GuiGraphics guiGraphics, MapViewport viewport) {
+		for (int i = 0; i < regions.size(); i++) {
+			AmbienceRegion region = regions.get(i);
+			if (region == null || region.shape == null) {
+				continue;
+			}
+			double[] center = regionCenterWorld(region);
+			if (center == null) {
+				continue;
+			}
+			int sx = (int) Math.round(viewport.screenX(center[0]));
+			int sy = (int) Math.round(viewport.screenY(center[1]));
+			if (sx < viewport.x || sx > viewport.x + viewport.width || sy < viewport.y || sy > viewport.y + viewport.height) {
+				continue;
+			}
+			boolean isSelected = i == selectedRegionIndex;
+			if (isSelected) {
+				// Re-draw the region being adjusted with a distinct highlight so it is obvious which one will change.
+				drawRegion(guiGraphics, viewport, region, 0xFF63FF8A, 2);
+			}
+			Component label = Component.literal(Integer.toString(region.priority));
+			guiGraphics.drawString(font, label, sx - font.width(label) / 2, sy - 4, isSelected ? 0xFF63FF8A : 0xFFFFFFFF);
 		}
-		if (tool == Tool.FREEFORM && drawing && !activePoints.isEmpty()) {
-			drawPolyline(guiGraphics, viewport, activePoints, 0xFFFFFFFF, false, 2);
+	}
+
+	private double[] regionCenterWorld(AmbienceRegion region) {
+		AmbienceRegion.Shape shape = region.shape;
+		String type = shape.type == null ? "box" : shape.type.toLowerCase(Locale.ROOT);
+		if ("polygon".equals(type) && shape.points != null && !shape.points.isEmpty()) {
+			double sumX = 0.0;
+			double sumZ = 0.0;
+			int count = 0;
+			for (AmbienceRegion.Point point : shape.points) {
+				if (point != null) {
+					sumX += point.x;
+					sumZ += point.z;
+					count++;
+				}
+			}
+			return count == 0 ? null : new double[] {sumX / count, sumZ / count};
+		}
+		if ("sphere".equals(type) && shape.center != null && shape.center.length >= 2) {
+			return new double[] {shape.center[0], shape.center[1]};
+		}
+		if (shape.min != null && shape.max != null && shape.min.length >= 2 && shape.max.length >= 2) {
+			return new double[] {(shape.min[0] + shape.max[0]) * 0.5, (shape.min[1] + shape.max[1]) * 0.5};
+		}
+		return null;
+	}
+
+	private void renderActiveDrawing(GuiGraphics guiGraphics, MapViewport viewport, int mouseX, int mouseY) {
+		if (tool == Tool.POLYGON && !activePoints.isEmpty()) {
+			drawAdaptivePolyline(guiGraphics, viewport, activePoints, 0xFFFFFFFF, false, 2);
+		}
+		// Freeform now persists across strokes, so its path is drawn whenever it has points -- not only mid-drag.
+		if (tool == Tool.FREEFORM && !activePoints.isEmpty()) {
+			drawAdaptivePolyline(guiGraphics, viewport, activePoints, 0xFFFFFFFF, false, 2);
+			// Between strokes, preview the straight connector the next press will create, from the last vertex to
+			// the cursor, so the multi-stroke behaviour is visible.
+			if (!drawing && mapAreaContains(mouseX, mouseY)) {
+				AmbienceRegion.Point last = activePoints.get(activePoints.size() - 1);
+				AmbienceRegion.Point cursor = viewport.toWorld(mouseX, mouseY);
+				maybeDrawCasing(guiGraphics, viewport, last, cursor, 0x80FFFFFF, 1);
+				drawWorldLine(guiGraphics, viewport, last, cursor, 0x80FFFFFF, 1);
+			}
+			// Mark the start vertex once the shape can be closed, and highlight it when the cursor is in range.
+			if (activePoints.size() >= 3) {
+				boolean canClose = !drawing && nearFirstPoint(mouseX, mouseY);
+				drawVertexMarker(guiGraphics, viewport, activePoints.get(0), canClose ? 0xFF63FF8A : 0xFFFFF263, canClose);
+			}
 		}
 		if (tool == Tool.BOX && drawing && boxStart != null && boxEnd != null) {
 			List<AmbienceRegion.Point> points = boxPoints(boxStart, boxEnd);
-			drawPolyline(guiGraphics, viewport, points, 0xFFFFFFFF, true, 2);
+			drawAdaptivePolyline(guiGraphics, viewport, points, 0xFFFFFFFF, true, 2);
 		}
+	}
+
+	private void drawVertexMarker(GuiGraphics guiGraphics, MapViewport viewport, AmbienceRegion.Point point, int color, boolean large) {
+		int cx = (int) Math.round(viewport.screenX(point.x));
+		int cy = (int) Math.round(viewport.screenY(point.z));
+		int half = large ? 4 : 3;
+		guiGraphics.fill(RenderPipelines.GUI, cx - half, cy - half, cx + half, cy + half, color);
+		guiGraphics.fill(RenderPipelines.GUI, cx - half + 1, cy - half + 1, cx + half - 1, cy + half - 1, 0xFF1A1C22);
 	}
 
 	private void drawRegion(GuiGraphics guiGraphics, MapViewport viewport, AmbienceRegion region, int color, int thickness) {
@@ -425,15 +541,80 @@ public class AmbienceRegionEditorScreen extends Screen {
 		}
 		String shapeType = region.shape.type == null ? "box" : region.shape.type.toLowerCase(Locale.ROOT);
 		if ("polygon".equals(shapeType) && region.shape.points != null && region.shape.points.size() >= 3) {
-			drawPolyline(guiGraphics, viewport, region.shape.points, color, true, thickness);
+			drawAdaptivePolyline(guiGraphics, viewport, region.shape.points, color, true, thickness);
 		} else if ("sphere".equals(shapeType) && region.shape.center != null && region.shape.center.length >= 2 && region.shape.radius > 0) {
 			drawCircle(guiGraphics, viewport, region.shape.center[0], region.shape.center[1], region.shape.radius, color, thickness);
 		} else if (region.shape.min != null && region.shape.max != null && region.shape.min.length >= 2 && region.shape.max.length >= 2) {
-			drawPolyline(guiGraphics, viewport, boxPoints(
+			drawAdaptivePolyline(guiGraphics, viewport, boxPoints(
 				new AmbienceRegion.Point(region.shape.min[0], region.shape.min[1]),
 				new AmbienceRegion.Point(region.shape.max[0], region.shape.max[1])
 			), color, true, thickness);
 		}
+	}
+
+	// Draws a polyline with a dark casing under any segment whose colour would be hard to read against the map
+	// behind it. The casing is a separate pass so the dark underlay never covers the coloured line at vertices.
+	private void drawAdaptivePolyline(GuiGraphics guiGraphics, MapViewport viewport, List<AmbienceRegion.Point> points, int color, boolean closed, int thickness) {
+		if (points.size() < 2) {
+			return;
+		}
+		for (int i = 1; i < points.size(); i++) {
+			maybeDrawCasing(guiGraphics, viewport, points.get(i - 1), points.get(i), color, thickness);
+		}
+		if (closed) {
+			maybeDrawCasing(guiGraphics, viewport, points.get(points.size() - 1), points.get(0), color, thickness);
+		}
+		drawPolyline(guiGraphics, viewport, points, color, closed, thickness);
+	}
+
+	private void maybeDrawCasing(GuiGraphics guiGraphics, MapViewport viewport, AmbienceRegion.Point a, AmbienceRegion.Point b, int color, int thickness) {
+		if (segmentNeedsCasing(color, a, b)) {
+			drawWorldLine(guiGraphics, viewport, a, b, LINE_CASING_COLOR, thickness + 2);
+		}
+	}
+
+	// A segment is cased if the line (blended over the map by its own alpha) is too low-contrast against the map at
+	// any of its endpoints or midpoint -- the multi-point sample catches segments that straddle a terrain boundary.
+	private boolean segmentNeedsCasing(int color, AmbienceRegion.Point a, AmbienceRegion.Point b) {
+		if (mapTiles == null) {
+			return false;
+		}
+		return sampleLowContrast(color, a.x, a.z)
+			|| sampleLowContrast(color, (a.x + b.x) * 0.5, (a.z + b.z) * 0.5)
+			|| sampleLowContrast(color, b.x, b.z);
+	}
+
+	private boolean sampleLowContrast(int color, double worldX, double worldZ) {
+		int background = mapTiles.sampleArgb(worldX, worldZ);
+		if ((background >>> 24) == 0) {
+			return false; // no loaded map tile behind this point -> the dark editor background already provides contrast
+		}
+		return contrastRatio(blendOver(background, color), background) < LINE_CASING_MIN_CONTRAST;
+	}
+
+	private static int blendOver(int backgroundArgb, int lineArgb) {
+		double a = (lineArgb >>> 24) / 255.0;
+		int r = (int) Math.round(((backgroundArgb >> 16) & 0xFF) * (1.0 - a) + ((lineArgb >> 16) & 0xFF) * a);
+		int g = (int) Math.round(((backgroundArgb >> 8) & 0xFF) * (1.0 - a) + ((lineArgb >> 8) & 0xFF) * a);
+		int b = (int) Math.round((backgroundArgb & 0xFF) * (1.0 - a) + (lineArgb & 0xFF) * a);
+		return 0xFF000000 | (r << 16) | (g << 8) | b;
+	}
+
+	private static double contrastRatio(int argbA, int argbB) {
+		double la = relativeLuminance(argbA);
+		double lb = relativeLuminance(argbB);
+		return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+	}
+
+	private static double relativeLuminance(int argb) {
+		double r = srgbToLinear(((argb >> 16) & 0xFF) / 255.0);
+		double g = srgbToLinear(((argb >> 8) & 0xFF) / 255.0);
+		double b = srgbToLinear((argb & 0xFF) / 255.0);
+		return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+	}
+
+	private static double srgbToLinear(double channel) {
+		return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
 	}
 
 	private void drawPolyline(GuiGraphics guiGraphics, MapViewport viewport, List<AmbienceRegion.Point> points, int color, boolean closed, int thickness) {
@@ -449,15 +630,12 @@ public class AmbienceRegionEditorScreen extends Screen {
 	}
 
 	private void drawCircle(GuiGraphics guiGraphics, MapViewport viewport, double centerX, double centerZ, double radius, int color, int thickness) {
-		AmbienceRegion.Point previous = null;
-		for (int i = 0; i <= 48; i++) {
+		List<AmbienceRegion.Point> points = new ArrayList<>(48);
+		for (int i = 0; i < 48; i++) {
 			double angle = Math.PI * 2.0 * i / 48.0;
-			AmbienceRegion.Point point = new AmbienceRegion.Point(centerX + Math.cos(angle) * radius, centerZ + Math.sin(angle) * radius);
-			if (previous != null) {
-				drawWorldLine(guiGraphics, viewport, previous, point, color, thickness);
-			}
-			previous = point;
+			points.add(new AmbienceRegion.Point(centerX + Math.cos(angle) * radius, centerZ + Math.sin(angle) * radius));
 		}
+		drawAdaptivePolyline(guiGraphics, viewport, points, color, true, thickness);
 	}
 
 	private void drawWorldLine(GuiGraphics guiGraphics, MapViewport viewport, AmbienceRegion.Point start, AmbienceRegion.Point end, int color, int thickness) {
@@ -515,18 +693,21 @@ public class AmbienceRegionEditorScreen extends Screen {
 	}
 
 	private void drawLine(GuiGraphics guiGraphics, int x1, int y1, int x2, int y2, int color, int thickness) {
+		// Centre the stroke on the path (offset by half its width) so a thicker casing grows symmetrically around the
+		// line instead of extending entirely to one side.
+		int half = thickness / 2;
 		int dx = x2 - x1;
 		int dy = y2 - y1;
 		int steps = Math.max(Math.abs(dx), Math.abs(dy));
 		if (steps == 0) {
-			guiGraphics.fill(RenderPipelines.GUI, x1, y1, x1 + thickness, y1 + thickness, color);
+			guiGraphics.fill(RenderPipelines.GUI, x1 - half, y1 - half, x1 - half + thickness, y1 - half + thickness, color);
 			return;
 		}
 		for (int i = 0; i <= steps; i++) {
 			double t = (double) i / steps;
 			int x = (int) Math.round(x1 + dx * t);
 			int y = (int) Math.round(y1 + dy * t);
-			guiGraphics.fill(RenderPipelines.GUI, x, y, x + thickness, y + thickness, color);
+			guiGraphics.fill(RenderPipelines.GUI, x - half, y - half, x - half + thickness, y - half + thickness, color);
 		}
 	}
 
@@ -539,37 +720,55 @@ public class AmbienceRegionEditorScreen extends Screen {
 		return Component.translatable("options.iris.wynncraftAmbienceRegionMapStatus", toolName, mapStatus);
 	}
 
-	private boolean beginFreeform(AmbienceRegion.Point point) {
-		clearActiveDrawing();
+	private boolean freeformPress(AmbienceRegion.Point point, double mouseX, double mouseY) {
+		// Clicking the start vertex closes the shape, so a multi-stroke freeform never has to be finished by a drag.
+		if (activePoints.size() >= 3 && nearFirstPoint(mouseX, mouseY)) {
+			finishFreeform();
+			return true;
+		}
 		drawing = true;
-		activePoints.add(point);
+		if (activePoints.isEmpty()) {
+			// Fresh shape: lay down the first vertex.
+			activePoints.add(point);
+		} else {
+			// Continuing an existing shape: the previous stroke's end is already a vertex, so appending this point
+			// implicitly draws the straight connector to where the new stroke begins.
+			addFreeformPoint(point);
+		}
 		status = Component.translatable("options.iris.wynncraftAmbienceRegionDrawingFreeform");
 		return true;
 	}
 
+	private boolean nearFirstPoint(double mouseX, double mouseY) {
+		if (activePoints.isEmpty()) {
+			return false;
+		}
+		MapViewport viewport = viewport();
+		AmbienceRegion.Point first = activePoints.get(0);
+		double dx = mouseX - viewport.screenX(first.x);
+		double dy = mouseY - viewport.screenY(first.z);
+		return dx * dx + dy * dy <= FREEFORM_CLOSE_RADIUS_PX * FREEFORM_CLOSE_RADIUS_PX;
+	}
+
 	private void addFreeformPoint(AmbienceRegion.Point point) {
-		if (activePoints.isEmpty() || distanceSquared(activePoints.get(activePoints.size() - 1), point) >= 64.0) {
+		if (activePoints.isEmpty()) {
+			activePoints.add(point);
+			return;
+		}
+		double minWorld = FREEFORM_CAPTURE_SPACING_PX / Math.max(viewport().scale, 1.0e-4);
+		if (distanceSquared(activePoints.get(activePoints.size() - 1), point) >= minWorld * minWorld) {
 			activePoints.add(point);
 		}
 	}
 
-	private void finishFreeform(double mouseX, double mouseY) {
+	private void finishFreeform() {
+		// The stroke is closed automatically on release: requiring the user to drag all the way back to the start
+		// is impossible once they have panned away to keep tracing, so any sufficiently large stroke becomes a region.
 		if (activePoints.size() < 3) {
 			clearActiveDrawing();
 			return;
 		}
-		MapViewport viewport = viewport();
-		AmbienceRegion.Point first = activePoints.get(0);
-		double firstX = viewport.screenX(first.x);
-		double firstY = viewport.screenY(first.z);
-		double dx = mouseX - firstX;
-		double dy = mouseY - firstY;
-		if (dx * dx + dy * dy > 256.0) {
-			status = Component.translatable("options.iris.wynncraftAmbienceRegionCloseShape").withStyle(ChatFormatting.YELLOW);
-			clearActiveDrawing();
-			return;
-		}
-		addPolygonRegion(simplify(activePoints));
+		addPolygonRegion(simplifyFreeform(activePoints));
 		clearActiveDrawing();
 	}
 
@@ -580,7 +779,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 			double dx = mouseX - viewport.screenX(first.x);
 			double dy = mouseY - viewport.screenY(first.z);
 			if (dx * dx + dy * dy <= 144.0) {
-				addPolygonRegion(simplify(activePoints));
+				addPolygonRegion(simplifyPolygon(activePoints));
 				clearActiveDrawing();
 				return true;
 			}
@@ -653,6 +852,32 @@ public class AmbienceRegionEditorScreen extends Screen {
 		return true;
 	}
 
+	private boolean adjustPriorityAt(double mouseX, double mouseY) {
+		int index = findRegionNear(mouseX, mouseY);
+		if (index < 0) {
+			selectedRegionIndex = -1;
+			status = Component.translatable("options.iris.wynncraftAmbienceRegionPriorityHint");
+			return false;
+		}
+		selectedRegionIndex = index;
+		// Left-click raises priority (overrides more), Shift+click lowers it.
+		changeRegionPriority(index, Minecraft.getInstance().hasShiftDown() ? -1 : 1);
+		return true;
+	}
+
+	private void changeRegionPriority(int index, int delta) {
+		if (index < 0 || index >= regions.size()) {
+			return;
+		}
+		AmbienceRegion region = regions.get(index);
+		if (region == null) {
+			return;
+		}
+		pushUndo();
+		region.priority += delta;
+		status = Component.translatable("options.iris.wynncraftAmbienceRegionPrioritySet", region.priority);
+	}
+
 	private int findRegionNear(double mouseX, double mouseY) {
 		MapViewport viewport = viewport();
 		for (int i = regions.size() - 1; i >= 0; i--) {
@@ -721,8 +946,13 @@ public class AmbienceRegionEditorScreen extends Screen {
 
 	private void setTool(Tool tool) {
 		this.tool = tool;
+		selectedRegionIndex = -1;
 		clearActiveDrawing();
-		status = Component.translatable("options.iris.wynncraftAmbienceRegionSelectedTool", Component.translatable(tool.translationKey));
+		if (tool == Tool.PRIORITY) {
+			status = Component.translatable("options.iris.wynncraftAmbienceRegionPriorityHint");
+		} else {
+			status = Component.translatable("options.iris.wynncraftAmbienceRegionSelectedTool", Component.translatable(tool.translationKey));
+		}
 	}
 
 	private void clearActiveDrawing() {
@@ -852,26 +1082,61 @@ public class AmbienceRegionEditorScreen extends Screen {
 		return false;
 	}
 
-	private List<AmbienceRegion.Point> simplify(List<AmbienceRegion.Point> points) {
+	// Freeform paths are densely sampled, so simplify them with RDP -- but at a tolerance tied to the draw-time zoom
+	// (a fixed screen-space distance) rather than a fixed world distance, so fine borders survive when zoomed in.
+	private List<AmbienceRegion.Point> simplifyFreeform(List<AmbienceRegion.Point> points) {
 		List<AmbienceRegion.Point> copied = copyPoints(points);
 		if (copied.size() <= 3) {
 			return copied;
 		}
-		double epsilon = 24.0;
+		double scale = Math.max(viewport().scale, 1.0e-4);
+		double epsilon = FREEFORM_SIMPLIFY_TOLERANCE_PX / scale;
 		List<AmbienceRegion.Point> simplified = ramerDouglasPeucker(copied, epsilon);
-		while (simplified.size() > MAX_FREEFORM_POINTS && epsilon < 512.0) {
+		// Only coarsen past the chosen tolerance if we blow the budget, and do it by re-running RDP (which keeps the
+		// most significant corners) rather than blindly dropping every Nth point. With the budget raised this should
+		// be unreachable for normal hand-drawn regions.
+		int guard = 0;
+		while (simplified.size() > MAX_FREEFORM_POINTS && guard++ < 40) {
 			epsilon *= 1.5;
 			simplified = ramerDouglasPeucker(copied, epsilon);
 		}
 		if (simplified.size() > MAX_FREEFORM_POINTS) {
-			List<AmbienceRegion.Point> decimated = new ArrayList<>();
-			int stride = (int) Math.ceil((double) simplified.size() / MAX_FREEFORM_POINTS);
-			for (int i = 0; i < simplified.size(); i += stride) {
-				decimated.add(simplified.get(i));
-			}
-			simplified = decimated;
+			simplified = decimateByStride(simplified, MAX_FREEFORM_POINTS);
 		}
 		return simplified;
+	}
+
+	// Polygon vertices are placed one click at a time, so every vertex is intentional -- keep them all and only drop
+	// coincident clicks. No RDP here: simplifying hand-placed corners is exactly the detail loss we want to avoid.
+	private List<AmbienceRegion.Point> simplifyPolygon(List<AmbienceRegion.Point> points) {
+		List<AmbienceRegion.Point> copied = copyPoints(points);
+		if (copied.size() <= 3) {
+			return copied;
+		}
+		double mergeWorld = POLYGON_MERGE_TOLERANCE_PX / Math.max(viewport().scale, 1.0e-4);
+		double mergeSquared = mergeWorld * mergeWorld;
+		List<AmbienceRegion.Point> out = new ArrayList<>();
+		for (AmbienceRegion.Point point : copied) {
+			if (out.isEmpty() || distanceSquared(out.get(out.size() - 1), point) >= mergeSquared) {
+				out.add(point);
+			}
+		}
+		if (out.size() > MAX_FREEFORM_POINTS) {
+			out = decimateByStride(out, MAX_FREEFORM_POINTS);
+		}
+		return out;
+	}
+
+	private List<AmbienceRegion.Point> decimateByStride(List<AmbienceRegion.Point> points, int maxPoints) {
+		if (points.size() <= maxPoints) {
+			return points;
+		}
+		List<AmbienceRegion.Point> decimated = new ArrayList<>();
+		int stride = (int) Math.ceil((double) points.size() / maxPoints);
+		for (int i = 0; i < points.size(); i += stride) {
+			decimated.add(points.get(i));
+		}
+		return decimated;
 	}
 
 	private List<AmbienceRegion.Point> ramerDouglasPeucker(List<AmbienceRegion.Point> points, double epsilon) {
@@ -1029,6 +1294,7 @@ public class AmbienceRegionEditorScreen extends Screen {
 		FREEFORM("options.iris.wynncraftAmbienceRegionToolFreeform"),
 		POLYGON("options.iris.wynncraftAmbienceRegionToolPolygon"),
 		BOX("options.iris.wynncraftAmbienceRegionToolBox"),
+		PRIORITY("options.iris.wynncraftAmbienceRegionToolPriority"),
 		ERASE("options.iris.wynncraftAmbienceRegionToolErase");
 
 		private final String translationKey;

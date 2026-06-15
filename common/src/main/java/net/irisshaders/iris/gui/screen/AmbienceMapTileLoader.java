@@ -65,6 +65,28 @@ final class AmbienceMapTileLoader implements AutoCloseable {
 		return List.copyOf(tiles);
 	}
 
+	/**
+	 * Samples the map colour (ARGB) at a world coordinate for contrast decisions, or 0 if no loaded tile covers it.
+	 * Iterates from the topmost (last-drawn) tile so overlapping instance maps return the colour actually shown.
+	 */
+	int sampleArgb(double worldX, double worldZ) {
+		for (int i = tiles.size() - 1; i >= 0; i--) {
+			Tile tile = tiles.get(i);
+			NativeImage image = tile.image;
+			if (image == null || worldX < tile.part.x1 || worldX > tile.part.x2 || worldZ < tile.part.z1 || worldZ > tile.part.z2) {
+				continue;
+			}
+			double worldWidth = tile.part.x2 - tile.part.x1 + 1;
+			double worldHeight = tile.part.z2 - tile.part.z1 + 1;
+			int px = (int) ((worldX - tile.part.x1) / worldWidth * image.getWidth());
+			int py = (int) ((worldZ - tile.part.z1) / worldHeight * image.getHeight());
+			px = Math.max(0, Math.min(image.getWidth() - 1, px));
+			py = Math.max(0, Math.min(image.getHeight() - 1, py));
+			return image.getPixel(px, py);
+		}
+		return 0;
+	}
+
 	Bounds bounds() {
 		return bounds;
 	}
@@ -199,6 +221,7 @@ final class AmbienceMapTileLoader implements AutoCloseable {
 			DynamicTexture texture = new DynamicTexture(() -> "wynniris_ambience_map_" + hash, image);
 			minecraft.getTextureManager().register(id, texture);
 			tile.identifier = id;
+			tile.image = image;
 			tile.textureWidth = image.getWidth();
 			tile.textureHeight = image.getHeight();
 			loadedCount++;
@@ -231,6 +254,8 @@ final class AmbienceMapTileLoader implements AutoCloseable {
 		loaderExecutor.shutdownNow();
 		minecraft.execute(() -> {
 			for (Tile tile : tiles) {
+				// The texture release closes the backing NativeImage, so drop our sampling reference first.
+				tile.image = null;
 				if (tile.identifier != null) {
 					minecraft.getTextureManager().release(tile.identifier);
 					tile.identifier = null;
@@ -244,6 +269,8 @@ final class AmbienceMapTileLoader implements AutoCloseable {
 		private volatile Identifier identifier;
 		private volatile int textureWidth;
 		private volatile int textureHeight;
+		// Retained for CPU-side colour sampling (the DynamicTexture owns it; we only read while the screen is open).
+		private volatile NativeImage image;
 
 		private Tile(MapPart part) {
 			this.part = part;
