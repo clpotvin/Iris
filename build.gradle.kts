@@ -1,7 +1,7 @@
 
 plugins {
     id("java")
-    id("fabric-loom") version("1.14.4") apply(false)
+    id("fabric-loom") version("1.16.1") apply(false)
 }
 
 val MINECRAFT_VERSION by extra { "1.21.11" }
@@ -9,7 +9,7 @@ val NEOFORGE_VERSION by extra { "21.11.5-beta" }
 val FABRIC_LOADER_VERSION by extra { "0.18.1" }
 val FABRIC_API_VERSION by extra { "0.140.2+1.21.11" }
 
-val SODIUM_DEPENDENCY_FABRIC by extra { files(rootDir.resolve("custom_sodium/sodium-fabric-0.8.7+mc1.21.11.jar")) }
+val SODIUM_DEPENDENCY_FABRIC by extra { files(rootDir.resolve("custom_sodium/sodium-fabric-0.8.13+mc1.21.11.jar")) }
 val SODIUM_DEPENDENCY_NEO by extra { files(rootDir.resolve("custom_sodium/net.caffeinemc.sodium-neoforge-0.8.6+mc1.21.11-mod.jar")) }
 
 // This value can be set to null to disable Parchment.
@@ -18,9 +18,11 @@ val PARCHMENT_VERSION by extra { null }
 
 // WynnIris versioning: IRIS_BASE_VERSION is the upstream Iris version we forked from.
 // It's used as the mod version so Fabric/Sodium compatibility checks pass.
+// Sodium 0.8.13+ declares breaks on iris <=1.10.7, so we report 1.10.8 (no such
+// upstream release for 1.21.11 exists; our Sodium 0.8.13 compat is our own port).
 // WYNNIRIS_VERSION is our own release counter, used in the jar filename only.
 val WYNNIRIS_VERSION by extra { "1.2.0" }
-val IRIS_BASE_VERSION by extra { "1.10.7" }
+val IRIS_BASE_VERSION by extra { "1.10.8" }
 val MOD_VERSION by extra { IRIS_BASE_VERSION }
 
 allprojects {

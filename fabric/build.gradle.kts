@@ -1,7 +1,7 @@
 plugins {
     id("java")
     id("idea")
-    id("fabric-loom") version ("1.14.4")
+    id("fabric-loom") version ("1.16.1")
     id("com.modrinth.minotaur") version ("2.+")
     id("net.darkhax.curseforgegradle") version ("1.1.28")
 }
