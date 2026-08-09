@@ -22,6 +22,11 @@ public class VanillaTransformer {
 			EntityPatcher.patchEntityId(t, tree, root, parameters);
 		} else if (parameters.inputs.isText()) {
 			EntityPatcher.patchEntityId(t, tree, root, parameters);
+			// Text background quads (no UV0): clamp output alpha to vertex alpha for
+			// packs that drop it (e.g. Super Duper Vanilla nameplate backgrounds).
+			if (!parameters.inputs.hasTex() && parameters.inputs.hasColor()) {
+				EntityPatcher.patchTextBackgroundAlpha(t, tree, root, parameters);
+			}
 		}
 		// Display entities may render through non-overlay paths with Color.
 		// Add translucency-only detection for these cases.

@@ -291,6 +291,12 @@ public class VanillaCoreTransformer {
 			EntityPatcher.patchTranslucencyOnly(t, tree, root, parameters);
 		}
 
+		// Text background quads (no UV0): clamp output alpha to vertex alpha for
+		// packs that drop it (e.g. Super Duper Vanilla nameplate backgrounds).
+		if (parameters.inputs.isText() && !parameters.inputs.hasTex() && parameters.inputs.hasColor()) {
+			EntityPatcher.patchTextBackgroundAlpha(t, tree, root, parameters);
+		}
+
 		// Wynncraft transition screen effects: inject into text vertex shaders.
 		// Detects transition signal (texture alpha=253) and remaps quad to fullscreen.
 		// Gated: text only, no geometry/tessellation shaders (varyings would be zeroed).

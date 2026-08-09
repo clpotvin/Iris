@@ -28,6 +28,7 @@ import io.github.douira.glsl_transformer.parser.ParseShape;
 import io.github.douira.glsl_transformer.util.Type;
 import net.irisshaders.iris.gl.shader.ShaderType;
 import net.irisshaders.iris.pipeline.transform.parameter.VanillaParameters;
+import net.irisshaders.iris.shaderpack.loading.ProgramGroup;
 
 import java.util.Collection;
 
@@ -177,8 +178,10 @@ public class EntityPatcher {
 		}""";
 
 	// Deferred path: detect skybox signal from the ALBEDO VARIABLE (already sampled by the pack)
-	// instead of resampling via Sampler0. Packs like Photon use `gtexture` (not Sampler0) for
-	// entity textures — an injected Sampler0 may not be bound to the correct texture unit.
+	// as a convenience — it is available at the anchor without an extra fetch. An injected
+	// Sampler0 IS correctly bound even for packs that use `gtexture` (ExtendedShader registers
+	// Sampler0 for UV0 formats and MixinUniform falls back to tex/gtexture/texture), which is
+	// why the deferred glint and emissive code sample Sampler0 directly.
 	// At the overlay anchor, albedo = texture(packSampler, uv) * tint. For skybox entities the
 	// vertex color is neutralized to white, so albedo ≈ raw texture with signal intact.
 	// ALBEDO_VAR is replaced with the actual variable name at injection time.
@@ -1334,7 +1337,8 @@ public class EntityPatcher {
 				"int irisW_entityInfoFlags = iris_entityInfo.y / 16384;",
 				"bool irisW_skipItemTint = irisW_entityInfoFlags == 1 || irisW_entityInfoFlags == 3;",
 				"bool irisW_skipEntityLightTweaks = irisW_entityInfoFlags >= 2;",
-				"bool irisW_skyboxApplied = false;");
+				"bool irisW_skyboxApplied = false;",
+				"bool irisW_emissiveApplied = false;");
 
 			if (!hadSampler0BeforeWynnIrisInjection) {
 				iris$logShaderPatchDebug("entity-fragment-sampler0",
@@ -1468,13 +1472,17 @@ public class EntityPatcher {
 						int shadelessStmtsCount = shadelessStmts.size();
 						mainBody.getStatements().addAll(glintIdx + skyboxStmtsCount, shadelessStmts);
 
-						// Glint + nearfade + optional entity lighting tweaks — guarded by skybox flag
+						// Glint + nearfade + optional entity lighting tweaks — guarded by skybox flag.
+						// Emissive signal is read from the RAW texture (matching the forward path):
+						// the pack's albedo variable may have had its alpha modified by overlay or
+						// premultiplication before this anchor, which broke signal detection.
 						String entityLightTweaks = applyEntityLightTweaks ?
-								"if (!irisW_skipEntityLightTweaks) { bool irisW_eE = irisW_isEmissiveSignal(" + glintAlbedoVar + ");" +
+								"if (!irisW_skipEntityLightTweaks) { vec4 irisW_eS = texture(Sampler0, iris_wynncraft_texcoord);" +
+							"  bool irisW_eE = irisW_isEmissiveSignal(irisW_eS);" +
 							"  bool irisW_sT = iris_wynncraft_glint >= 15 && iris_wynncraft_glint <= 24;" +
 							"  if (irisW_eE && !irisW_sT) {" +
-							"  vec3 irisW_eT = texture(Sampler0, iris_wynncraft_texcoord).rgb;" +
-							"  " + glintAlbedoVar + ".rgb = mix(" + glintAlbedoVar + ".rgb, max(" + glintAlbedoVar + ".rgb, irisW_eT), iris_wynncraftEntityEmissivity);" +
+							"  " + glintAlbedoVar + ".rgb = mix(" + glintAlbedoVar + ".rgb, max(" + glintAlbedoVar + ".rgb, irisW_eS.rgb), iris_wynncraftEntityEmissivity);" +
+							"  if (iris_wynncraftEntityEmissivity > 0.0) irisW_emissiveApplied = true;" +
 							"  } else {" +
 							"  float irisW_bL = dot(" + glintAlbedoVar + ".rgb, vec3(0.2126, 0.7152, 0.0722));" +
 							"  float irisW_bS = mix(iris_wynncraftEntityBoost, 1.0, smoothstep(0.3, 0.8, irisW_bL));" +
@@ -1504,11 +1512,20 @@ public class EntityPatcher {
 				// procedural colors to black in dark areas. After the pack writes its
 				// gbuffer, overwrite the light channel to max for skybox pixels.
 				// layout(location=0).w holds packed light_levels in Photon-style packs;
-				// 1.0 = max block + sky light in pack_unorm_2x8 encoding.
+				// pack_unorm_2x8 encoding: w * 65535 = block + 256 * sky (bytes).
+				// Emissive-signal pixels (texture alpha 254) need the same treatment —
+				// boosting albedo alone is not enough because the deferred lighting pass
+				// re-multiplies it back down in shadow/darkness — but only the BLOCK
+				// light byte is forced, preserving the sky byte: claiming full sky
+				// exposure punches holes in skylight-gated effects (e.g. Photon's
+				// volumetric fog) around every emissive mob at night.
 				String deferredGbufferOut = resolveLayoutLocation0Name(root);
 				if (deferredGbufferOut != null) {
 					tree.appendMainFunctionBody(t,
-						"if (irisW_skyboxApplied) " + deferredGbufferOut + ".w = 1.0;");
+						"if (irisW_skyboxApplied) { " + deferredGbufferOut + ".w = 1.0; }" +
+							" else if (irisW_emissiveApplied) {" +
+							" int irisW_lightPacked = int(round(" + deferredGbufferOut + ".w * 65535.0));" +
+							" " + deferredGbufferOut + ".w = float(255 + (irisW_lightPacked / 256) * 256) / 65535.0; }");
 				}
 			}
 
@@ -2100,6 +2117,59 @@ public class EntityPatcher {
 			} else if (parameters.hasTesselation) {
 				root.rename("iris_wynncraft_translucency", "iris_wynncraft_translucencyTES");
 			}
+		}
+	}
+
+	// Text background quads (nameplates, text displays) use POSITION_COLOR_LIGHTMAP with
+	// no UV, so Iris binds a 1x1 white texture and some packs (e.g. Super Duper Vanilla)
+	// carry only the vertex color RGB into their entity program, dropping the vertex
+	// ALPHA — the background then renders opaque instead of the dark ~25%-alpha box and
+	// picks up fog/TAA/bloom as a large bright smear. Clamp the fragment output alpha to
+	// the interpolated vertex alpha. min() keeps this a no-op for packs that already
+	// apply vertex alpha; gl_Color is written pre-replacement so each transformer's own
+	// color-attribute rewrite resolves it. Skipped for geometry/tessellation programs
+	// (the varying would need per-stage passthrough) and when no whole-vec4 fragment
+	// output is resolvable (deferred component-packed gbuffers).
+	public static void patchTextBackgroundAlpha(
+		ASTParser t,
+		TranslationUnit tree,
+		Root root,
+		VanillaParameters parameters) {
+
+		if (parameters.hasGeometry || parameters.hasTesselation) {
+			return;
+		}
+		// Shadow-pass variants (SHADOW_TEXT_BG) often have vec3 outputs that
+		// resolveFragOutput rejects, which would leave an orphan vertex varying —
+		// and clamping shadow color alpha is pointless anyway.
+		if (parameters.programId.getGroup() == ProgramGroup.Shadow) {
+			return;
+		}
+
+		if (parameters.type.glShaderType == ShaderType.VERTEX) {
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"out float irisW_textBgVertAlpha;");
+			tree.appendMainFunctionBody(t,
+				"irisW_textBgVertAlpha = gl_Color.a;");
+		} else if (parameters.type.glShaderType == ShaderType.FRAGMENT) {
+			FragOutput fragOutput = resolveFragOutput(root);
+			if (fragOutput == null) {
+				iris$logShaderPatchDebug("text-bg-alpha-skip",
+					"[WynnIris] Text background alpha clamp skipped (no resolvable output) program={}", parameters.type);
+				return;
+			}
+			// Straight-alpha clamp on purpose, ignoring FragOutput.premultiplied():
+			// the premultiplied flag is a heuristic that is true for all layout-scanned
+			// outputs (including SDV's standard-blended sceneColOut, the pack this
+			// targets). Scaling .rgb like appendTranslucencyAlpha does would over-darken
+			// there; on genuinely premultiplied packs the clamp is a no-op today because
+			// they keep the vertex alpha (min(a, va) with a <= va).
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS,
+				"in float irisW_textBgVertAlpha;");
+			tree.appendMainFunctionBody(t,
+				fragOutput.name() + ".a = min(" + fragOutput.name() + ".a, irisW_textBgVertAlpha);");
+			iris$logShaderPatchDebug("text-bg-alpha",
+				"[WynnIris] Text background alpha clamp applied program={} output={}", parameters.type, fragOutput.name());
 		}
 	}
 
