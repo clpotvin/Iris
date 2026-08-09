@@ -804,7 +804,38 @@ public class EntityPatcher {
 		        float iW_inLuma  = max(dot(iW_in.rgb,  vec3(0.2126, 0.7152, 0.0722)), 0.0);
 		        if (iW_isTint) {
 		            float iW_tintRatio = iW_inLuma / iW_texLuma * iris_tintBrightness;
-		            iW_out.rgb *= clamp(iW_tintRatio, 0.0, 4.0);
+		            // Scene-light hue adoption, gated by the tint output's own saturation.
+		            // The scalar luma ratio deliberately strips the pack's light color so
+		            // saturated tints keep their hue under colored lighting (392e4ac10
+		            // removed a uniform 35% chroma injection for shifting tint hues). But a
+		            // hue-stripped NEUTRAL tint (black/gray/white, and whitened highlights)
+		            // stays gray while the pack grades night/shade blue, and gray beside
+		            // blue reads as warm brown by simultaneous contrast — the "black armor
+		            // looks brown in the dark" bug. Where the tint output is near-neutral
+		            // there is no hue to preserve, so multiply in the scene light's hue
+		            // (luma-normalized — brightness still comes only from iW_tintRatio).
+		            // The light estimate divides lit by raw texture PER CHANNEL, so on the
+		            // deferred path (iW_in = unlit albedo ≈ iW_tex) it collapses to neutral
+		            // and this whole block is a no-op there, as it must be — deferred packs
+		            // apply their own colored lighting after the gbuffer stage.
+		            float iW_outMax = max(iW_out.r, max(iW_out.g, iW_out.b));
+		            float iW_outSat = (iW_outMax - min(iW_out.r, min(iW_out.g, iW_out.b))) / max(iW_outMax, 0.001);
+		            float iW_hueAdopt = 1.0 - smoothstep(0.12, 0.45, iW_outSat);
+		            // The clamp is tight (±30%) on purpose: packs gamma-encode their output,
+		            // so the real light-hue correction measured in output space stays within
+		            // ~±27% even for strong night blues, while gamma-mismatched estimates
+		            // (e.g. BSL's linear-buffer mode) or asymmetric near-black texels can
+		            // produce wild per-channel ratios that must not reach the tint.
+		            // The iW_hueAdopt > 0.0 branch keeps saturated tints (adopt == 0)
+		            // bit-identical to the pre-fix path and NaN-proof.
+		            vec3 iW_lightScale = vec3(1.0);
+		            if (iW_hueAdopt > 0.0 && iW_inLuma > 0.001) {
+		                vec3 iW_lightVec = iW_in.rgb / max(iW_tex.rgb, vec3(0.03));
+		                float iW_lightLuma = max(dot(iW_lightVec, vec3(0.2126, 0.7152, 0.0722)), 0.001);
+		                vec3 iW_lightHue = clamp(iW_lightVec / iW_lightLuma, vec3(0.70), vec3(1.30));
+		                iW_lightScale = mix(vec3(1.0), iW_lightHue, iW_hueAdopt);
+		            }
+		            iW_out.rgb *= clamp(iW_tintRatio, 0.0, 4.0) * iW_lightScale;
 		        } else {
 		            float iW_ratio = iW_inLuma / iW_texLuma * iris_glintBrightness;
 		            iW_out.rgb *= min(iW_ratio, 1.0);
