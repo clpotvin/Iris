@@ -70,6 +70,7 @@ public class WynncraftSkyboxRenderer {
 		uniform sampler2D DepthTex;
 		uniform sampler2D ColorTex;
 		uniform sampler2D DhDepthTex;
+		uniform sampler2D VoxyDepthTex;
 		uniform mat4 InvProjMat;
 		uniform mat4 InvViewMat;
 		uniform float GameTime;
@@ -78,6 +79,7 @@ public class WynncraftSkyboxRenderer {
 		uniform float LodFarPlane;
 		uniform int SkyboxId;
 		uniform bool HasDH;
+		uniform bool HasVoxy;
 		// Mode: 0 = sky paint (pre-translucent), 1 = scene effects (end of frame)
 		uniform int Mode;
 
@@ -463,11 +465,15 @@ public class WynncraftSkyboxRenderer {
 		    float depth = texture(DepthTex, uv).r;
 		    vec4 existing = texture(ColorTex, uv);
 
-		    // Sky classifier — vanilla MC clear depth. DH terrain lives in a separate
-		    // buffer, so when DH is active a pixel is only "sky" if both buffers agree.
+		    // Sky classifier — vanilla MC clear depth. DH and Voxy LOD terrain live in
+		    // separate depth buffers (Voxy never writes vanilla depth under Iris, on any
+		    // pack), so a pixel is only "sky" if every active LOD provider agrees.
 		    bool isSky = (depth > 0.999999);
 		    if (HasDH && isSky) {
 		        isSky = (texture(DhDepthTex, uv).r > 0.999999);
+		    }
+		    if (HasVoxy && isSky) {
+		        isSky = (texture(VoxyDepthTex, uv).r > 0.999999);
 		    }
 
 		    // Reconstruct view-space position and world direction once — needed by both modes.
@@ -503,6 +509,14 @@ public class WynncraftSkyboxRenderer {
 		            dL = min(dL, dhL); dR = min(dR, dhR);
 		            dU = min(dU, dhU); dD = min(dD, dhD);
 		        }
+		        if (HasVoxy) {
+		            float vxL = texture(VoxyDepthTex, uv + vec2(-texelSize.x, 0)).r;
+		            float vxR = texture(VoxyDepthTex, uv + vec2( texelSize.x, 0)).r;
+		            float vxU = texture(VoxyDepthTex, uv + vec2(0,  texelSize.y)).r;
+		            float vxD = texture(VoxyDepthTex, uv + vec2(0, -texelSize.y)).r;
+		            dL = min(dL, vxL); dR = min(dR, vxR);
+		            dU = min(dU, vxU); dD = min(dD, vxD);
+		        }
 		        float skyNeighbors = float(dL > 0.999999) + float(dR > 0.999999)
 		                           + float(dU > 0.999999) + float(dD > 0.999999);
 		        if (skyNeighbors > 0.5) {
@@ -518,11 +532,12 @@ public class WynncraftSkyboxRenderer {
 		    // ======== SCENE EFFECTS ========
 		    // Skip any pixel whose MAIN depth is at clear — that covers real sky (already
 		    // painted pre-translucent), translucent VFX over sky (must preserve blend), AND
-		    // DH LOD terrain (which only shows in the DH depth buffer, not main). The
-		    // stricter "isSky" check used by sky paint would classify DH terrain as
+		    // DH/Voxy LOD terrain (which only shows in the LOD depth buffers, not main).
+		    // The stricter "isSky" check used by sky paint would classify LOD terrain as
 		    // non-sky here and apply fog blend, which erases translucent VFX that happened
-		    // to be drawn in front of DH terrain — the symptom that shows up as the rift
-		    // being "eaten" at distance when DH is enabled.
+		    // to be drawn in front of LOD terrain — the symptom that shows up as the rift
+		    // being "eaten" at distance when DH is enabled. Accepted limitation: LOD
+		    // terrain therefore receives no scene tint (same tradeoff as DH).
 		    if (depth > 0.999999) {
 		        fragColor = existing;
 		        return;
@@ -564,6 +579,8 @@ public class WynncraftSkyboxRenderer {
 	private int depthTexId;
 	private int dhDepthTexId; // DH depth texture (0 if DH not present)
 	private boolean hasDH;
+	private int voxyDepthTexId; // Voxy LOD depth texture (0 if Voxy not present/active)
+	private boolean hasVoxy;
 	private int colorTexId; // main color texture (read source — NOT swapTexture)
 	private float gameTime;
 	private float opacity;
@@ -620,12 +637,15 @@ public class WynncraftSkyboxRenderer {
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "SkyboxId", () -> this.skyboxId);
 		// DH depth integration — when DH is present, check its depth to avoid overlaying skybox on LOD terrain
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "HasDH", () -> this.hasDH ? 1 : 0);
+		// Voxy depth integration — same as DH: Voxy LOD terrain never writes vanilla depth under Iris
+		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "HasVoxy", () -> this.hasVoxy ? 1 : 0);
 		// Mode: 0 = sky paint (pre-translucent), 1 = scene effects (end of frame)
 		builder.uniform1i(UniformUpdateFrequency.PER_FRAME, "Mode", () -> this.mode);
 
 		// Samplers
 		builder.addDynamicSampler(() -> depthTexId, GlSampler.NEAREST, "DepthTex");
 		builder.addDynamicSampler(() -> dhDepthTexId > 0 ? dhDepthTexId : depthTexId, GlSampler.NEAREST, "DhDepthTex");
+		builder.addDynamicSampler(() -> voxyDepthTexId > 0 ? voxyDepthTexId : depthTexId, GlSampler.NEAREST, "VoxyDepthTex");
 
 		// ColorTex reads the main color texture (set per-frame via colorTexId field).
 		// swapTexture is the WRITE target (via framebuffer). No read/write feedback.
@@ -647,8 +667,8 @@ public class WynncraftSkyboxRenderer {
 	 * over the painted skybox during the translucent pass instead of being
 	 * wiped out by a late post-process overwrite.
 	 */
-	public void renderSkyPaint(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
-		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, 0, "Wynncraft Sky Paint");
+	public void renderSkyPaint(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int voxyDepthTexId) {
+		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, voxyDepthTexId, 0, "Wynncraft Sky Paint");
 	}
 
 	/**
@@ -657,16 +677,18 @@ public class WynncraftSkyboxRenderer {
 	 * after translucents and composites. Sky-depth pixels pass through untouched
 	 * because they were painted by {@link #renderSkyPaint}.
 	 */
-	public void renderSceneEffects(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId) {
-		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, 1, "Wynncraft Scene Effects");
+	public void renderSceneEffects(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int voxyDepthTexId) {
+		renderPass(depthTexId, colorTex, gameTime, opacity, skyboxId, dhDepthTexId, voxyDepthTexId, 1, "Wynncraft Scene Effects");
 	}
 
-	private void renderPass(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int mode, String passName) {
+	private void renderPass(int depthTexId, GlTexture colorTex, float gameTime, float opacity, int skyboxId, int dhDepthTexId, int voxyDepthTexId, int mode, String passName) {
 		if (opacity <= 0.001f || skyboxId <= 0) return;
 
 		this.depthTexId = depthTexId;
 		this.dhDepthTexId = dhDepthTexId;
 		this.hasDH = (dhDepthTexId > 0);
+		this.voxyDepthTexId = voxyDepthTexId;
+		this.hasVoxy = (voxyDepthTexId > 0);
 		this.colorTexId = colorTex.iris$getGlId();
 		this.gameTime = gameTime;
 		this.opacity = opacity;

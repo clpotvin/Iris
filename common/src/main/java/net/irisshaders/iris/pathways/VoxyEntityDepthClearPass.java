@@ -172,10 +172,10 @@ public class VoxyEntityDepthClearPass {
 		}
 	}
 
-	/** Build a lazy supplier for a Voxy depth texture id via reflection. */
-	private static java.util.function.IntSupplier makeDepthSupplier(Object pipeline,
-	                                                                Method getPipeData,
-	                                                                String fbFieldName) {
+	/** Build a lazy supplier for a Voxy depth texture id via reflection. Shared with {@link VoxyLodDepth}. */
+	static java.util.function.IntSupplier makeDepthSupplier(Object pipeline,
+	                                                        Method getPipeData,
+	                                                        String fbFieldName) {
 		return () -> {
 			try {
 				Object pipeData = getPipeData.invoke(pipeline);

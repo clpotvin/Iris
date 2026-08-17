@@ -184,6 +184,13 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	 * bleeding through entities. Null if Voxy is absent or not applicable.
 	 */
 	private final net.irisshaders.iris.pathways.VoxyEntityDepthClearPass voxyEntityDepthClear;
+
+	/**
+	 * Voxy LOD depth texture access for the Wynncraft skybox sky classifier.
+	 * Null when Voxy is absent. Present whenever Voxy's Iris pipeline data is
+	 * reachable — independent of the aux-target requirement above.
+	 */
+	private final net.irisshaders.iris.pathways.VoxyLodDepth voxyLodDepth;
 	private final CompositeRenderer compositeRenderer;
 	private final FinalPassRenderer finalPassRenderer;
 	private final CustomTextureManager customTextureManager;
@@ -637,6 +644,11 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		// terrain CUTOUT pass, before any flip to the translucent state).
 		this.voxyEntityDepthClear = net.irisshaders.iris.pathways.VoxyEntityDepthClearPass.tryCreate(
 			this, renderTargets, flippedAfterPrepare);
+
+		// Voxy LOD depth access for the skybox sky classifier. Unlike the pass
+		// above this needs no pack-declared aux targets — any pack rendering
+		// Voxy LODs qualifies, since Voxy never writes vanilla depth under Iris.
+		this.voxyLodDepth = net.irisshaders.iris.pathways.VoxyLodDepth.tryCreate(this);
 
 		if (ambiencePool != null) {
 			AmbienceRenderTargetPool.ProfilePressure pressure = getAmbienceProfilePressure();
@@ -1481,13 +1493,15 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
 			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
 			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
+			int voxyDepthTex = voxyLodDepth != null ? voxyLodDepth.currentDepthTexId() : 0;
 			wynncraftSkyboxRenderer.renderSkyPaint(
 				main.getDepthTexture().iris$getGlId(),
 				(GlTexture) main.getColorTexture(),
 				computeWynncraftGameTime(),
 				skyboxFadeOpacity,
 				displayedSkyboxId,
-				dhDepthTex);
+				dhDepthTex,
+				voxyDepthTex);
 		}
 
 		// note: we are careful not to touch the lightmap texture unit or overlay color texture unit here,
@@ -1646,13 +1660,15 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		if (wynncraftSkyboxRenderer != null && displayedSkyboxId > 0 && skyboxFadeOpacity > 0.001f) {
 			com.mojang.blaze3d.pipeline.RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
 			int dhDepthTex = dhCompat != null ? dhCompat.getDepthTex() : 0;
+			int voxyDepthTex = voxyLodDepth != null ? voxyLodDepth.currentDepthTexId() : 0;
 			wynncraftSkyboxRenderer.renderSceneEffects(
 				main.getDepthTexture().iris$getGlId(),
 				(GlTexture) main.getColorTexture(),
 				computeWynncraftGameTime(),
 				skyboxFadeOpacity,
 				displayedSkyboxId,
-				dhDepthTex);
+				dhDepthTex,
+				voxyDepthTex);
 		}
 
 		// Wynncraft transition rendering — independent of skybox state.
