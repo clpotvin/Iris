@@ -2,9 +2,7 @@ package net.irisshaders.iris.mixin.entity_render_context;
 
 import com.llamalad7.mixinextras.sugar.Share;
 import com.llamalad7.mixinextras.sugar.ref.LocalIntRef;
-import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.mixin.texture.SpriteContentsAccessor;
 import net.irisshaders.iris.mixinterface.ItemContextState;
 import net.irisshaders.iris.pathways.WynncraftMountArmorOverlay;
@@ -13,7 +11,6 @@ import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
-import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
@@ -28,15 +25,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.Collections;
-import java.util.Map;
-import java.util.WeakHashMap;
-
 @Mixin(ItemStackRenderState.LayerRenderState.class)
 public class ItemStackStateLayerMixin {
-	@Unique
-	private static final Map<SpriteContents, Boolean> iris$emissiveSpriteCache = Collections.synchronizedMap(new WeakHashMap<>());
-
 	@Unique
 	private ItemStackRenderState parentState;
 
@@ -49,10 +39,15 @@ public class ItemStackStateLayerMixin {
 	}
 
 	/**
-	 * Unified skybox + emissive detection via packedLight modification.
-	 * Runs as @ModifyVariable on the first int param (packedLight) of submit().
-	 * Single-pass scan of quads: detects skybox signal (G=251,A=254) AND emissive signal (A=254,G!=251).
-	 * Skybox detection always runs regardless of emissivity setting.
+	 * CPU-side skybox detection (center pixel of each quad sprite).
+	 * Runs as @ModifyVariable on the first int param (packedLight) of submit()
+	 * purely for injection convenience — packedLight is returned UNCHANGED.
+	 * <p>
+	 * Emissivity is deliberately NOT handled here: packedLight is per-draw, so
+	 * any boost applied at this level lights the WHOLE model (the "entire wolf
+	 * glows" bug) instead of just the alpha-254 texels. Per-pixel emissive is
+	 * handled in the patched gbuffer programs (EntityPatcher), matching the
+	 * vanilla RP behavior where only the signal texels ignore scene lighting.
 	 * PoseStack is captured from the method args for delta_y extraction.
 	 */
 	@ModifyVariable(
@@ -61,10 +56,9 @@ public class ItemStackStateLayerMixin {
 		ordinal = 0,
 		argsOnly = true
 	)
-	private int iris$detectSignalsAndModifyLight(int packedLight, PoseStack poseStack) {
+	private int iris$detectSkyboxSignal(int packedLight, PoseStack poseStack) {
 		if (quads == null || quads.isEmpty()) return packedLight;
 
-		boolean foundEmissive = false;
 		int skyboxId = 0;
 		float skyboxDeltaY = 0;
 		String skyboxSpriteName = null;
@@ -99,8 +93,6 @@ public class ItemStackStateLayerMixin {
 						skyboxPixelG = g;
 						skyboxPixelB = b;
 					}
-				} else if (!foundEmissive && iris$hasEmissiveSignal(contents, image)) {
-					foundEmissive = true;
 				}
 			}
 		} catch (Exception e) {
@@ -129,60 +121,7 @@ public class ItemStackStateLayerMixin {
 			}
 		}
 
-		// Apply emissive boost
-		if (foundEmissive && iris$shouldApplyEntityEmissivity()) {
-			int emissivity = IrisVideoSettings.wynncraftEntityEmissivity;
-			if (emissivity <= 0) return packedLight;
-			float t = emissivity / 100.0f;
-			if (t >= 1.0f) return 0xF000F0; // LightTexture.FULL_BRIGHT
-			if (t <= 0.0f) return packedLight;
-
-			// Channel-wise lerp toward fullbright
-			int block = (packedLight >> 4) & 0xF;
-			int sky = (packedLight >> 20) & 0xF;
-			int blockOut = Math.round(block + (15 - block) * t);
-			int skyOut = Math.round(sky + (15 - sky) * t);
-			return (blockOut << 4) | (skyOut << 20);
-		}
-
 		return packedLight;
-	}
-
-	@Unique
-	private static boolean iris$hasEmissiveSignal(SpriteContents contents, NativeImage image) {
-		synchronized (iris$emissiveSpriteCache) {
-			Boolean cached = iris$emissiveSpriteCache.get(contents);
-			if (cached != null) return cached;
-		}
-
-		int width = image.getWidth();
-		int height = image.getHeight();
-		boolean found = false;
-		for (int y = 0; y < height && !found; y++) {
-			for (int x = 0; x < width; x++) {
-				if (iris$isEmissivePixel(image.getPixel(x, y))) {
-					found = true;
-					break;
-				}
-			}
-		}
-
-		synchronized (iris$emissiveSpriteCache) {
-			iris$emissiveSpriteCache.put(contents, found);
-		}
-		return found;
-	}
-
-	@Unique
-	private static boolean iris$isEmissivePixel(int argb) {
-		int a = (argb >> 24) & 0xFF;
-		int g = (argb >> 8) & 0xFF;
-		return a == 254 && g != 251;
-	}
-
-	@Unique
-	private boolean iris$shouldApplyEntityEmissivity() {
-		return !iris$isHandDisplayContext();
 	}
 
 	@Unique
