@@ -1133,6 +1133,50 @@ public class Iris {
 		}
 	}
 
+	/**
+	 * Rebinds Voxy's renderer after a NEW shader pipeline is created for a
+	 * dimension. A Wynncraft world switch unloads the level -- Iris destroys the
+	 * pipeline (and its RenderTargets) -- while Voxy's world engine survives the
+	 * transfer, still holding an IrisVoxyRenderPipeline whose sampler-binding
+	 * lambdas close over the destroyed targets. The first terrain frame in the
+	 * new world then dies with "Tried to use destroyed RenderTargets"
+	 * (RenderTargets.getOrCreate via IrisSamplers -> IrisVoxyRenderPipelineData).
+	 * The ambience system already runs this refresh on profile switches; this
+	 * covers pipeline (re)creation. Gated to the case where Voxy is currently
+	 * bound to an Iris-style pipeline so enable/disable transitions stay with
+	 * Voxy's own handling.
+	 */
+	public static void onShaderPipelineCreated(WorldRenderingPipeline newPipeline) {
+		if (!(newPipeline instanceof IrisRenderingPipeline)) {
+			return;
+		}
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.level == null || minecraft.levelRenderer == null) {
+			return;
+		}
+		try {
+			Method getRenderSystem = findNoArgMethod(minecraft.levelRenderer.getClass(), "voxy$getRenderSystem");
+			if (getRenderSystem == null) {
+				return; // Voxy absent
+			}
+			Object renderSystem = getRenderSystem.invoke(minecraft.levelRenderer);
+			if (renderSystem == null) {
+				return;
+			}
+			Object voxyPipeline = findField(renderSystem.getClass(), "pipeline").get(renderSystem);
+			if (voxyPipeline == null || !"IrisVoxyRenderPipeline".equals(voxyPipeline.getClass().getSimpleName())) {
+				return; // Voxy not on an Iris pipeline -- nothing stale to rebind
+			}
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return;
+		}
+		VoxyRefreshResult result = refreshVoxyRendererForActivePipeline("pipeline-created");
+		if (WynncraftDebugLog.shouldLog("pipeline-create-voxy-refresh")) {
+			WynncraftDebugLog.info("pipeline-create-voxy-refresh",
+				"Voxy refresh after shader pipeline creation: result={}", result);
+		}
+	}
+
 	private static VoxyRefreshResult refreshVoxyRendererForActivePipeline(String profileKey) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft.level == null || minecraft.levelRenderer == null) {

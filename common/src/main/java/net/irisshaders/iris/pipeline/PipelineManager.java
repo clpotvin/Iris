@@ -34,6 +34,12 @@ public class PipelineManager {
 			pipeline = pipelineFactory.apply(currentDimension);
 			pipelinesPerDimension.put(currentDimension, pipeline);
 
+			// A surviving Voxy world engine (e.g. Wynncraft world switch: level
+			// unloads but Voxy's engine persists) still holds bindings into the
+			// PREVIOUS pipeline's destroyed RenderTargets. Rebind it before the
+			// first terrain frame renders with the new pipeline.
+			Iris.onShaderPipelineCreated(pipeline);
+
 			if (WorldRenderingSettings.INSTANCE.isReloadRequired()) {
 				if (WynncraftDebugLog.shouldLog("world-settings-reload")) {
 					WynncraftDebugLog.info("world-settings-reload",
