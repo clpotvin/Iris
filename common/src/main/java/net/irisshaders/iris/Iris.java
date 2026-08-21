@@ -1168,6 +1168,10 @@ public class Iris {
 				return; // Voxy not on an Iris pipeline -- nothing stale to rebind
 			}
 		} catch (ReflectiveOperationException | RuntimeException e) {
+			// Release-visible on purpose: if a Voxy update renames these members,
+			// the rebind stops running and the world-switch crash returns -- that
+			// must leave a trace. Pipeline creation is rare, so this cannot spam.
+			logger.warn("Voxy world-switch rebind gate failed; skipping Voxy pipeline refresh", e);
 			return;
 		}
 		VoxyRefreshResult result = refreshVoxyRendererForActivePipeline("pipeline-created");
@@ -1203,10 +1207,11 @@ public class Iris {
 			}
 			return VoxyRefreshResult.PIPELINE_PRESERVED_CHUNKS;
 		} catch (ReflectiveOperationException | RuntimeException e) {
-			if (WynncraftDebugLog.shouldLog("ambience-voxy-refresh-failed")) {
-				WynncraftDebugLog.info("ambience-voxy-refresh-failed",
-					"Failed to refresh Voxy renderer after ambience switch: {}", e.toString());
-			}
+			// Release-visible: after this rollback Voxy may still be bound to a
+			// destroyed pipeline, i.e. a "Tried to use destroyed RenderTargets"
+			// crash is likely imminent. Refreshes only run on pipeline/profile
+			// switches, so this cannot spam.
+			logger.warn("Voxy pipeline refresh failed (" + profileKey + "); Voxy may still reference a destroyed pipeline", e);
 			return VoxyRefreshResult.FAILED;
 		}
 	}

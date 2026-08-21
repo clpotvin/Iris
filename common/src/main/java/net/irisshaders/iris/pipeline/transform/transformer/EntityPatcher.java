@@ -803,6 +803,11 @@ public class EntityPatcher {
 		        float iW_texLuma = max(dot(iW_tex.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.001);
 		        float iW_inLuma  = max(dot(iW_in.rgb,  vec3(0.2126, 0.7152, 0.0722)), 0.0);
 		        if (iW_isTint) {
+		            // FALLBACK PATH ONLY: forward packs whose fragment main contains an
+		            // entityColor albedo anchor apply tint ids 15-24 EARLY (pre-lighting,
+		            // see IRISW_FORWARD_EARLY_TINT_CODE) and never reach this branch. The
+		            // relight + hue adoption below remains for anchor-less programs
+		            // (vanilla core shaders, GUI item rendering, exotic packs).
 		            float iW_tintRatio = iW_inLuma / iW_texLuma * iris_tintBrightness;
 		            // Scene-light hue adoption, gated by the tint output's own saturation.
 		            // The scalar luma ratio deliberately strips the pack's light color so
@@ -852,11 +857,13 @@ public class EntityPatcher {
 	// subsequently multiplied by lightMapColor and vertex shading. This is what the
 	// deferred path already gets for free (the pack lights the tinted albedo), and
 	// it replaces the end-of-main luma-ratio relight + scene-hue adoption for tints,
-	// which packs break in the dark (BSL desaturates its lit output so the light
-	// estimate collapses to neutral; near torches the estimate over-adopts the
-	// pack's saturated warm blocklight -- the "black armor turns brown in the dark"
-	// bug). The end-of-main glint block is skipped for these ids via
-	// irisW_tintAppliedEarly. Tint colors mirror the irisW_applyGlint switch.
+	// which packs break in the dark: BSL desaturates its lit output toward a
+	// gray/night-blue target and applies min-light there, none of which the
+	// relight reproduces, so armor diverged from adjacent terrain exactly in
+	// dark scenes -- the "black armor turns brown in the dark" bug. (Torch-lit
+	// output was already correct and is unchanged by this.) The end-of-main
+	// glint block skips these ids via its baked-in irisW_tintAppliedEarly
+	// guard. Tint colors mirror the irisW_applyGlint switch.
 	// ALBEDO_VAR is replaced with the pack's albedo variable at injection time.
 	private static final String IRISW_FORWARD_EARLY_TINT_CODE = """
 		if (iris_wynncraft_glint >= 15 && iris_wynncraft_glint <= 24) {
@@ -879,8 +886,11 @@ public class EntityPatcher {
 
 	// Glint fragment code used by the FORWARD path. FRAG_OUTPUT is replaced with the
 	// actual fragment output variable name (e.g., iris_FragData0).
+	// The irisW_tintAppliedEarly guard is part of the template (the flag is always
+	// declared in the main prologue): when the early-tint albedo anchor fired for
+	// ids 15-24, this whole block must not run or tints would apply twice.
 	private static final String IRISW_GLINT_FRAGMENT_CODE = """
-		if (iris_wynncraft_glint != 0) {
+		if (iris_wynncraft_glint != 0 && !irisW_tintAppliedEarly) {
 		    vec2 irisW_texSize = vec2(textureSize(Sampler0, 0));
 		    bool irisW_isAtlas = max(irisW_texSize.x, irisW_texSize.y) > 2000.0;
 		    vec2 irisW_uv = iris_wynncraft_texcoord;
@@ -1459,6 +1469,10 @@ public class EntityPatcher {
 					iris$logShaderPatchDebug("entity-fragment-early-tint",
 						"[WynnIris EntityPatch] forward early tint anchored program={} albedoVar={}",
 						parameters.type, earlyTintAnchor.albedoVar());
+				} else {
+					iris$logShaderPatchDebug("entity-fragment-early-tint-fallback",
+						"[WynnIris EntityPatch] no entityColor albedo anchor; tint ids 15-24 use end-of-main relight fallback program={}",
+						parameters.type);
 				}
 
 				String skyboxApplyCode = (fragOutput.premultiplied()
@@ -1469,9 +1483,7 @@ public class EntityPatcher {
 				tree.appendMainFunctionBody(t, IRISW_SHADELESS_FORWARD.replace("FRAG_OUTPUT", fo));
 				// Glint and translucency skip naturally for skybox entities (signal is in
 				// texture, not vertex color, so iris_wynncraft_glint/translucency == 0).
-				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE
-					.replace("if (iris_wynncraft_glint != 0) {", "if (iris_wynncraft_glint != 0 && !irisW_tintAppliedEarly) {")
-					.replace("FRAG_OUTPUT", fo));
+				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
 				tree.appendMainFunctionBody(t, IRISW_ITEM_TINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				if (root.identifierIndex.has("vlAlbedo") && hasGlFragDataIndex(root, 1)) {
@@ -1672,9 +1684,13 @@ public class EntityPatcher {
 		return strictMatch != null ? strictMatch : findNestedOverlayIn(mainBody, false);
 	}
 
-	// Depth-first walk; the LAST matching overlay assignment wins (mirrors
-	// findOverlayAnchorInMain). Only assignments sitting directly in a compound
-	// block are eligible -- a braceless if-body has no statement list to insert into.
+	// Depth-first walk; the LAST matching overlay assignment wins (same rule as
+	// findOverlayAnchorInMain, with one deliberate difference: a strict match
+	// anywhere in the body beats any relaxed match, because the whole-body strict
+	// pass runs first -- the old finder decides strict-vs-relaxed per statement).
+	// Only assignments sitting directly in a compound block are eligible -- a
+	// braceless if-body has no statement list to insert into, and else-if chains
+	// and loop bodies are not descended into (such packs keep the fallback path).
 	private static NestedOverlayAnchor findNestedOverlayIn(CompoundStatement block, boolean strict) {
 		NestedOverlayAnchor last = null;
 		ChildNodeList<Statement> statements = block.getStatements();

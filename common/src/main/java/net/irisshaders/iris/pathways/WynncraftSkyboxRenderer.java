@@ -466,8 +466,9 @@ public class WynncraftSkyboxRenderer {
 		    vec4 existing = texture(ColorTex, uv);
 
 		    // Sky classifier — vanilla MC clear depth. DH and Voxy LOD terrain live in
-		    // separate depth buffers (Voxy never writes vanilla depth under Iris, on any
-		    // pack), so a pixel is only "sky" if every active LOD provider agrees.
+		    // separate depth buffers (Voxy keeps LOD depth in its own framebuffers under
+		    // Iris — observed on every pack tested), so a pixel is only "sky" if every
+		    // active LOD provider agrees.
 		    bool isSky = (depth > 0.999999);
 		    if (HasDH && isSky) {
 		        isSky = (texture(DhDepthTex, uv).r > 0.999999);

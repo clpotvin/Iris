@@ -8,7 +8,8 @@ import java.util.function.IntSupplier;
  *
  * <p>Under Iris, Voxy renders LOD terrain into its own framebuffers
  * ({@code thePipeline.fb} opaque, {@code thePipeline.fbTranslucent} opaque +
- * LOD water) and does not write the vanilla depth buffer — on every pack. Any
+ * LOD water) and — as observed on every pack and Voxy build tested — does not
+ * write the vanilla depth buffer. Any
  * screen-space pass that classifies "sky" purely from the vanilla depth buffer
  * (e.g. the Wynncraft skybox paint) therefore treats LOD-only pixels as sky
  * and draws over the composited LOD terrain. This mirrors the DH depth
@@ -33,7 +34,16 @@ public final class VoxyLodDepth {
 		this.opaqueDepth = opaqueDepth;
 	}
 
-	/** Returns null if Voxy is absent or its pipeline data is unreachable. */
+	/**
+	 * @param pipeline the active world pipeline; expected (but not required) to
+	 *                 implement Voxy's {@code IGetIrisVoxyPipelineData} mixin
+	 *                 interface, which is not on the compile classpath — hence
+	 *                 {@code Object}.
+	 * @return null if Voxy is absent or its pipeline-data accessor cannot be
+	 *         resolved. Note the data itself is not touched here: a non-null
+	 *         result whose data is unavailable at render time yields 0 from
+	 *         {@link #currentDepthTexId()} instead.
+	 */
 	public static VoxyLodDepth tryCreate(Object pipeline) {
 		try {
 			ClassLoader cl = pipeline.getClass().getClassLoader();
@@ -51,14 +61,23 @@ public final class VoxyLodDepth {
 				VoxyEntityDepthClearPass.makeDepthSupplier(pipeline, getPipeData, "fbTranslucent"),
 				VoxyEntityDepthClearPass.makeDepthSupplier(pipeline, getPipeData, "fb"));
 		} catch (Throwable t) {
+			// Voxy-absent is handled above (ClassNotFoundException / isInstance);
+			// reaching here means Voxy IS present but its API changed. Silent
+			// degradation would resurface as "skybox paints over LOD terrain"
+			// with nothing in the log, so mirror the sibling pass's warn.
+			net.irisshaders.iris.Iris.logger.warn("VoxyLodDepth: setup failed, skybox LOD depth integration disabled", t);
 			return null;
 		}
 	}
 
 	/**
-	 * Current GL id of Voxy's LOD depth texture, or 0 when Voxy has not
-	 * rendered this frame (suppliers re-resolve per call, so ambience pipeline
-	 * swaps and Voxy pipeline rebuilds are picked up automatically).
+	 * Current GL id of Voxy's LOD depth texture, or 0 when Voxy's pipeline
+	 * data, framebuffer, or depth texture is not currently present (Voxy idle
+	 * or torn down — no per-frame "did Voxy draw" check exists, matching
+	 * {@code DHCompat.getDepthTex()} semantics). Suppliers re-resolve Voxy's
+	 * pipeline data per call, so Voxy-side pipeline rebuilds are picked up;
+	 * ambience/profile swaps are covered because each new IrisRenderingPipeline
+	 * constructs its own VoxyLodDepth.
 	 */
 	public int currentDepthTexId() {
 		int id = translucentDepth.getAsInt();

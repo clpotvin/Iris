@@ -646,8 +646,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 			this, renderTargets, flippedAfterPrepare);
 
 		// Voxy LOD depth access for the skybox sky classifier. Unlike the pass
-		// above this needs no pack-declared aux targets — any pack rendering
-		// Voxy LODs qualifies, since Voxy never writes vanilla depth under Iris.
+		// above this needs no pack-declared aux targets: it only READS Voxy's
+		// depth texture, whereas the clear pass writes into pack-declared aux
+		// color targets. Any pack rendering Voxy LODs qualifies.
 		this.voxyLodDepth = net.irisshaders.iris.pathways.VoxyLodDepth.tryCreate(this);
 
 		if (ambiencePool != null) {
