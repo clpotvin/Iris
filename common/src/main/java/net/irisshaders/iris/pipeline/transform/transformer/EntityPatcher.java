@@ -845,6 +845,38 @@ public class EntityPatcher {
 		}
 		""";
 
+	// Forward-path EARLY tint (glint ids 15-24): substituted into the pack's albedo
+	// right after the entityColor overlay, BEFORE the pack's lighting runs. The pack
+	// then lights, shadows, desaturates, and grades the tinted armor exactly like
+	// the terrain next to it -- vanilla parity, where glintTint's output is
+	// subsequently multiplied by lightMapColor and vertex shading. This is what the
+	// deferred path already gets for free (the pack lights the tinted albedo), and
+	// it replaces the end-of-main luma-ratio relight + scene-hue adoption for tints,
+	// which packs break in the dark (BSL desaturates its lit output so the light
+	// estimate collapses to neutral; near torches the estimate over-adopts the
+	// pack's saturated warm blocklight -- the "black armor turns brown in the dark"
+	// bug). The end-of-main glint block is skipped for these ids via
+	// irisW_tintAppliedEarly. Tint colors mirror the irisW_applyGlint switch.
+	// ALBEDO_VAR is replaced with the pack's albedo variable at injection time.
+	private static final String IRISW_FORWARD_EARLY_TINT_CODE = """
+		if (iris_wynncraft_glint >= 15 && iris_wynncraft_glint <= 24) {
+		    vec3 irisW_etColor =
+		        iris_wynncraft_glint == 15 ? irisW_rgb(80,  130, 230) :
+		        iris_wynncraft_glint == 16 ? irisW_rgb(30,  230, 130) :
+		        iris_wynncraft_glint == 17 ? irisW_rgb(235, 70,  70 ) :
+		        iris_wynncraft_glint == 18 ? irisW_rgb(100, 190, 190) :
+		        iris_wynncraft_glint == 19 ? irisW_rgb(250, 120, 20 ) :
+		        iris_wynncraft_glint == 20 ? irisW_rgb(50,  50,  50 ) :
+		        iris_wynncraft_glint == 21 ? irisW_rgb(250, 230, 230) :
+		        iris_wynncraft_glint == 22 ? irisW_rgb(255, 150, 200) :
+		        iris_wynncraft_glint == 23 ? irisW_rgb(200, 60,  230) :
+		                                     irisW_rgb(240, 240, 80 );
+		    vec4 irisW_etTex = texture(Sampler0, iris_wynncraft_texcoord);
+		    ALBEDO_VAR.rgb = clamp(irisW_tintEffect(irisW_etColor, irisW_etTex).rgb * iris_tintBrightness, 0.0, 1.0);
+		    irisW_tintAppliedEarly = true;
+		}
+		""";
+
 	// Glint fragment code used by the FORWARD path. FRAG_OUTPUT is replaced with the
 	// actual fragment output variable name (e.g., iris_FragData0).
 	private static final String IRISW_GLINT_FRAGMENT_CODE = """
@@ -1369,7 +1401,8 @@ public class EntityPatcher {
 				"bool irisW_skipItemTint = irisW_entityInfoFlags == 1 || irisW_entityInfoFlags == 3;",
 				"bool irisW_skipEntityLightTweaks = irisW_entityInfoFlags >= 2;",
 				"bool irisW_skyboxApplied = false;",
-				"bool irisW_emissiveApplied = false;");
+				"bool irisW_emissiveApplied = false;",
+				"bool irisW_tintAppliedEarly = false;");
 
 			if (!hadSampler0BeforeWynnIrisInjection) {
 				iris$logShaderPatchDebug("entity-fragment-sampler0",
@@ -1409,6 +1442,25 @@ public class EntityPatcher {
 				// Skybox apply runs first — replaces fragment color for skybox entities.
 				// Guard flag prevents subsequent effects from mutating skybox output.
 				String fo = fragOutput.name();
+
+				// EARLY TINT: apply tint effects (15-24) at the pack's albedo/overlay
+				// anchor so the pack's own lighting pipeline processes them. Insertion
+				// happens IMMEDIATELY after the overlay assignment in its containing
+				// block (Complementary nests it inside a branch with DoLighting after;
+				// a top-level index would land after the lighting, which is too late).
+				// Packs without a matching anchor keep the end-of-main relight fallback
+				// (irisW_tintAppliedEarly stays false there).
+				NestedOverlayAnchor earlyTintAnchor = findNestedOverlayAnchorInMain(tree);
+				if (earlyTintAnchor != null) {
+					earlyTintAnchor.container().getStatements().addAll(
+						earlyTintAnchor.insertAfterIndex(),
+						t.parseStatements(root, IRISW_FORWARD_EARLY_TINT_CODE
+							.replace("ALBEDO_VAR", earlyTintAnchor.albedoVar())));
+					iris$logShaderPatchDebug("entity-fragment-early-tint",
+						"[WynnIris EntityPatch] forward early tint anchored program={} albedoVar={}",
+						parameters.type, earlyTintAnchor.albedoVar());
+				}
+
 				String skyboxApplyCode = (fragOutput.premultiplied()
 					? IRISW_SKYBOX_APPLY_FORWARD_PREMUL : IRISW_SKYBOX_APPLY_FORWARD)
 					.replace("FRAG_OUTPUT", fo);
@@ -1417,7 +1469,9 @@ public class EntityPatcher {
 				tree.appendMainFunctionBody(t, IRISW_SHADELESS_FORWARD.replace("FRAG_OUTPUT", fo));
 				// Glint and translucency skip naturally for skybox entities (signal is in
 				// texture, not vertex color, so iris_wynncraft_glint/translucency == 0).
-				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
+				tree.appendMainFunctionBody(t, IRISW_GLINT_FRAGMENT_CODE
+					.replace("if (iris_wynncraft_glint != 0) {", "if (iris_wynncraft_glint != 0 && !irisW_tintAppliedEarly) {")
+					.replace("FRAG_OUTPUT", fo));
 				appendTranslucencyAlpha(t, tree, fo, fragOutput.premultiplied());
 				tree.appendMainFunctionBody(t, IRISW_ITEM_TINT_FRAGMENT_CODE.replace("FRAG_OUTPUT", fo));
 				if (root.identifierIndex.has("vlAlbedo") && hasGlFragDataIndex(root, 1)) {
@@ -1599,6 +1653,56 @@ public class EntityPatcher {
 
 	private record OverlayAnchor(String albedoVar, int topLevelInsertAfterIndex) {}
 	private record AlphaDiscardAnchor(String albedoVar, int topLevelInsertBeforeIndex) {}
+
+	// Overlay anchor variant that records the assignment's IMMEDIATE containing
+	// block, so code can be inserted directly after the overlay even when the
+	// pack nests it (Complementary wraps most of main in a visibility branch and
+	// calls DoLighting later in the same block; the top-level variant's index
+	// would land after the lighting -- too late for an albedo substitution).
+	private record NestedOverlayAnchor(CompoundStatement container, int insertAfterIndex, String albedoVar) {}
+
+	private static NestedOverlayAnchor findNestedOverlayAnchorInMain(TranslationUnit tree) {
+		CompoundStatement mainBody;
+		try {
+			mainBody = tree.getOneMainDefinitionBody();
+		} catch (Exception e) {
+			return null;
+		}
+		NestedOverlayAnchor strictMatch = findNestedOverlayIn(mainBody, true);
+		return strictMatch != null ? strictMatch : findNestedOverlayIn(mainBody, false);
+	}
+
+	// Depth-first walk; the LAST matching overlay assignment wins (mirrors
+	// findOverlayAnchorInMain). Only assignments sitting directly in a compound
+	// block are eligible -- a braceless if-body has no statement list to insert into.
+	private static NestedOverlayAnchor findNestedOverlayIn(CompoundStatement block, boolean strict) {
+		NestedOverlayAnchor last = null;
+		ChildNodeList<Statement> statements = block.getStatements();
+		for (int i = 0; i < statements.size(); i++) {
+			Statement stmt = statements.get(i);
+			if (stmt instanceof ExpressionStatement exprStmt
+				&& exprStmt.getExpression() instanceof AssignmentExpression assign) {
+				String var = checkOverlayAssignment(assign, strict);
+				if (var != null) {
+					last = new NestedOverlayAnchor(block, i + 1, var);
+				}
+			} else if (stmt instanceof SelectionStatement sel) {
+				if (sel.getIfTrue() instanceof CompoundStatement ifTrue) {
+					NestedOverlayAnchor found = findNestedOverlayIn(ifTrue, strict);
+					if (found != null) last = found;
+				}
+				if (sel.hasIfFalse() && sel.getIfFalse() instanceof CompoundStatement ifFalse) {
+					NestedOverlayAnchor found = findNestedOverlayIn(ifFalse, strict);
+					if (found != null) last = found;
+				}
+			} else if (stmt instanceof CompoundStatement compound) {
+				NestedOverlayAnchor found = findNestedOverlayIn(compound, strict);
+				if (found != null) last = found;
+			}
+		}
+		return last;
+	}
+
 
 	// Find the entityColor overlay assignment in main():
 	//   albedo.rgb = mix(albedo.rgb, entityColor.rgb, entityColor.a);
