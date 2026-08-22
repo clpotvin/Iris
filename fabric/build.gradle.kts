@@ -174,5 +174,6 @@ tasks.register<net.darkhax.curseforgegradle.TaskPublishCurseForge>("publishCurse
     mainFile.changelogType = "markdown"
     mainFile.addGameVersion(MINECRAFT_VERSION)
     mainFile.addModLoader("Fabric")
+    mainFile.addEnvironment("Client")
     mainFile.addRequirement("sodium")
 }
