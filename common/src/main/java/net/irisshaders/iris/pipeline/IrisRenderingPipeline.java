@@ -278,9 +278,29 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 	// Skybox fog/sky state: tracks active skybox for fog color override + post-process primary.
 	// Public for iris_wynncraftPrimarySkyboxId uniform access from CommonUniforms.
 	public static int displayedSkyboxId = 0;
-	private long lastDetectionTimeMs = 0;
-	private long skyboxFadeInStartMs = 0;
+
+	// Grace period: a skybox id that just faded out or was switched away. Domes
+	// with this id stay GPU-discarded and can't re-trigger detection (preferred OR
+	// fallback) until the grace expires. Prevents the still-loaded dome entity
+	// from popping back as a floating patch or re-triggering a fade-in cycle.
+	public static int recentSkyboxId = 0;
+	public static long recentSkyboxExpiryMs = 0;
+	private static final long RECENT_SKYBOX_GRACE_MS = 10_000;
+
+	// Exponential smoothing replaces the old hold+fade state machine. No hold
+	// timer, no sticky branch, no edge transitions. Opacity decays smoothly
+	// when detection drops (resilient to EntityCulling gaps: a 1-frame gap
+	// causes a ~1% dip that recovers instantly) and fades in smoothly when
+	// detection appears. Frame-rate-independent via dt.
+	private long lastSkyboxFrameMs = 0;
 	public static float skyboxFadeOpacity = 0.0f;
+
+	// Debounce: a new skybox id must be detected for several consecutive frames
+	// before the display switches. Filters single-frame noise from passing
+	// through a wrong region's dome while teleporting/flying fast.
+	private int candidateSkyboxId = 0;
+	private int candidateFrameCount = 0;
+	private static final int SKYBOX_SWITCH_FRAMES = 3;
 
 	public IrisRenderingPipeline(ProgramSet programSet) {
 		long constructorStartNanos = System.nanoTime();
@@ -1524,54 +1544,87 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		compositeRenderer.renderAll();
 		finalPassRenderer.renderFinalPass();
 
-		// Wynncraft skybox state machine.
-		// skyboxFadeOpacity tracks DETECTION state only (fade-in/out) — controls post-process sky overlay.
-		// Fog/boost state is separately gated by dark skybox type + rain (doesn't affect sky overlay).
+		// Wynncraft skybox fade — exponential smoothing.
+		//
+		// Replaces the old hold+fade+sticky state machine that had three
+		// interacting failure modes (see git history). The new approach:
+		// - Detection present → opacity smoothly approaches 1.0
+		// - Detection absent → opacity decays exponentially toward 0.0
+		// - No hold timer, no sticky branch, no edge transitions
+		// EntityCulling gaps (1-2 frames) cause an imperceptible ~1% opacity
+		// dip that recovers the next frame. Real departures produce a smooth
+		// ~4s fade. Item toggles get a responsive ~4s exit + ~2s re-entry.
+		// Grace period blocks re-trigger from still-loaded dome entities.
 		{
 			int preferredId = ImmediateState.consumeSkyboxPreferred();
 			int fallbackId = ImmediateState.consumeSkyboxFallback();
 			long now = System.currentTimeMillis();
 
-			// Sticky primary selection:
-			// - Preferred (delta_y range) detection always wins — switch to it
-			// - No preferred, fallback MATCHES current → keep current (sticky, refresh timestamp)
-			// - No preferred, fallback DIFFERENT from current → don't refresh (let old fade out,
-			//   then fallback takes over as initial detection once displayedSkyboxId resets to 0)
-			// - No preferred, no current, fallback exists → use fallback as initial detection
+			// Detection: preferred wins; fallback only for initial detection
+			// when no primary exists. Grace blocks both preferred and fallback
+			// for the recently-faded id (the dome is still loaded but the
+			// skybox effect is no longer wanted).
 			int detectedId;
-			if (preferredId > 0) {
+			if (preferredId > 0
+				&& !(preferredId == recentSkyboxId && now < recentSkyboxExpiryMs)) {
 				detectedId = preferredId;
-			} else if (fallbackId > 0 && displayedSkyboxId > 0 && fallbackId == displayedSkyboxId) {
-				// Same ID — keep current, refresh timestamp (entity just drifted out of range)
-				detectedId = displayedSkyboxId;
-			} else if (fallbackId > 0 && displayedSkyboxId == 0) {
-				// No existing primary — use fallback as initial detection
+			} else if (fallbackId > 0 && displayedSkyboxId == 0
+				&& !(fallbackId == recentSkyboxId && now < recentSkyboxExpiryMs)) {
 				detectedId = fallbackId;
 			} else {
-				// Either nothing detected, or fallback has different ID — let current fade out
 				detectedId = 0;
 			}
 
-			// Track detection state — fade in/out regardless of skybox type or weather
+			// Frame-rate-independent dt, clamped to avoid jumps after pauses
+			float dt = Math.max(0.001f, Math.min(0.25f,
+				(now - lastSkyboxFrameMs) / 1000.0f));
+			lastSkyboxFrameMs = now;
+
 			if (detectedId > 0 && detectedId <= 7) {
 				if (detectedId != displayedSkyboxId) {
-					displayedSkyboxId = detectedId;
-					skyboxFadeInStartMs = now;
-				}
-				lastDetectionTimeMs = now;
-				float fadeIn = Math.min((now - skyboxFadeInStartMs) / 2000.0f, 1.0f);
-				skyboxFadeOpacity = fadeIn;
-			} else if (displayedSkyboxId > 0) {
-				// No detection — hold for 5s then fade out over 3s.
-				// Hold prevents flicker from intermittent entity culling/unloading.
-				float secondsSince = (now - lastDetectionTimeMs) / 1000.0f;
-				if (secondsSince < 5.0f) {
-					// Hold at full opacity — entity may just be temporarily culled
-					skyboxFadeOpacity = 1.0f;
-				} else if (secondsSince < 8.0f) {
-					// Fade out over 3s after the hold period
-					skyboxFadeOpacity = 1.0f - (secondsSince - 5.0f) / 3.0f;
+					// Debounce: require N consecutive frames of a new id before
+					// switching. Filters single-frame noise from passing through
+					// a wrong region's dome while teleporting fast.
+					if (detectedId == candidateSkyboxId) {
+						candidateFrameCount++;
+					} else {
+						candidateSkyboxId = detectedId;
+						candidateFrameCount = 1;
+					}
+					if (displayedSkyboxId == 0 || candidateFrameCount >= SKYBOX_SWITCH_FRAMES) {
+						if (displayedSkyboxId > 0) {
+							recentSkyboxId = displayedSkyboxId;
+							recentSkyboxExpiryMs = now + RECENT_SKYBOX_GRACE_MS;
+						}
+						displayedSkyboxId = detectedId;
+						candidateSkyboxId = 0;
+						candidateFrameCount = 0;
+					}
 				} else {
+					candidateSkyboxId = 0;
+					candidateFrameCount = 0;
+				}
+				// Fade in: ~0.5s time constant → reaches ~0.98 in 2s
+				// (only advances when detectedId matches displayedSkyboxId, so
+				// an uncommitted candidate doesn't affect opacity)
+				if (detectedId == displayedSkyboxId) {
+					float fadeInAlpha = 1.0f - (float) Math.exp(-dt / 0.5f);
+					skyboxFadeOpacity += (1.0f - skyboxFadeOpacity) * fadeInAlpha;
+				}
+			} else if (displayedSkyboxId > 0) {
+				// Fade out: two-phase exponential for resilience + responsiveness.
+				// Above 50% opacity, decay slowly (tau=2.0s) so EntityCulling gaps
+				// of a few hundred ms cause only a small dip that recovers. Below
+				// 50%, decay faster (tau=0.6s) for a crisp tail.
+				float tau = skyboxFadeOpacity > 0.5f ? 2.0f : 0.6f;
+				skyboxFadeOpacity *= (float) Math.exp(-dt / tau);
+
+				// Keep grace refreshed throughout the fade so the dome stays
+				// discarded and can't re-trigger even if it outlives the fade.
+				recentSkyboxId = displayedSkyboxId;
+				recentSkyboxExpiryMs = now + RECENT_SKYBOX_GRACE_MS;
+
+				if (skyboxFadeOpacity < 0.005f) {
 					skyboxFadeOpacity = 0.0f;
 					displayedSkyboxId = 0;
 				}
@@ -1950,6 +2003,9 @@ public class IrisRenderingPipeline implements WorldRenderingPipeline, ShaderRend
 		skyboxFogBlendFactor = 0.0f;
 		displayedSkyboxId = 0;
 		skyboxFadeOpacity = 0.0f;
+		recentSkyboxId = 0;
+		recentSkyboxExpiryMs = 0;
+		lastSkyboxFrameMs = 0;
 
 		GlStateManager._glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, 0);
 		GlStateManager._glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, 0);

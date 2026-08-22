@@ -150,7 +150,8 @@ public class EntityPatcher {
 		{
 		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
 		    if (irisW_skyId > 0) {
-		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
+		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId
+		            || irisW_skyId == iris_wynncraftRecentSkyboxId) {
 		            discard;
 		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
@@ -166,7 +167,8 @@ public class EntityPatcher {
 		{
 		    int irisW_skyId = irisW_skyboxSignal(Sampler0, iris_wynncraft_texcoord);
 		    if (irisW_skyId > 0) {
-		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
+		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId
+		            || irisW_skyId == iris_wynncraftRecentSkyboxId) {
 		            discard;
 		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
@@ -195,7 +197,8 @@ public class EntityPatcher {
 		        if (irisW_skyId < 1 || irisW_skyId > 7) irisW_skyId = 0;
 		    }
 		    if (irisW_skyId > 0) {
-		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId) {
+		        if (irisW_skyId == iris_wynncraftPrimarySkyboxId
+		            || irisW_skyId == iris_wynncraftRecentSkyboxId) {
 		            discard;
 		        }
 		        float irisW_skyTime = fract(iris_globalInfo.GameTime) * 12000.0;
@@ -1424,6 +1427,7 @@ public class EntityPatcher {
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityEmissivity;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform float iris_wynncraftEntityBoost;");
 			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform int iris_wynncraftPrimarySkyboxId;");
+			tree.parseAndInjectNode(t, ASTInjectionPoint.BEFORE_DECLARATIONS, "uniform int iris_wynncraftRecentSkyboxId;");
 
 			// Inject Wynncraft GLSL functions into fragment shader.
 			// Use BEFORE_FUNCTIONS so they land after all uniform/varying declarations.

@@ -114,6 +114,15 @@ public final class CommonUniforms {
 			() -> net.irisshaders.iris.pipeline.IrisRenderingPipeline.displayedSkyboxId,
 			StateUpdateNotifiers.fallbackEntityNotifier);
 
+		// Wynncraft recent skybox ID — a primary that faded out or was switched away
+		// within the grace window. Domes with this id stay DISCARDED so the departed
+		// region's still-loaded skybox entity doesn't reappear as a floating
+		// procedural patch once the primary id resets to 0.
+		uniforms.uniform1i("iris_wynncraftRecentSkyboxId",
+			() -> System.currentTimeMillis() < net.irisshaders.iris.pipeline.IrisRenderingPipeline.recentSkyboxExpiryMs
+				? net.irisshaders.iris.pipeline.IrisRenderingPipeline.recentSkyboxId : 0,
+			StateUpdateNotifiers.fallbackEntityNotifier);
+
 		// TODO: OptiFine doesn't think that atlasSize is a "dynamic" uniform,
 		//       but we do. How will custom uniforms depending on atlasSize work?
 		//
