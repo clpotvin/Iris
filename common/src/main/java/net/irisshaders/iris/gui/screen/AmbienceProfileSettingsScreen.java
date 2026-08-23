@@ -125,7 +125,7 @@ public class AmbienceProfileSettingsScreen extends Screen implements ShaderPackO
 				this.navigation.back();
 				return true;
 			}
-			onClose();
+			dropChangesAndClose();
 			return true;
 		}
 		return super.keyPressed(event);

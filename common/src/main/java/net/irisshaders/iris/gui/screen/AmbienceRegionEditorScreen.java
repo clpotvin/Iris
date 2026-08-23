@@ -306,7 +306,20 @@ public class AmbienceRegionEditorScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		cancelAndClose();
+		if (!undoStack.isEmpty() && minecraft != null) {
+			minecraft.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(confirmed -> {
+				minecraft.setScreen(this);
+				if (confirmed) {
+					saveAndClose();
+				} else {
+					cancelAndClose();
+				}
+			}, Component.translatable("options.iris.wynncraftAmbienceRegionUnsaved"),
+				Component.translatable("options.iris.wynncraftAmbienceRegionUnsavedDesc"),
+				CommonComponents.GUI_YES, CommonComponents.GUI_NO));
+		} else {
+			cancelAndClose();
+		}
 	}
 
 	@Override

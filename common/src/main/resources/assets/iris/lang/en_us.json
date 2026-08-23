@@ -226,6 +226,8 @@
   "options.iris.wynncraftAmbienceExportLink": "Search Modrinth",
   "options.iris.wynncraftAmbienceRegionProfiles": "Presets",
   "options.iris.wynncraftAmbienceRegionCount": "%d regions",
+  "options.iris.wynncraftAmbienceRegionUnsaved": "You have unsaved changes",
+  "options.iris.wynncraftAmbienceRegionUnsavedDesc": "Save your region changes before closing?",
   "options.iris.wynncraftAmbienceRegionToolFreeform": "Draw",
   "options.iris.wynncraftAmbienceRegionToolPolygon": "Poly",
   "options.iris.wynncraftAmbienceRegionToolBox": "Box",
