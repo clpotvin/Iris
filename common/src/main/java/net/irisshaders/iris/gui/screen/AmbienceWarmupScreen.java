@@ -99,8 +99,6 @@ public class AmbienceWarmupScreen extends Screen {
 		} else {
 			drawCenteredTruncated(guiGraphics, SUBTITLE, panelTop + 92, 0xFFAAAAAA);
 		}
-
-		AmbienceRuntime.processWarmupWithoutLevelRender();
 	}
 
 	@Override

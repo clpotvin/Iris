@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import net.irisshaders.iris.Iris;
+import net.irisshaders.iris.gui.option.IrisVideoSettings;
 import net.irisshaders.iris.gui.option.WynncraftDebugLog;
 import net.irisshaders.iris.platform.IrisPlatformHelpers;
 import net.irisshaders.iris.shaderpack.option.OptionSet;
@@ -653,6 +654,41 @@ public final class AmbiencePackManager {
 		writeProfile(loaded, newId);
 		lastLoadMillis = System.currentTimeMillis();
 		return copy;
+	}
+
+	public synchronized void deletePack(String packId) throws IOException {
+		Optional<LoadedAmbiencePack> loadedPack = getPack(packId);
+		if (loadedPack.isEmpty()) {
+			throw new IOException("Ambience pack is not installed: " + packId);
+		}
+		LoadedAmbiencePack loaded = loadedPack.get();
+		Path path = loaded.path();
+		if (path == null) {
+			throw new IOException("Ambience pack has no path: " + packId);
+		}
+		packs.remove(packId);
+		if (Files.isDirectory(path)) {
+			try (var entries = Files.walk(path)) {
+				entries.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+					try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+				});
+			}
+		} else {
+			Files.deleteIfExists(path);
+		}
+		Path overrides = getDirectory().resolve("overrides").resolve(packId);
+		if (Files.isDirectory(overrides)) {
+			try (var entries = Files.walk(overrides)) {
+				entries.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+					try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+				});
+			}
+		}
+		if (packId.equals(IrisVideoSettings.wynncraftSelectedAmbiencePack)) {
+			IrisVideoSettings.wynncraftSelectedAmbiencePack = packs.isEmpty() ? "" : packs.keySet().iterator().next();
+			try { Iris.getIrisConfig().save(); } catch (IOException ignored) {}
+		}
+		lastLoadMillis = System.currentTimeMillis();
 	}
 
 	public synchronized void deleteProfile(String selectedPackId, String profileId) throws IOException {

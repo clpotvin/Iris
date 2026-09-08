@@ -151,7 +151,7 @@ public class AmbiencePresetCreateScreen extends Screen {
 		String shaderPack = selectedShaderPack;
 		createButton.active = false;
 		status = Component.translatable("options.iris.wynncraftAmbienceDependencyResolving", shaderPack).withStyle(ChatFormatting.GRAY);
-		CompletableFuture.runAsync(() -> {
+		CompletableFuture.supplyAsync(() -> {
 			AmbienceDependencyResolver resolver = new AmbienceDependencyResolver();
 			try {
 				Path shaderPackPath = Iris.getShaderpacksDirectory().resolve(shaderPack);
@@ -159,23 +159,30 @@ public class AmbiencePresetCreateScreen extends Screen {
 					? resolver.findExactDependency(shaderPackPath, shaderPack)
 					: Optional.empty();
 				if (exact.isPresent()) {
-					Minecraft.getInstance().execute(() -> finishWithDependency(presetId, shaderPack, resolver.dependencyFromCandidate(exact.get())));
-					return;
+					return new DependencyResult(resolver.dependencyFromCandidate(exact.get()), null);
 				}
 				List<AmbienceDependencyCandidate> candidates = resolver.searchDependencies(shaderPack, shaderPack);
-				Minecraft.getInstance().execute(() -> {
-					if (candidates.isEmpty()) {
-						finishWithDependency(presetId, shaderPack, AmbienceDependencyResolver.localDependency(shaderPack));
-					} else {
-						this.minecraft.setScreen(new AmbienceDependencySelectionScreen(this, shaderPack, candidates, dependency -> finishWithDependency(presetId, shaderPack, dependency)));
-					}
-				});
+				return new DependencyResult(null, candidates);
 			} catch (Exception e) {
 				Iris.logger.warn("Failed to resolve ambience shader dependency for {}", shaderPack, e);
-				Minecraft.getInstance().execute(() -> finishWithDependency(presetId, shaderPack, AmbienceDependencyResolver.localDependency(shaderPack)));
+				return new DependencyResult(AmbienceDependencyResolver.localDependency(shaderPack), null);
 			}
+		}).orTimeout(5, java.util.concurrent.TimeUnit.SECONDS).whenComplete((result, error) -> {
+			Minecraft.getInstance().execute(() -> {
+				if (error != null || result == null) {
+					finishWithDependency(presetId, shaderPack, AmbienceDependencyResolver.localDependency(shaderPack));
+				} else if (result.dependency != null) {
+					finishWithDependency(presetId, shaderPack, result.dependency);
+				} else if (result.candidates != null && !result.candidates.isEmpty()) {
+					this.minecraft.setScreen(new AmbienceDependencySelectionScreen(this, shaderPack, result.candidates, dependency -> finishWithDependency(presetId, shaderPack, dependency)));
+				} else {
+					finishWithDependency(presetId, shaderPack, AmbienceDependencyResolver.localDependency(shaderPack));
+				}
+			});
 		});
 	}
+
+	private record DependencyResult(AmbienceDependency dependency, List<AmbienceDependencyCandidate> candidates) {}
 
 	private void finishWithDependency(String presetId, String shaderPack, AmbienceDependency dependency) {
 		try {
@@ -228,7 +235,11 @@ public class AmbiencePresetCreateScreen extends Screen {
 
 	private class ShaderPackList extends IrisObjectSelectionList<ShaderPackEntry> {
 		ShaderPackList(Minecraft client, int width, int height, int top, int bottom, int left, int right) {
-			super(client, width, bottom, top + 4, bottom, left, right, 20);
+			// Height must be the widget's HEIGHT, not the bottom coordinate.
+			// Passing `bottom` here made the widget rectangle extend past the
+			// screen bottom, swallowing clicks meant for the Cancel/Create
+			// buttons below the list (they never received the events).
+			super(client, width, bottom - top - 4, top + 4, bottom, left, right, 20);
 			refresh();
 		}
 

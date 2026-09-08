@@ -74,7 +74,7 @@ public class AmbienceProfileSelectionScreen extends Screen {
 			.bounds(topLeft + 312, this.height - 51, 100, 20)
 			.build());
 
-		int bottomLeft = this.width / 2 - ((bottomRowWidth * 5) + (bottomRowGap * 4)) / 2;
+		int bottomLeft = this.width / 2 - ((bottomRowWidth * 4) + (bottomRowGap * 3)) / 2;
 		shaderButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceProfileChangeShader"), button -> changeSelectedShader(), buttonTransition)
 			.bounds(bottomLeft, this.height - 27, 100, 20)
 			.build());
@@ -84,11 +84,8 @@ public class AmbienceProfileSelectionScreen extends Screen {
 		deleteButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.delete"), button -> deleteSelectedProfile(), buttonTransition)
 			.bounds(bottomLeft + 208, this.height - 27, 100, 20)
 			.build());
-		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_BACK, button -> this.minecraft.setScreen(parent), buttonTransition)
-			.bounds(bottomLeft + 312, this.height - 27, 100, 20)
-			.build());
 		this.addRenderableWidget(IrisButton.iris$builder(CommonComponents.GUI_DONE, button -> this.minecraft.setScreen(parent), buttonTransition)
-			.bounds(bottomLeft + 416, this.height - 27, 100, 20)
+			.bounds(bottomLeft + 312, this.height - 27, 100, 20)
 			.build());
 		updateButtons();
 	}

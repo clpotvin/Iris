@@ -62,12 +62,9 @@ public final class AmbienceRuntime {
 			return;
 		}
 
+		// Cache warming is independent of the ambience toggle: users can prepare
+		// the cache before enabling the feature.
 		if (isWarmupRunning()) {
-			if (!IrisVideoSettings.wynncraftAmbienceEnabled) {
-				cancelWarmup();
-				logDiagnostics(tickStartNanos, 0, "warmup_cancelled_disabled");
-				return;
-			}
 			logDiagnostics(tickStartNanos, 0, "warmup_running");
 			return;
 		}
@@ -152,12 +149,6 @@ public final class AmbienceRuntime {
 		}
 	}
 
-	public static void processWarmupWithoutLevelRender() {
-		if (Minecraft.getInstance().level == null && isWarmupRunning()) {
-			processWarmupJob();
-		}
-	}
-
 	public static void reset() {
 		pendingProfile = null;
 		pendingRestore = false;
@@ -203,6 +194,12 @@ public final class AmbienceRuntime {
 	}
 
 	private static WarmupStartResult startWarmSelectedPackProfiles(String reason, boolean auto) {
+		// Warmup renders pipelines against the live level; onClientTick discards
+		// the job as soon as the level is gone, so starting without one just
+		// wedges the warmup screen.
+		if (Minecraft.getInstance().level == null) {
+			return new WarmupStartResult(false, false, 0, 0, "");
+		}
 		AmbiencePackManager manager = AmbiencePackManager.getInstance();
 		manager.reloadIfNeeded();
 		List<AmbiencePackManager.ResolvedProfile> profiles = manager.resolveProfiles(IrisVideoSettings.wynncraftSelectedAmbiencePack);

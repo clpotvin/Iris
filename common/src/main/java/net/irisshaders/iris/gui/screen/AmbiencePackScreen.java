@@ -51,6 +51,7 @@ public class AmbiencePackScreen extends Screen {
 	private Button autoWarmButton;
 	private Button settingsButton;
 	private Button regionsButton;
+	private Button deletePackButton;
 	private float backgroundInit = 0.0f;
 
 	public final SmoothedFloat listTransition = new SmoothedFloat(1, 1, () -> backgroundInit, notifier);
@@ -102,9 +103,12 @@ public class AmbiencePackScreen extends Screen {
 		regionsButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceRegionEditor"), button -> openRegionEditor(), buttonTransition)
 			.bounds(topCursor, topRowY, topTextButtonWidth, 20)
 			.build());
+		int cornerButtonCount = 4;
+		cornerButtonX = this.width - 8 - ICON_BUTTON_SIZE * cornerButtonCount - rowGap * (cornerButtonCount - 1);
 		this.addRenderableWidget(iconButton(Component.translatable("options.iris.refresh"), GuiUtil.Icon.REFRESH, GuiUtil.Icon.REFRESH, cornerButtonX, cornerButtonY, button -> reloadPacks()));
 		this.addRenderableWidget(iconButton(Component.translatable("options.iris.import"), GuiUtil.Icon.IMPORT, GuiUtil.Icon.IMPORT_COLORED, cornerButtonX + ICON_BUTTON_SIZE + rowGap, cornerButtonY, button -> importPack()));
 		this.addRenderableWidget(iconButton(Component.translatable("options.iris.export"), GuiUtil.Icon.EXPORT, GuiUtil.Icon.EXPORT_COLORED, cornerButtonX + (ICON_BUTTON_SIZE + rowGap) * 2, cornerButtonY, button -> exportPack()));
+		deletePackButton = this.addRenderableWidget(iconButton(Component.translatable("options.iris.delete"), GuiUtil.Icon.CLOSE, GuiUtil.Icon.CLOSE, cornerButtonX + (ICON_BUTTON_SIZE + rowGap) * 3, cornerButtonY, button -> deleteSelectedPack()));
 
 		installButton = this.addRenderableWidget(IrisButton.iris$builder(Component.translatable("options.iris.wynncraftAmbienceInstallMissingShort"), button -> installMissing(), buttonTransition)
 			.bounds(bottomCursor, bottomRowY, bottomButtonWidth, 20)
@@ -188,9 +192,6 @@ public class AmbiencePackScreen extends Screen {
 
 	public void setAmbienceEnabled(boolean enabled) {
 		IrisVideoSettings.wynncraftAmbienceEnabled = enabled;
-		if (!enabled) {
-			AmbienceRuntime.cancelWarmup();
-		}
 		status = Component.translatable(enabled ? "options.iris.wynncraftAmbienceEnabledStatus" : "options.iris.wynncraftAmbienceDisabledStatus");
 		try {
 			Iris.getIrisConfig().save();
@@ -269,6 +270,9 @@ public class AmbiencePackScreen extends Screen {
 		if (regionsButton != null) {
 			regionsButton.active = dependencyStatus != null;
 		}
+		if (deletePackButton != null) {
+			deletePackButton.active = !packs.isEmpty();
+		}
 	}
 
 	private void openProfileSettings() {
@@ -276,6 +280,29 @@ public class AmbiencePackScreen extends Screen {
 			return;
 		}
 		this.minecraft.setScreen(new AmbienceProfileSelectionScreen(this, selected().pack().id));
+	}
+
+	private void deleteSelectedPack() {
+		if (packs.isEmpty()) return;
+		AmbiencePackManager.LoadedAmbiencePack pack = selected();
+		this.minecraft.setScreen(new ConfirmScreen(confirmed -> {
+			this.minecraft.setScreen(this);
+			if (confirmed) {
+				try {
+					manager.deletePack(pack.pack().id);
+					refreshPacks();
+					if (ambiencePackList != null) {
+						ambiencePackList.refresh(packs);
+					}
+					status = Component.translatable("options.iris.wynncraftAmbiencePackDeleted", pack.pack().displayName()).withStyle(ChatFormatting.YELLOW);
+				} catch (IOException e) {
+					Iris.logger.warn("Failed to delete ambience pack", e);
+					status = Component.literal(e.getMessage() == null ? "Delete failed" : e.getMessage()).withStyle(ChatFormatting.RED);
+				}
+				updateButtons();
+			}
+		}, Component.translatable("options.iris.wynncraftAmbiencePackDeleteConfirm"),
+			Component.translatable("options.iris.wynncraftAmbiencePackDeleteConfirmDesc", pack.pack().displayName())));
 	}
 
 	private void openRegionEditor() {
@@ -598,6 +625,10 @@ public class AmbiencePackScreen extends Screen {
 		if (packs.isEmpty()) {
 			return;
 		}
+		if (this.minecraft.level == null) {
+			status = Component.translatable("options.iris.wynncraftAmbienceWarmupNeedsWorld").withStyle(ChatFormatting.RED);
+			return;
+		}
 		if (warmButton != null) {
 			warmButton.active = false;
 		}
@@ -635,7 +666,9 @@ public class AmbiencePackScreen extends Screen {
 	}
 
 	private void maybeOpenAutoWarmScreen() {
-		if (packs.isEmpty() || !IrisVideoSettings.wynncraftAmbienceEnabled || !IrisVideoSettings.wynncraftAmbienceAutoWarmCache) {
+		// Without a level there is nothing to warm against; the runtime auto-warm
+		// path will kick in on its own once the player joins a world.
+		if (packs.isEmpty() || this.minecraft.level == null || !IrisVideoSettings.wynncraftAmbienceEnabled || !IrisVideoSettings.wynncraftAmbienceAutoWarmCache) {
 			return;
 		}
 		AmbienceDependencyStatus dependencyStatus = manager.dependencyStatus(selected().pack());

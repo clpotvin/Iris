@@ -21,7 +21,7 @@ val PARCHMENT_VERSION by extra { null }
 // Sodium 0.8.13+ declares breaks on iris <=1.10.7, so we report 1.10.8 (no such
 // upstream release for 1.21.11 exists; our Sodium 0.8.13 compat is our own port).
 // WYNNIRIS_VERSION is our own release counter, used in the jar filename only.
-val WYNNIRIS_VERSION by extra { "1.2.0" }
+val WYNNIRIS_VERSION by extra { "1.2.1" }
 val IRIS_BASE_VERSION by extra { "1.10.8" }
 val MOD_VERSION by extra { IRIS_BASE_VERSION }
 

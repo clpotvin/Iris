@@ -129,7 +129,9 @@ public class AmbienceDependencySelectionScreen extends Screen {
 
 	private class CandidateList extends IrisObjectSelectionList<CandidateEntry> {
 		CandidateList(Minecraft client, int width, int height, int top, int bottom, int left, int right) {
-			super(client, width, bottom, top + 4, bottom, left, right, 20);
+			// Height, not bottom coordinate: an oversized widget rectangle was
+			// extending under the Skip/Cancel/Select buttons and eating their clicks.
+			super(client, width, bottom - top - 4, top + 4, bottom, left, right, 20);
 			for (int i = 0; i < candidates.size(); i++) {
 				addEntry(new CandidateEntry(i));
 			}
